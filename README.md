@@ -45,6 +45,10 @@ With the default `setup: mise`, `boringcache/one` resolves project tools from `m
 
 When `cache-runtime: true`, `one` caches `mise` installs and rebuilds shims after restore. It does not archive the shim directory itself.
 
+Generated tags are deterministic and readable. With `cache-tag: web`, `tools: ruby@4.0.1`, and the default `tool-version-scope: patch`, the runtime cache tag becomes `web-mise-ruby-4.0.1` and an archive entry such as `bundler:vendor/bundle` resolves to `bundler-ruby-4.0.1`.
+
+If you want the exact same runtime tag across GitHub Actions, local CLI use, and Docker-based workflows, set `runtime-cache-tag` explicitly.
+
 Mise-powered Rails-style workflow:
 
 ```yaml
@@ -122,6 +126,27 @@ In practice:
 - Docker plus Rails tooling can be one step
 - Bazel plus Gradle should be separate `boringcache/one` steps in the same job
 
+## Tag model
+
+- `cache-tag` gives `one` a stable human prefix for generated tags
+- `runtime-cache-tag` lets you set the exact runtime cache tag when you need local and CI reuse to line up exactly
+- `tool-version-scope` controls how generated tags encode versions: `patch`, `minor`, or `major`
+- `resolved-entries` and `runtime-cache-tag` outputs show the exact tags `one` used, so you can reuse them with the CLI
+
+Example:
+
+```yaml
+- id: cache
+  uses: boringcache/one@v1
+  with:
+    workspace: boringcache/web
+    cache-tag: web
+    tool-version-scope: minor
+    entries: bundler:vendor/bundle
+```
+
+That resolves to tags like `web-mise-ruby-4.0` and `bundler-ruby-4.0`, which are deterministic across the same tool versions on local Ubuntu, Docker-based Ubuntu, and GitHub-hosted Ubuntu runners.
+
 ## Trust model
 
 - On `pull_request` jobs, restore can run with `BORINGCACHE_RESTORE_TOKEN`
@@ -138,8 +163,10 @@ In practice:
 | `preset` | `none`, `rails`, or `node-turbo`. |
 | `workspace` | Workspace in `org/repo` form. Defaults to `BORINGCACHE_DEFAULT_WORKSPACE`, then the repository name. |
 | `working-directory` | Project root used for detection and relative paths. |
-| `cache-tag` | Optional cache tag or prefix override. |
+| `cache-tag` | Human-readable cache tag or prefix for generated tags. |
+| `runtime-cache-tag` | Optional exact tag override for the `mise` installs cache. |
 | `tools` | Explicit `mise` tools in `tool@version` form. |
+| `tool-version-scope` | `patch`, `minor`, or `major` for generated tool-scoped tags. |
 | `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
 | `cli-version` | BoringCache CLI version to install. Set to `skip` to disable automatic CLI setup. |
 
@@ -174,7 +201,7 @@ In practice:
 | `runtime-cache-hit` | Whether the `mise` runtime cache was restored. |
 | `resolved-mode` | Effective mode used by the action. |
 | `resolved-tools` | Resolved `mise` tools as newline-separated `tool@version` values. |
-| `workspace`, `cache-tag`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
+| `workspace`, `cache-tag`, `runtime-cache-tag`, `resolved-entries`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
 | `image-id`, `digest`, `buildx-name`, `buildx-platforms` | Docker and BuildKit outputs. |
 | `rust-version`, `cargo-tag`, `target-tag`, `cargo-bin-tag`, `sccache-tag`, `sccache-hit` | Rust mode outputs. |
 

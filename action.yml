@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.12.4'
+    default: 'v1.12.5'
     required: false
   setup:
     description: 'Runtime setup owner: mise, external, or none. mise auto-detects project tools from mise.toml, .tool-versions, and common version files.'
@@ -22,7 +22,10 @@ inputs:
     description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses BORINGCACHE_DEFAULT_WORKSPACE or the repository name.'
     required: false
   cache-tag:
-    description: 'Optional cache tag or prefix. Defaults vary by mode.'
+    description: 'Human-readable cache tag or prefix. Archive entries and runtime caches derive deterministic tags from this when you do not set exact overrides.'
+    required: false
+  runtime-cache-tag:
+    description: 'Optional exact tag for the mise installs cache. Use this when you want the same runtime cache tag across GitHub Actions, local CLI, and Docker workflows.'
     required: false
   working-directory:
     description: 'Project root used for tool detection and relative cache paths.'
@@ -30,6 +33,10 @@ inputs:
     required: false
   tools:
     description: 'Explicit mise tools to install, one per line (for example ruby@3.3, node@22). Overrides auto-detected project tools for the same names.'
+    required: false
+  tool-version-scope:
+    description: 'How generated runtime and archive tags encode tool versions: patch, minor, or major.'
+    default: 'patch'
     required: false
   cache-runtime:
     description: 'Cache mise tool installs when setup is mise. Shims are regenerated after restore.'
@@ -254,6 +261,10 @@ outputs:
     description: 'Resolved BoringCache workspace'
   cache-tag:
     description: 'Resolved cache tag or prefix'
+  runtime-cache-tag:
+    description: 'Resolved mise runtime cache tag'
+  resolved-entries:
+    description: 'Resolved archive cache entries after deterministic tool scoping'
   proxy-port:
     description: 'Resolved proxy port for proxy-backed modes'
   proxy-log-path:

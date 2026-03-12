@@ -5,6 +5,7 @@ import { getMiseInstallsDir } from '@boringcache/action-core';
 import {
   applyMiseSetup,
   buildPlan,
+  buildRuntimeCacheTag,
   buildRuntimeCacheEntry,
   parseToolSpecs,
   type OneInputs,
@@ -35,8 +36,10 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     preset: 'none',
     workspace: 'my-org/my-project',
     cacheTag: '',
+    runtimeCacheTag: '',
     workingDirectory: process.cwd(),
     tools: '',
+    toolVersionScope: 'patch',
     cacheRuntime: false,
     readOnly: false,
     proxyPort: '',
@@ -85,7 +88,8 @@ describe('one utils', () => {
         { name: 'ruby', version: '3.3.6', label: 'Ruby', source: 'project' },
         { name: 'node', version: '22.4.1', label: 'Node.js', source: 'project' },
       ]);
-      expect(plan.runtimeEntry).toBe(`bundler-mise-installs-node-22.4.1-ruby-3.3.6:${getMiseInstallsDir()}`);
+      expect(plan.runtimeTag).toBe('bundler-mise-node-22.4.1-ruby-3.3.6');
+      expect(plan.runtimeEntry).toBe(`bundler-mise-node-22.4.1-ruby-3.3.6:${getMiseInstallsDir()}`);
       expect(plan.archiveEntries).toContain('bundler-node-22.4.1-ruby-3.3.6:vendor/bundle');
     } finally {
       await removeTempProject(project);
@@ -110,7 +114,7 @@ describe('one utils', () => {
       { name: 'ruby', version: '4.0.1', label: 'Ruby', source: 'project' },
       { name: 'pnpm', version: '9.15.1', label: 'pnpm', source: 'project' },
     ]);
-    expect(plan.runtimeEntry).toBe(`bundler-mise-installs-pnpm-9.15.1-ruby-4.0.1:${getMiseInstallsDir()}`);
+    expect(plan.runtimeEntry).toBe(`bundler-mise-pnpm-9.15.1-ruby-4.0.1:${getMiseInstallsDir()}`);
   });
 
   it('prefers project-defined versions over preset detection', async () => {
@@ -215,12 +219,12 @@ describe('one utils', () => {
   });
 
   it('uses readable runtime tool versions in the cache tag', () => {
-    const entry = buildRuntimeCacheEntry('rails', [
+    const entry = buildRuntimeCacheEntry('rails', '', [
       { name: 'ruby', version: '3.3.6', label: 'Ruby', source: 'preset' },
       { name: 'node', version: '22.4.1', label: 'Node.js', source: 'preset' },
-    ]);
+    ], 'patch');
 
-    expect(entry).toBe(`rails-mise-installs-node-22.4.1-ruby-3.3.6:${getMiseInstallsDir()}`);
+    expect(entry).toBe(`rails-mise-node-22.4.1-ruby-3.3.6:${getMiseInstallsDir()}`);
   });
 
   it('scopes explicit archive entries to resolved mise tool versions', async () => {
@@ -230,7 +234,33 @@ describe('one utils', () => {
       entries: 'bundler:vendor/bundle',
     }));
 
-    expect(plan.runtimeEntry).toBe(`bundler-mise-installs-ruby-4.0.1:${getMiseInstallsDir()}`);
+    expect(plan.runtimeEntry).toBe(`bundler-mise-ruby-4.0.1:${getMiseInstallsDir()}`);
+    expect(plan.archiveEntries).toBe('bundler-ruby-4.0.1:vendor/bundle');
+  });
+
+  it('supports deterministic version scoping for runtime and archive tags', async () => {
+    const plan = await buildPlan(buildInputs({
+      tools: 'ruby@4.0.1,node@22.4.1',
+      toolVersionScope: 'minor',
+      cacheRuntime: true,
+      entries: 'bundler:vendor/bundle',
+    }));
+
+    expect(plan.runtimeTag).toBe('bundler-mise-node-22.4-ruby-4.0');
+    expect(plan.archiveEntries).toBe('bundler-node-22.4-ruby-4.0:vendor/bundle');
+  });
+
+  it('allows explicit runtime cache tags for local and CI reuse', async () => {
+    const plan = await buildPlan(buildInputs({
+      tools: 'ruby@4.0.1',
+      cacheRuntime: true,
+      cacheTag: 'web',
+      runtimeCacheTag: 'web-mise-ruby',
+      entries: 'bundler:vendor/bundle',
+    }));
+
+    expect(buildRuntimeCacheTag('web', 'web-mise-ruby', plan.runtimeTools, 'patch')).toBe('web-mise-ruby');
+    expect(plan.runtimeEntry).toBe(`web-mise-ruby:${getMiseInstallsDir()}`);
     expect(plan.archiveEntries).toBe('bundler-ruby-4.0.1:vendor/bundle');
   });
 

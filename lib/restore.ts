@@ -116,6 +116,9 @@ export async function run(): Promise<void> {
     core.setOutput('resolved-mode', plan.mode);
     core.setOutput('resolved-tools', serializeTools(plan.runtimeTools));
     core.setOutput('workspace', plan.workspace);
+    core.setOutput('cache-tag', plan.cacheTagPrefix);
+    core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
+    core.setOutput('resolved-entries', plan.archiveEntries);
 
     core.saveState('resolved-mode', plan.mode);
     core.saveState('cli-version', inputs.cliVersion);

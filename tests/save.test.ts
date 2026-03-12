@@ -33,7 +33,7 @@ describe('save action', () => {
       'generic-cache-entries': 'deps:node_modules',
       'generic-cache-workspace': 'my-org/my-project',
       'generic-cache-exclude': '*.log',
-      'cli-version': 'v1.12.4',
+      'cli-version': 'v1.12.5',
       'no-platform': 'true',
       'enableCrossOsArchive': 'false',
       'force': 'true',
@@ -42,7 +42,7 @@ describe('save action', () => {
 
     await saveRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.4' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.5' });
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
       ['save', 'my-org/my-project', 'deps:node_modules', '--force', '--no-platform', '--verbose', '--exclude', '*.log'],

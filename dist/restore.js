@@ -99,6 +99,9 @@ async function run() {
         core.setOutput('resolved-mode', plan.mode);
         core.setOutput('resolved-tools', (0, utils_1.serializeTools)(plan.runtimeTools));
         core.setOutput('workspace', plan.workspace);
+        core.setOutput('cache-tag', plan.cacheTagPrefix);
+        core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
+        core.setOutput('resolved-entries', plan.archiveEntries);
         core.saveState('resolved-mode', plan.mode);
         core.saveState('cli-version', inputs.cliVersion);
         core.saveState('generic-cache-entries', genericSaveEntries);

@@ -13,7 +13,7 @@ describe('restore action', () => {
 
     await restoreRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.4' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.5' });
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
       ['restore', 'my-org/my-project', 'deps:node_modules,build:dist', '--no-platform'],
@@ -21,6 +21,9 @@ describe('restore action', () => {
     );
     expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
     expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'archive');
+    expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'deps');
+    expect(core.setOutput).toHaveBeenCalledWith('runtime-cache-tag', '');
+    expect(core.setOutput).toHaveBeenCalledWith('resolved-entries', 'deps:node_modules,build:dist');
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-entries', 'deps:node_modules,build:dist');
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-workspace', 'my-org/my-project');
   });

@@ -37,9 +37,11 @@ exports.parseEntries = exports.installMiseTool = exports.installMise = exports.g
 exports.getInputs = getInputs;
 exports.normalizeSetup = normalizeSetup;
 exports.normalizePreset = normalizePreset;
+exports.normalizeToolVersionScope = normalizeToolVersionScope;
 exports.resolveWorkspace = resolveWorkspace;
 exports.parseToolSpecs = parseToolSpecs;
 exports.resolveRuntimeTools = resolveRuntimeTools;
+exports.buildRuntimeCacheTag = buildRuntimeCacheTag;
 exports.buildRuntimeCacheEntry = buildRuntimeCacheEntry;
 exports.buildArchiveEntries = buildArchiveEntries;
 exports.validateOneInputs = validateOneInputs;
@@ -85,14 +87,16 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.12.4',
+        cliVersion: core.getInput('cli-version') || 'v1.12.5',
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),
         preset: normalizePreset(core.getInput('preset')),
         workspace: core.getInput('workspace'),
         cacheTag: core.getInput('cache-tag'),
+        runtimeCacheTag: core.getInput('runtime-cache-tag'),
         workingDirectory: path.resolve(core.getInput('working-directory') || '.'),
         tools: core.getInput('tools'),
+        toolVersionScope: normalizeToolVersionScope(core.getInput('tool-version-scope')),
         cacheRuntime: core.getBooleanInput('cache-runtime'),
         readOnly: core.getBooleanInput('read-only'),
         proxyPort: core.getInput('proxy-port'),
@@ -129,6 +133,16 @@ function normalizePreset(value) {
             return (value || 'none').trim().toLowerCase();
         default:
             throw new Error(`Unsupported preset "${value}". Expected none, rails, or node-turbo.`);
+    }
+}
+function normalizeToolVersionScope(value) {
+    switch ((value || 'patch').trim().toLowerCase()) {
+        case 'major':
+        case 'minor':
+        case 'patch':
+            return (value || 'patch').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported tool-version-scope "${value}". Expected major, minor, or patch.`);
     }
 }
 function resolveWorkspace(workspace) {
@@ -424,41 +438,36 @@ function normalizeToolName(name) {
     }
     return normalized;
 }
-function buildRuntimeCacheEntry(cacheTagPrefix, tools) {
+function buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
     if (tools.length === 0) {
         return null;
     }
-    return `${cacheTagPrefix}-mise-installs-${buildRuntimeToolTag(tools)}:${(0, action_core_1.getMiseInstallsDir)()}`;
+    if (runtimeCacheTag.trim()) {
+        return runtimeCacheTag.trim();
+    }
+    return (0, action_core_1.buildMiseRuntimeTag)(cacheTagPrefix, tools, versionScope);
 }
-function slugTagPart(value) {
-    const normalized = value
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9._-]+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^[.-]+|[.-]+$/g, '');
-    return normalized || 'unknown';
+function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
+    const runtimeTag = buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope);
+    if (!runtimeTag) {
+        return null;
+    }
+    return `${runtimeTag}:${(0, action_core_1.getMiseInstallsDir)()}`;
 }
-function buildRuntimeToolTag(tools) {
-    return tools
-        .map((tool) => `${slugTagPart(tool.name)}-${slugTagPart(tool.version)}`)
-        .sort()
-        .join('-');
-}
-function scopeTagToRuntimeTools(tag, tools) {
-    const runtimeTag = buildRuntimeToolTag(tools);
+function scopeTagToRuntimeTools(tag, tools, versionScope) {
+    const runtimeTag = (0, action_core_1.buildMiseToolTag)(tools, versionScope);
     if (!runtimeTag || tag === runtimeTag || tag.endsWith(`-${runtimeTag}`)) {
         return tag;
     }
     return `${tag}-${runtimeTag}`;
 }
-function scopeArchiveEntries(entries, tools) {
+function scopeArchiveEntries(entries, tools, versionScope) {
     if (!entries.trim() || tools.length === 0) {
         return entries;
     }
     return (0, action_core_1.parseEntries)(entries, 'restore', { resolvePaths: false })
         .map((entry) => {
-        const scopedTag = scopeTagToRuntimeTools(entry.tag, tools);
+        const scopedTag = scopeTagToRuntimeTools(entry.tag, tools, versionScope);
         const pathSpec = entry.restorePath === entry.savePath
             ? entry.restorePath
             : `${entry.restorePath}=>${entry.savePath}`;
@@ -471,7 +480,7 @@ function buildArchiveEntries(inputs, runtimeTools) {
     let usesCacheFormat = false;
     if (inputs.entries) {
         archiveEntries = inputs.setup === 'mise'
-            ? scopeArchiveEntries(inputs.entries, runtimeTools)
+            ? scopeArchiveEntries(inputs.entries, runtimeTools, inputs.toolVersionScope)
             : inputs.entries;
     }
     else if (inputs.path || inputs.key) {
@@ -517,8 +526,12 @@ async function buildPlan(inputs) {
     const modeSpec = (0, modes_1.resolveModeSpec)(inputs.mode);
     (0, modes_1.assertImplementedMode)(modeSpec);
     const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory);
+    const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools);
+    const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
+        ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
+        : null;
     const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
-        ? buildRuntimeCacheEntry(getCacheTagPrefix(inputs, runtimeTools), runtimeTools)
+        ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
         : null;
     const archiveEntries = buildArchiveEntries(inputs, runtimeTools);
     validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
@@ -529,7 +542,9 @@ async function buildPlan(inputs) {
         mode: modeSpec.resolved,
         modeSpec,
         preset: inputs.preset,
+        cacheTagPrefix,
         runtimeTools,
+        runtimeTag,
         runtimeEntry,
         archiveEntries: archiveEntries.entries,
         usesCacheFormat: archiveEntries.usesCacheFormat,

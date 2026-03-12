@@ -4,6 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   activateMiseTool,
+  buildMiseRuntimeTag,
+  buildMiseToolTag,
   convertCacheFormatToEntries,
   ensureBoringCache,
   execBoringCache,
@@ -16,6 +18,7 @@ import {
   readMiseTomlVersion,
   readToolVersionsValue,
   reshimMise,
+  type MiseVersionScope,
 } from '@boringcache/action-core';
 import {
   assertImplementedMode,
@@ -54,8 +57,10 @@ export interface OneInputs {
   preset: Preset;
   workspace: string;
   cacheTag: string;
+  runtimeCacheTag: string;
   workingDirectory: string;
   tools: string;
+  toolVersionScope: MiseVersionScope;
   cacheRuntime: boolean;
   readOnly: boolean;
   proxyPort: string;
@@ -81,7 +86,9 @@ export interface ResolvedPlan {
   mode: ResolvedMode;
   modeSpec: ModeSpec;
   preset: Preset;
+  cacheTagPrefix: string;
   runtimeTools: ToolSpec[];
+  runtimeTag: string | null;
   runtimeEntry: string | null;
   archiveEntries: string;
   usesCacheFormat: boolean;
@@ -109,14 +116,16 @@ const TOOL_LABELS: Record<string, string> = {
 
 export function getInputs(): OneInputs {
   return {
-    cliVersion: core.getInput('cli-version') || 'v1.12.4',
+    cliVersion: core.getInput('cli-version') || 'v1.12.5',
     setup: normalizeSetup(core.getInput('setup')),
     mode: normalizeMode(core.getInput('mode')),
     preset: normalizePreset(core.getInput('preset')),
     workspace: core.getInput('workspace'),
     cacheTag: core.getInput('cache-tag'),
+    runtimeCacheTag: core.getInput('runtime-cache-tag'),
     workingDirectory: path.resolve(core.getInput('working-directory') || '.'),
     tools: core.getInput('tools'),
+    toolVersionScope: normalizeToolVersionScope(core.getInput('tool-version-scope')),
     cacheRuntime: core.getBooleanInput('cache-runtime'),
     readOnly: core.getBooleanInput('read-only'),
     proxyPort: core.getInput('proxy-port'),
@@ -155,6 +164,17 @@ export function normalizePreset(value: string): Preset {
       return (value || 'none').trim().toLowerCase() as Preset;
     default:
       throw new Error(`Unsupported preset "${value}". Expected none, rails, or node-turbo.`);
+  }
+}
+
+export function normalizeToolVersionScope(value: string): MiseVersionScope {
+  switch ((value || 'patch').trim().toLowerCase()) {
+    case 'major':
+    case 'minor':
+    case 'patch':
+      return (value || 'patch').trim().toLowerCase() as MiseVersionScope;
+    default:
+      throw new Error(`Unsupported tool-version-scope "${value}". Expected major, minor, or patch.`);
   }
 }
 
@@ -514,48 +534,56 @@ function normalizeToolName(name: string): string {
   return normalized;
 }
 
-export function buildRuntimeCacheEntry(cacheTagPrefix: string, tools: ToolSpec[]): string | null {
+export function buildRuntimeCacheTag(
+  cacheTagPrefix: string,
+  runtimeCacheTag: string,
+  tools: ToolSpec[],
+  versionScope: MiseVersionScope,
+): string | null {
   if (tools.length === 0) {
     return null;
   }
 
-  return `${cacheTagPrefix}-mise-installs-${buildRuntimeToolTag(tools)}:${getMiseInstallsDir()}`;
+  if (runtimeCacheTag.trim()) {
+    return runtimeCacheTag.trim();
+  }
+
+  return buildMiseRuntimeTag(cacheTagPrefix, tools, versionScope);
 }
 
-function slugTagPart(value: string): string {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[.-]+|[.-]+$/g, '');
-
-  return normalized || 'unknown';
+export function buildRuntimeCacheEntry(
+  cacheTagPrefix: string,
+  runtimeCacheTag: string,
+  tools: ToolSpec[],
+  versionScope: MiseVersionScope,
+): string | null {
+  const runtimeTag = buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope);
+  if (!runtimeTag) {
+    return null;
+  }
+  return `${runtimeTag}:${getMiseInstallsDir()}`;
 }
 
-function buildRuntimeToolTag(tools: ToolSpec[]): string {
-  return tools
-    .map((tool) => `${slugTagPart(tool.name)}-${slugTagPart(tool.version)}`)
-    .sort()
-    .join('-');
-}
-
-function scopeTagToRuntimeTools(tag: string, tools: ToolSpec[]): string {
-  const runtimeTag = buildRuntimeToolTag(tools);
+function scopeTagToRuntimeTools(tag: string, tools: ToolSpec[], versionScope: MiseVersionScope): string {
+  const runtimeTag = buildMiseToolTag(tools, versionScope);
   if (!runtimeTag || tag === runtimeTag || tag.endsWith(`-${runtimeTag}`)) {
     return tag;
   }
   return `${tag}-${runtimeTag}`;
 }
 
-function scopeArchiveEntries(entries: string, tools: ToolSpec[]): string {
+function scopeArchiveEntries(
+  entries: string,
+  tools: ToolSpec[],
+  versionScope: MiseVersionScope,
+): string {
   if (!entries.trim() || tools.length === 0) {
     return entries;
   }
 
   return parseEntries(entries, 'restore', { resolvePaths: false })
     .map((entry) => {
-      const scopedTag = scopeTagToRuntimeTools(entry.tag, tools);
+      const scopedTag = scopeTagToRuntimeTools(entry.tag, tools, versionScope);
       const pathSpec = entry.restorePath === entry.savePath
         ? entry.restorePath
         : `${entry.restorePath}=>${entry.savePath}`;
@@ -573,7 +601,7 @@ export function buildArchiveEntries(
 
   if (inputs.entries) {
     archiveEntries = inputs.setup === 'mise'
-      ? scopeArchiveEntries(inputs.entries, runtimeTools)
+      ? scopeArchiveEntries(inputs.entries, runtimeTools, inputs.toolVersionScope)
       : inputs.entries;
   } else if (inputs.path || inputs.key) {
     if (!inputs.path || !inputs.key) {
@@ -639,8 +667,12 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     inputs.tools,
     inputs.workingDirectory,
   );
+  const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools);
+  const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
+    ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
+    : null;
   const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
-    ? buildRuntimeCacheEntry(getCacheTagPrefix(inputs, runtimeTools), runtimeTools)
+    ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
     : null;
 
   const archiveEntries = buildArchiveEntries(inputs, runtimeTools);
@@ -653,7 +685,9 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     mode: modeSpec.resolved,
     modeSpec,
     preset: inputs.preset,
+    cacheTagPrefix,
     runtimeTools,
+    runtimeTag,
     runtimeEntry,
     archiveEntries: archiveEntries.entries,
     usesCacheFormat: archiveEntries.usesCacheFormat,
