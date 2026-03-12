@@ -1,0 +1,304 @@
+name: E2E Trust Boundaries
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-trust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-action:
+    name: Build Action
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build action
+        run: npm run build
+
+      - name: Upload action bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-dist
+          path: dist
+          if-no-files-found: error
+
+  archive-poison-seed:
+    name: Archive Seed
+    needs: build-action
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check split tokens
+        id: tokens
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping trust-boundary E2E because split tokens are not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Prepare trusted cache content
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          echo "E2E_WORKDIR=$RUNNER_TEMP/one-trust/archive-poison" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/one-trust/archive-poison"
+          printf 'trusted-seed\n' > "$RUNNER_TEMP/one-trust/archive-poison/marker.txt"
+
+      - name: Save trusted cache
+        if: steps.tokens.outputs.enabled == 'true'
+        uses: ./
+        with:
+          setup: none
+          mode: archive
+          workspace: boringcache/one-trust
+          cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          entries: |
+            marker:marker.txt
+          verbose: true
+
+  archive-poison-attempt:
+    name: Archive Poison Attempt
+    needs: archive-poison-seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check restore token
+        id: tokens
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping trust-boundary E2E because BORINGCACHE_RESTORE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Prepare attacker workspace
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          echo "E2E_WORKDIR=$RUNNER_TEMP/one-trust/archive-poison" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/one-trust/archive-poison"
+
+      - name: Restore trusted cache with restore-only token
+        if: steps.tokens.outputs.enabled == 'true'
+        id: cache
+        uses: ./
+        with:
+          setup: none
+          mode: archive
+          workspace: boringcache/one-trust
+          cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          entries: |
+            marker:marker.txt
+          verbose: true
+
+      - name: Assert trusted contents
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          grep "trusted-seed" "$E2E_WORKDIR/marker.txt"
+          if [ "${{ steps.cache.outputs.cache-hit }}" != "true" ]; then
+            echo "Expected cache hit before poison attempt" >&2
+            exit 1
+          fi
+
+      - name: Attempt manual poison save without save token
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          printf 'poisoned\n' > "$E2E_WORKDIR/marker.txt"
+          set +e
+          boringcache save boringcache/one-trust "marker:$E2E_WORKDIR/marker.txt" --force >"$RUNNER_TEMP/archive-poison.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/archive-poison.log"
+          if [ "$status" -eq 0 ]; then
+            echo "Expected manual save to fail without BORINGCACHE_SAVE_TOKEN" >&2
+            exit 1
+          fi
+
+  archive-poison-verify:
+    name: Archive Poison Verify
+    needs: archive-poison-attempt
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check restore token
+        id: tokens
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping trust-boundary E2E because BORINGCACHE_RESTORE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Prepare verification workspace
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          echo "E2E_WORKDIR=$RUNNER_TEMP/one-trust/archive-poison" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/one-trust/archive-poison"
+
+      - name: Restore cache after poison attempt
+        if: steps.tokens.outputs.enabled == 'true'
+        id: cache
+        uses: ./
+        with:
+          setup: none
+          mode: archive
+          workspace: boringcache/one-trust
+          cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          entries: |
+            marker:marker.txt
+          verbose: true
+
+      - name: Assert original cache is intact
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          grep "trusted-seed" "$E2E_WORKDIR/marker.txt"
+          if grep -q "poisoned" "$E2E_WORKDIR/marker.txt"; then
+            echo "Poisoned content should not have been published" >&2
+            exit 1
+          fi
+          if [ "${{ steps.cache.outputs.cache-hit }}" != "true" ]; then
+            echo "Expected cache hit after poison attempt" >&2
+            exit 1
+          fi
+
+  proxy-read-only:
+    name: Proxy Read Only (${{ matrix.mode }})
+    needs: build-action
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: bazel
+            mode: bazel
+            tools: ''
+          - id: gradle
+            mode: gradle
+            tools: |
+              gradle@8.12
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check restore token
+        id: tokens
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping proxy read-only E2E because BORINGCACHE_RESTORE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set work directory
+        if: steps.tokens.outputs.enabled == 'true'
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/one-trust/${{ matrix.id }}" >> "$GITHUB_ENV"
+
+      - name: Prepare fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        run: bash scripts/e2e-fixture.sh prepare "${{ matrix.id }}" "$E2E_WORKDIR"
+
+      - name: Run read-only proxy mode
+        if: steps.tokens.outputs.enabled == 'true'
+        uses: ./
+        with:
+          setup: mise
+          mode: ${{ matrix.mode }}
+          workspace: boringcache/one-trust
+          cache-tag: ${{ format('readonly-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          tools: ${{ matrix.tools }}
+          gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+          read-only: true
+          verbose: true
+
+      - name: Verify read-only configuration
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          if [ "${{ matrix.mode }}" = "bazel" ]; then
+            grep -- "--remote_upload_local_results=false" "$HOME/.bazelrc"
+          else
+            grep "push = false" "$E2E_WORKDIR/.gradle-home/init.d/boringcache-cache.gradle"
+          fi
+
+      - name: Run build under read-only config
+        if: steps.tokens.outputs.enabled == 'true'
+        env:
+          E2E_GRADLE_HOME: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+        run: bash scripts/e2e-run.sh verify "${{ matrix.id }}" "$E2E_WORKDIR"

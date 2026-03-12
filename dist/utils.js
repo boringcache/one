@@ -1,0 +1,513 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseEntries = exports.installMiseTool = exports.installMise = exports.getMiseDataDir = exports.execBoringCache = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
+exports.getInputs = getInputs;
+exports.normalizeSetup = normalizeSetup;
+exports.normalizePreset = normalizePreset;
+exports.resolveWorkspace = resolveWorkspace;
+exports.parseToolSpecs = parseToolSpecs;
+exports.resolveRuntimeTools = resolveRuntimeTools;
+exports.buildRuntimeCacheEntry = buildRuntimeCacheEntry;
+exports.buildArchiveEntries = buildArchiveEntries;
+exports.validateOneInputs = validateOneInputs;
+exports.buildPlan = buildPlan;
+exports.getCacheTagPrefix = getCacheTagPrefix;
+exports.buildFlagArgs = buildFlagArgs;
+exports.applyMiseSetup = applyMiseSetup;
+exports.serializeTools = serializeTools;
+exports.getRestoreKeyCandidates = getRestoreKeyCandidates;
+exports.getPlatformSuffix = getPlatformSuffix;
+const core = __importStar(require("@actions/core"));
+const crypto = __importStar(require("crypto"));
+const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
+const path = __importStar(require("path"));
+const action_core_1 = require("@boringcache/action-core");
+Object.defineProperty(exports, "activateMiseTool", { enumerable: true, get: function () { return action_core_1.activateMiseTool; } });
+Object.defineProperty(exports, "convertCacheFormatToEntries", { enumerable: true, get: function () { return action_core_1.convertCacheFormatToEntries; } });
+Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return action_core_1.ensureBoringCache; } });
+Object.defineProperty(exports, "execBoringCache", { enumerable: true, get: function () { return action_core_1.execBoringCache; } });
+Object.defineProperty(exports, "getMiseDataDir", { enumerable: true, get: function () { return action_core_1.getMiseDataDir; } });
+Object.defineProperty(exports, "installMise", { enumerable: true, get: function () { return action_core_1.installMise; } });
+Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: function () { return action_core_1.installMiseTool; } });
+Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return action_core_1.parseEntries; } });
+const modes_1 = require("./modes");
+const TOOL_LABELS = {
+    bazel: 'Bazel',
+    elixir: 'Elixir',
+    erlang: 'Erlang',
+    go: 'Go',
+    java: 'Java',
+    node: 'Node.js',
+    nodejs: 'Node.js',
+    python: 'Python',
+    ruby: 'Ruby',
+    rust: 'Rust',
+};
+function getInputs() {
+    return {
+        cliVersion: core.getInput('cli-version') || 'v1.12.4',
+        setup: normalizeSetup(core.getInput('setup')),
+        mode: (0, modes_1.normalizeMode)(core.getInput('mode')),
+        preset: normalizePreset(core.getInput('preset')),
+        workspace: core.getInput('workspace'),
+        cacheTag: core.getInput('cache-tag'),
+        workingDirectory: path.resolve(core.getInput('working-directory') || '.'),
+        tools: core.getInput('tools'),
+        cacheRuntime: core.getBooleanInput('cache-runtime'),
+        readOnly: core.getBooleanInput('read-only'),
+        proxyPort: core.getInput('proxy-port'),
+        proxyNoGit: core.getBooleanInput('proxy-no-git'),
+        proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
+        entries: core.getInput('entries'),
+        path: core.getInput('path'),
+        key: core.getInput('key'),
+        restoreKeys: core.getInput('restore-keys'),
+        enableCrossOsArchive: core.getBooleanInput('enableCrossOsArchive'),
+        noPlatform: core.getBooleanInput('no-platform'),
+        failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
+        lookupOnly: core.getBooleanInput('lookup-only'),
+        force: core.getBooleanInput('force'),
+        verbose: core.getBooleanInput('verbose'),
+        exclude: core.getInput('exclude'),
+    };
+}
+function normalizeSetup(value) {
+    switch ((value || 'mise').trim().toLowerCase()) {
+        case 'mise':
+        case 'external':
+        case 'none':
+            return (value || 'mise').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported setup "${value}". Expected mise, external, or none.`);
+    }
+}
+function normalizePreset(value) {
+    switch ((value || 'none').trim().toLowerCase()) {
+        case 'none':
+        case 'rails':
+        case 'node-turbo':
+            return (value || 'none').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported preset "${value}". Expected none, rails, or node-turbo.`);
+    }
+}
+function resolveWorkspace(workspace) {
+    const resolved = workspace
+        ? workspace.includes('/') ? workspace : `default/${workspace}`
+        : (0, action_core_1.getInputsWorkspace)({});
+    if (!resolved.includes('/')) {
+        return `default/${resolved}`;
+    }
+    return resolved;
+}
+function parseToolSpecs(input) {
+    return input
+        .split(/\r?\n|,/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => {
+        const atIndex = entry.lastIndexOf('@');
+        if (atIndex <= 0 || atIndex === entry.length - 1) {
+            throw new Error(`Invalid tool spec "${entry}". Expected format tool@version.`);
+        }
+        const name = normalizeToolName(entry.slice(0, atIndex));
+        const version = entry.slice(atIndex + 1).trim();
+        return {
+            name,
+            version,
+            label: TOOL_LABELS[name] || name,
+            source: 'input',
+        };
+    });
+}
+async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory) {
+    if (setup !== 'mise') {
+        return [];
+    }
+    const explicitTools = parseToolSpecs(toolsInput);
+    const presetTools = await detectPresetTools(preset, workingDirectory);
+    const modeTools = await detectModeTools(mode, workingDirectory);
+    return mergeTools(explicitTools, presetTools, modeTools);
+}
+async function detectPresetTools(preset, workingDirectory) {
+    switch (preset) {
+        case 'rails':
+            return detectRailsTools(workingDirectory);
+        case 'node-turbo':
+            return detectNodeTurboTools(workingDirectory);
+        default:
+            return [];
+    }
+}
+async function detectModeTools(mode, workingDirectory) {
+    switch (mode) {
+        case 'turbo-proxy':
+            return detectNodeTurboTools(workingDirectory);
+        case 'bazel':
+            return detectBazelTools(workingDirectory);
+        case 'gradle':
+            return detectGradleTools(workingDirectory);
+        case 'rust-sccache':
+            return detectRustTools(workingDirectory);
+        default:
+            return [];
+    }
+}
+async function detectRailsTools(workingDirectory) {
+    const tools = [];
+    const rubyVersion = await detectRubyVersion(workingDirectory);
+    if (rubyVersion) {
+        tools.push({ name: 'ruby', version: rubyVersion, label: 'Ruby', source: 'preset' });
+    }
+    if (await needsNodeRuntime(workingDirectory)) {
+        const nodeVersion = await detectNodeVersion(workingDirectory);
+        if (nodeVersion) {
+            tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
+        }
+    }
+    return tools;
+}
+async function detectNodeTurboTools(workingDirectory) {
+    const nodeVersion = await detectNodeVersion(workingDirectory);
+    if (!nodeVersion) {
+        return [];
+    }
+    return [{ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' }];
+}
+async function detectBazelTools(workingDirectory) {
+    const bazelVersion = await detectBazelVersion(workingDirectory);
+    if (!bazelVersion) {
+        return [];
+    }
+    return [{ name: 'bazel', version: bazelVersion, label: 'Bazel', source: 'mode' }];
+}
+async function detectGradleTools(workingDirectory) {
+    const javaVersion = await detectJavaVersion(workingDirectory);
+    if (!javaVersion) {
+        return [];
+    }
+    return [{ name: 'java', version: javaVersion, label: 'Java', source: 'mode' }];
+}
+async function detectRustTools(workingDirectory) {
+    const rustVersion = await detectRustVersion(workingDirectory);
+    if (!rustVersion) {
+        return [];
+    }
+    return [{ name: 'rust', version: rustVersion, label: 'Rust', source: 'mode' }];
+}
+async function detectRubyVersion(workingDirectory) {
+    const rubyVersion = await readFirstLine(path.join(workingDirectory, '.ruby-version'));
+    if (rubyVersion) {
+        return rubyVersion;
+    }
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'ruby');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'ruby');
+}
+async function detectNodeVersion(workingDirectory) {
+    const nodeVersion = await readFirstLine(path.join(workingDirectory, '.node-version'));
+    if (nodeVersion) {
+        return nodeVersion.replace(/^v/, '');
+    }
+    const nvmVersion = await readFirstLine(path.join(workingDirectory, '.nvmrc'));
+    if (nvmVersion) {
+        return nvmVersion.replace(/^v/, '');
+    }
+    const toolVersion = (await readToolVersionsValue(workingDirectory, 'nodejs'))
+        || (await readToolVersionsValue(workingDirectory, 'node'));
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'node'))
+        || (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'nodejs'));
+}
+async function detectBazelVersion(workingDirectory) {
+    const bazelVersion = await readFirstLine(path.join(workingDirectory, '.bazelversion'));
+    if (bazelVersion) {
+        return bazelVersion;
+    }
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'bazel');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'bazel');
+}
+async function detectJavaVersion(workingDirectory) {
+    const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
+    if (javaVersion) {
+        return javaVersion;
+    }
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'java');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'java');
+}
+async function detectRustVersion(workingDirectory) {
+    const rustToolchainToml = await readFile(path.join(workingDirectory, 'rust-toolchain.toml'));
+    if (rustToolchainToml) {
+        const match = rustToolchainToml.match(/channel\s*=\s*["']([^"']+)["']/);
+        if (match === null || match === void 0 ? void 0 : match[1]) {
+            return match[1];
+        }
+    }
+    const rustToolchain = await readFirstLine(path.join(workingDirectory, 'rust-toolchain'));
+    if (rustToolchain) {
+        return rustToolchain;
+    }
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'rust');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'rust');
+}
+async function readFirstLine(filePath) {
+    try {
+        const content = await fs.promises.readFile(filePath, 'utf-8');
+        const line = content.split('\n').map((value) => value.trim()).find(Boolean);
+        return line || null;
+    }
+    catch {
+        return null;
+    }
+}
+async function readFile(filePath) {
+    try {
+        return await fs.promises.readFile(filePath, 'utf-8');
+    }
+    catch {
+        return null;
+    }
+}
+async function readToolVersionsValue(workingDirectory, toolName) {
+    var _a;
+    try {
+        const content = await fs.promises.readFile(path.join(workingDirectory, '.tool-versions'), 'utf-8');
+        const line = content
+            .split('\n')
+            .map((value) => value.trim())
+            .find((value) => value.startsWith(`${toolName} `));
+        if (!line) {
+            return null;
+        }
+        return ((_a = line.split(/\s+/)[1]) === null || _a === void 0 ? void 0 : _a.trim()) || null;
+    }
+    catch {
+        return null;
+    }
+}
+async function needsNodeRuntime(workingDirectory) {
+    const markers = ['package.json', 'yarn.lock', 'pnpm-lock.yaml', 'package-lock.json', 'turbo.json'];
+    for (const marker of markers) {
+        if (await pathExists(path.join(workingDirectory, marker))) {
+            return true;
+        }
+    }
+    return false;
+}
+async function pathExists(filePath) {
+    try {
+        await fs.promises.access(filePath);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function mergeTools(...toolSets) {
+    const merged = new Map();
+    for (const toolSet of toolSets) {
+        for (const tool of toolSet) {
+            if (tool.source === 'input' || !merged.has(tool.name)) {
+                merged.set(tool.name, tool);
+            }
+        }
+    }
+    return Array.from(merged.values());
+}
+function normalizeToolName(name) {
+    const normalized = name.trim().toLowerCase();
+    return normalized === 'nodejs' ? 'node' : normalized;
+}
+function buildRuntimeCacheEntry(cacheTagPrefix, tools) {
+    if (tools.length === 0) {
+        return null;
+    }
+    const fingerprint = tools
+        .map((tool) => `${tool.name}@${tool.version}`)
+        .sort()
+        .join(',');
+    const digest = crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 12);
+    return `${cacheTagPrefix}-mise-runtime-${digest}:${(0, action_core_1.getMiseDataDir)()}`;
+}
+function buildArchiveEntries(inputs) {
+    let archiveEntries = '';
+    let usesCacheFormat = false;
+    if (inputs.entries) {
+        archiveEntries = inputs.entries;
+    }
+    else if (inputs.path || inputs.key) {
+        if (!inputs.path || !inputs.key) {
+            throw new Error('actions/cache compatibility mode requires both path and key');
+        }
+        archiveEntries = (0, action_core_1.convertCacheFormatToEntries)({
+            path: inputs.path,
+            key: inputs.key,
+            noPlatform: inputs.noPlatform,
+            enableCrossOsArchive: inputs.enableCrossOsArchive,
+        }, 'restore');
+        usesCacheFormat = true;
+    }
+    return {
+        entries: archiveEntries,
+        usesCacheFormat,
+    };
+}
+function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries) {
+    if (inputs.entries && (inputs.path || inputs.key)) {
+        core.warning('Both explicit entries and actions/cache compatibility inputs were provided. Using entries.');
+    }
+    if ((inputs.path && !inputs.key) || (!inputs.path && inputs.key)) {
+        throw new Error('actions/cache compatibility mode requires both path and key');
+    }
+    if (inputs.setup !== 'mise' && inputs.tools.trim()) {
+        core.warning(`Ignoring tools because setup=${inputs.setup}`);
+    }
+    if (inputs.setup !== 'mise' && inputs.cacheRuntime) {
+        core.warning(`Ignoring cache-runtime because setup=${inputs.setup}`);
+    }
+    if (inputs.setup === 'mise' && inputs.cacheRuntime && runtimeTools.length === 0) {
+        core.warning('cache-runtime requested but no mise tools were resolved');
+    }
+    const hasArchiveInputs = Boolean(archiveEntries || runtimeEntry);
+    if (modeSpec.resolved === 'archive' && !hasArchiveInputs) {
+        throw new Error('No cache entries resolved. Provide entries, path+key, or enable cache-runtime with setup=mise.');
+    }
+}
+async function buildPlan(inputs) {
+    const workspace = resolveWorkspace(inputs.workspace);
+    const modeSpec = (0, modes_1.resolveModeSpec)(inputs.mode);
+    (0, modes_1.assertImplementedMode)(modeSpec);
+    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory);
+    const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
+        ? buildRuntimeCacheEntry(getCacheTagPrefix(inputs, runtimeTools), runtimeTools)
+        : null;
+    const archiveEntries = buildArchiveEntries(inputs);
+    validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
+    return {
+        workspace,
+        workingDirectory: inputs.workingDirectory,
+        setup: inputs.setup,
+        mode: modeSpec.resolved,
+        modeSpec,
+        preset: inputs.preset,
+        runtimeTools,
+        runtimeEntry,
+        archiveEntries: archiveEntries.entries,
+        usesCacheFormat: archiveEntries.usesCacheFormat,
+    };
+}
+function getCacheTagPrefix(inputs, runtimeTools) {
+    if (inputs.cacheTag) {
+        return inputs.cacheTag;
+    }
+    if (inputs.entries) {
+        const firstEntry = (0, action_core_1.parseEntries)(inputs.entries, 'restore', { resolvePaths: false })[0];
+        if (firstEntry) {
+            return firstEntry.tag;
+        }
+    }
+    if (inputs.key) {
+        return inputs.key;
+    }
+    if (runtimeTools.length > 0) {
+        return runtimeTools.map((tool) => tool.name).join('-');
+    }
+    return 'one';
+}
+function buildFlagArgs(inputs) {
+    const flagArgs = [];
+    if (inputs.enableCrossOsArchive || inputs.noPlatform) {
+        flagArgs.push('--no-platform');
+    }
+    if (inputs.failOnCacheMiss) {
+        flagArgs.push('--fail-on-cache-miss');
+    }
+    if (inputs.lookupOnly) {
+        flagArgs.push('--lookup-only');
+    }
+    if (inputs.verbose) {
+        flagArgs.push('--verbose');
+    }
+    if (inputs.exclude) {
+        flagArgs.push('--exclude', inputs.exclude);
+    }
+    return flagArgs;
+}
+async function applyMiseSetup(runtimeTools, runtimeCacheHit) {
+    if (runtimeTools.length === 0) {
+        return;
+    }
+    await (0, action_core_1.installMise)();
+    for (const tool of runtimeTools) {
+        if (runtimeCacheHit) {
+            await (0, action_core_1.activateMiseTool)(tool.name, tool.version, { label: tool.label });
+        }
+        else {
+            await (0, action_core_1.installMiseTool)(tool.name, tool.version, { label: tool.label });
+        }
+    }
+}
+function serializeTools(runtimeTools) {
+    return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');
+}
+function getRestoreKeyCandidates(inputs) {
+    return inputs.restoreKeys
+        .split('\n')
+        .map((value) => value.trim())
+        .filter(Boolean);
+}
+function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
+    if (noPlatform || enableCrossOsArchive) {
+        return '';
+    }
+    const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
+    const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
+    return `-${platform}-${arch}`;
+}

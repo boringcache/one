@@ -1,0 +1,272 @@
+name: Next.js Cache Benchmark
+
+on:
+  workflow_dispatch:
+
+env:
+  BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
+  BUILDX_CACHE_DIR: /tmp/.buildx-cache
+
+jobs:
+  install-actions-cache:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        run: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Cache node_modules (actions/cache)
+        uses: actions/cache@v4
+        with:
+          path: examples/nextjs_app/node_modules
+          key: node-mods-actions-${{ runner.os }}-${{ hashFiles('examples/nextjs_app/yarn.lock') }}
+          restore-keys: |
+            node-mods-actions-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          cd examples/nextjs_app
+          START_TIME=$(date +%s%N)
+          yarn install --frozen-lockfile
+          END_TIME=$(date +%s%N)
+          DURATION=$(( (END_TIME - START_TIME) / 1000000 ))
+          echo "actions/cache yarn install - Run ${{ matrix.run }}: ${DURATION}ms"
+          mkdir -p "$GITHUB_WORKSPACE/benchmark-results"
+          echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/actions-cache-run${{ matrix.run }}.txt"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: actions-cache-results-${{ matrix.run }}
+          path: benchmark-results/
+
+  install-boringcache:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        run: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Restore CLI and node_modules (boringcache)
+        uses: ./
+        id: cache-batch-next
+        with:
+          workspace: boringcache/actions
+          entries: "boringcache-cli-${{ matrix.run }}:/usr/local/bin/boringcache,node-mods-boring-next-${{ matrix.run }}:examples/nextjs_app/node_modules"
+
+      - name: Ensure BoringCache CLI
+        run: |
+          if ! command -v boringcache >/dev/null 2>&1; then
+            curl -sSL https://install.boringcache.com/install.sh | sh
+          else
+            echo "boringcache CLI already installed"
+          fi
+
+      - name: Authenticate BoringCache CLI
+        run: boringcache auth --token ${{ env.BORINGCACHE_API_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          cd examples/nextjs_app
+          START_TIME=$(date +%s%N)
+          yarn install --frozen-lockfile
+          END_TIME=$(date +%s%N)
+          DURATION=$(( (END_TIME - START_TIME) / 1000000 ))
+          echo "boringcache yarn install - Run ${{ matrix.run }}: ${DURATION}ms"
+          mkdir -p "$GITHUB_WORKSPACE/benchmark-results"
+          echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/boringcache-run${{ matrix.run }}.txt"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: boringcache-results-${{ matrix.run }}
+          path: benchmark-results/
+
+  docker-actions-cache:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        run: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers (actions/cache)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.BUILDX_CACHE_DIR }}
+            ${{ env.BUILDX_CACHE_DIR }}-new
+          key: docker-actions-${{ runner.os }}-${{ hashFiles('examples/nextjs_app/Dockerfile', 'examples/nextjs_app/yarn.lock') }}
+          restore-keys: |
+            docker-actions-${{ runner.os }}-
+
+      - name: Build Docker image
+        env:
+          CACHE_DIR: ${{ env.BUILDX_CACHE_DIR }}
+        run: |
+          umask 022
+          cd examples/nextjs_app
+          CACHE_READ_DIR="${CACHE_DIR}"
+          CACHE_WRITE_DIR="${CACHE_DIR}-new"
+          rm -rf "${CACHE_WRITE_DIR}"
+          START_TIME=$(date +%s%N)
+          docker buildx build \
+            --cache-from=type=local,src=${CACHE_READ_DIR} \
+            --cache-to=type=local,dest=${CACHE_WRITE_DIR},mode=max \
+            --load \
+            -t nextjs-app:latest .
+          END_TIME=$(date +%s%N)
+          DURATION=$(( (END_TIME - START_TIME) / 1000000 ))
+          echo "actions/cache docker - Run ${{ matrix.run }}: ${DURATION}ms"
+          mkdir -p "$GITHUB_WORKSPACE/benchmark-results"
+          echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/docker-actions-run${{ matrix.run }}.txt"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-actions-results-${{ matrix.run }}
+          path: benchmark-results/
+
+  docker-boringcache:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        run: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Restore CLI and Docker cache (boringcache)
+        uses: ./
+        id: cache-batch-docker-next
+        with:
+          workspace: boringcache/actions
+          entries: ${{ format('boringcache-cli-{0}:/usr/local/bin/boringcache,docker-boring-next-{0}:{1}=>{1}-new', matrix.run, env.BUILDX_CACHE_DIR) }}
+
+      - name: Ensure BoringCache CLI
+        run: |
+          if ! command -v boringcache >/dev/null 2>&1; then
+            curl -sSL https://install.boringcache.com/install.sh | sh
+          else
+            echo "boringcache CLI already installed"
+          fi
+
+      - name: Authenticate BoringCache CLI
+        run: boringcache auth --token ${{ env.BORINGCACHE_API_TOKEN }}
+
+      - name: Build Docker image
+        env:
+          CACHE_DIR: ${{ env.BUILDX_CACHE_DIR }}
+        run: |
+          umask 022
+          cd examples/nextjs_app
+          CACHE_READ_DIR="${CACHE_DIR}"
+          CACHE_WRITE_DIR="${CACHE_DIR}-new"
+          rm -rf "${CACHE_WRITE_DIR}"
+          START_TIME=$(date +%s%N)
+          docker buildx build \
+            --cache-from=type=local,src=${CACHE_READ_DIR} \
+            --cache-to=type=local,dest=${CACHE_WRITE_DIR},mode=max \
+            --load \
+            -t nextjs-app:latest .
+          END_TIME=$(date +%s%N)
+          DURATION=$(( (END_TIME - START_TIME) / 1000000 ))
+          echo "boringcache docker - Run ${{ matrix.run }}: ${DURATION}ms"
+          mkdir -p "$GITHUB_WORKSPACE/benchmark-results"
+          echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/docker-boring-run${{ matrix.run }}.txt"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-boringcache-results-${{ matrix.run }}
+          path: benchmark-results/
+
+  benchmark-summary:
+    runs-on: ubuntu-latest
+    needs:
+      - install-actions-cache
+      - install-boringcache
+      - docker-actions-cache
+      - docker-boringcache
+    if: always()
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-results-*"
+          merge-multiple: true
+
+      - name: Generate summary
+        run: |
+          echo "# Cache Performance Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Yarn Install Times (Next.js app)" >> $GITHUB_STEP_SUMMARY
+          echo "| Run | actions/cache | boringcache | Improvement |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|---------------|-------------|-------------|" >> $GITHUB_STEP_SUMMARY
+          for run in 1 2 3; do
+            if [[ -f "actions-cache-run${run}.txt" && -f "boringcache-run${run}.txt" ]]; then
+              a=$(cat "actions-cache-run${run}.txt"); b=$(cat "boringcache-run${run}.txt")
+              if [[ $b -gt 0 ]]; then imp=$(echo "scale=1; $a / $b" | bc -l); else imp="N/A"; fi
+              echo "| $run | ${a}ms | ${b}ms | ${imp}x faster |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $run | Missing | Missing | N/A |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ -f actions-cache-run1.txt && -f actions-cache-run2.txt && -f actions-cache-run3.txt && -f boringcache-run1.txt && -f boringcache-run2.txt && -f boringcache-run3.txt ]]; then
+            aa=$(( ($(cat actions-cache-run1.txt)+$(cat actions-cache-run2.txt)+$(cat actions-cache-run3.txt))/3 ))
+            bb=$(( ($(cat boringcache-run1.txt)+$(cat boringcache-run2.txt)+$(cat boringcache-run3.txt))/3 ))
+            if [[ $bb -gt 0 ]]; then imp=$(echo "scale=1; $aa / $bb" | bc -l); else imp="N/A"; fi
+            echo "- actions/cache: ${aa}ms" >> $GITHUB_STEP_SUMMARY
+            echo "- boringcache: ${bb}ms" >> $GITHUB_STEP_SUMMARY
+            echo "- Improvement: ${imp}x faster with boringcache" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Build Times (Next.js app)" >> $GITHUB_STEP_SUMMARY
+          echo "| Run | actions/cache | boringcache | Improvement |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|---------------|-------------|-------------|" >> $GITHUB_STEP_SUMMARY
+          for run in 1 2 3; do
+            if [[ -f "docker-actions-run${run}.txt" && -f "docker-boring-run${run}.txt" ]]; then
+              a=$(cat "docker-actions-run${run}.txt"); b=$(cat "docker-boring-run${run}.txt")
+              if [[ $b -gt 0 ]]; then imp=$(echo "scale=1; $a / $b" | bc -l); else imp="N/A"; fi
+              echo "| $run | ${a}ms | ${b}ms | ${imp}x faster |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $run | Missing | Missing | N/A |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ -f docker-actions-run1.txt && -f docker-actions-run2.txt && -f docker-actions-run3.txt && -f docker-boring-run1.txt && -f docker-boring-run2.txt && -f docker-boring-run3.txt ]]; then
+            aa=$(( ($(cat docker-actions-run1.txt)+$(cat docker-actions-run2.txt)+$(cat docker-actions-run3.txt))/3 ))
+            bb=$(( ($(cat docker-boring-run1.txt)+$(cat docker-boring-run2.txt)+$(cat docker-boring-run3.txt))/3 ))
+            if [[ $bb -gt 0 ]]; then imp=$(echo "scale=1; $aa / $bb" | bc -l); else imp="N/A"; fi
+            echo "- actions/cache: ${aa}ms" >> $GITHUB_STEP_SUMMARY
+            echo "- boringcache: ${bb}ms" >> $GITHUB_STEP_SUMMARY
+            echo "- Improvement: ${imp}x faster with boringcache" >> $GITHUB_STEP_SUMMARY
+          fi

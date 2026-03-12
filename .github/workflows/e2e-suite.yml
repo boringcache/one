@@ -1,0 +1,672 @@
+name: E2E Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-action:
+    name: Build Action
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build action
+        run: npm run build
+
+      - name: Upload action bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-dist
+          path: dist
+          if-no-files-found: error
+
+  language-seed:
+    name: Language Seed (${{ matrix.id }})
+    needs: build-action
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - id: archive-compat-node
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              node@20.19.0
+            entries: ''
+            path: |
+              node_modules
+              .npm-cache
+            key_style: cache
+          - id: node-pnpm
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              node@20.19.0
+              pnpm@10.12.1
+            entries: |
+              pnpm-store:.pnpm-store
+              node-modules:node_modules
+            path: ''
+            key_style: entries
+          - id: node-yarn
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              node@20.19.0
+              yarn@1.22.22
+            entries: |
+              yarn-cache:.yarn-cache
+              node-modules:node_modules
+            path: ''
+            key_style: entries
+          - id: ruby
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              ruby@3.3.7
+            entries: |
+              bundle:vendor/bundle
+            path: ''
+            key_style: entries
+          - id: rails-preset
+            setup: mise
+            mode: archive
+            preset: rails
+            tools: ''
+            entries: |
+              bundle:vendor/bundle
+              node-modules:node_modules
+              npm-cache:.npm-cache
+            path: ''
+            key_style: entries
+          - id: python
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              python@3.12.9
+            entries: |
+              venv:.venv
+            path: ''
+            key_style: entries
+          - id: go
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              go@1.23.7
+            entries: |
+              gomod:.cache/gomod
+              gobuild:.cache/gobuild
+            path: ''
+            key_style: entries
+          - id: java-maven
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              java@21
+              maven@3.9.9
+            entries: |
+              m2:.m2/repository
+            path: ''
+            key_style: entries
+          - id: elixir
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              erlang@27.2
+              elixir@1.17.3
+            entries: |
+              deps:deps
+              build:_build
+              hex:.hex
+              mix:.mix
+            path: ''
+            key_style: entries
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check BoringCache tokens
+        id: tokens
+        shell: bash
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping language E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set work directory
+        if: steps.tokens.outputs.enabled == 'true'
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/one-e2e/language-${{ matrix.id }}" >> "$GITHUB_ENV"
+
+      - name: Prepare fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        run: bash scripts/e2e-fixture.sh prepare "${{ matrix.id }}" "$E2E_WORKDIR"
+
+      - name: Run boringcache/one
+        if: steps.tokens.outputs.enabled == 'true'
+        id: cache
+        uses: ./
+        with:
+          setup: ${{ matrix.setup }}
+          mode: ${{ matrix.mode }}
+          preset: ${{ matrix.preset }}
+          workspace: boringcache/one-e2e
+          cache-tag: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          tools: ${{ matrix.tools }}
+          entries: ${{ matrix.entries }}
+          path: ${{ matrix.path }}
+          key: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          restore-keys: ${{ format('lang-{0}-', matrix.id) }}
+          verbose: true
+
+      - name: Seed fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        run: bash scripts/e2e-run.sh seed "${{ matrix.id }}" "$E2E_WORKDIR"
+
+  language-verify:
+    name: Language Verify (${{ matrix.id }})
+    needs: language-seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - id: archive-compat-node
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              node@20.19.0
+            entries: ''
+            path: |
+              node_modules
+              .npm-cache
+            key_style: cache
+          - id: node-pnpm
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              node@20.19.0
+              pnpm@10.12.1
+            entries: |
+              pnpm-store:.pnpm-store
+              node-modules:node_modules
+            path: ''
+            key_style: entries
+          - id: node-yarn
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              node@20.19.0
+              yarn@1.22.22
+            entries: |
+              yarn-cache:.yarn-cache
+              node-modules:node_modules
+            path: ''
+            key_style: entries
+          - id: ruby
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              ruby@3.3.7
+            entries: |
+              bundle:vendor/bundle
+            path: ''
+            key_style: entries
+          - id: rails-preset
+            setup: mise
+            mode: archive
+            preset: rails
+            tools: ''
+            entries: |
+              bundle:vendor/bundle
+              node-modules:node_modules
+              npm-cache:.npm-cache
+            path: ''
+            key_style: entries
+          - id: python
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              python@3.12.9
+            entries: |
+              venv:.venv
+            path: ''
+            key_style: entries
+          - id: go
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              go@1.23.7
+            entries: |
+              gomod:.cache/gomod
+              gobuild:.cache/gobuild
+            path: ''
+            key_style: entries
+          - id: java-maven
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              java@21
+              maven@3.9.9
+            entries: |
+              m2:.m2/repository
+            path: ''
+            key_style: entries
+          - id: elixir
+            setup: mise
+            mode: archive
+            preset: none
+            tools: |
+              erlang@27.2
+              elixir@1.17.3
+            entries: |
+              deps:deps
+              build:_build
+              hex:.hex
+              mix:.mix
+            path: ''
+            key_style: entries
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check BoringCache tokens
+        id: tokens
+        shell: bash
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping language E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set work directory
+        if: steps.tokens.outputs.enabled == 'true'
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/one-e2e/language-${{ matrix.id }}" >> "$GITHUB_ENV"
+
+      - name: Prepare fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        run: bash scripts/e2e-fixture.sh prepare "${{ matrix.id }}" "$E2E_WORKDIR"
+
+      - name: Restore fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        id: cache
+        uses: ./
+        with:
+          setup: ${{ matrix.setup }}
+          mode: ${{ matrix.mode }}
+          preset: ${{ matrix.preset }}
+          workspace: boringcache/one-e2e
+          cache-tag: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          tools: ${{ matrix.tools }}
+          entries: ${{ matrix.entries }}
+          path: ${{ matrix.path }}
+          key: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          restore-keys: ${{ format('lang-{0}-', matrix.id) }}
+          verbose: true
+
+      - name: Assert cache restore
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          if [ "${{ steps.cache.outputs.resolved-mode }}" != "archive" ]; then
+            echo "Expected archive mode, got ${{ steps.cache.outputs.resolved-mode }}" >&2
+            exit 1
+          fi
+          if [ "${{ steps.cache.outputs.cache-hit }}" != "true" ]; then
+            echo "Expected cache hit for ${{ matrix.id }}" >&2
+            exit 1
+          fi
+
+      - name: Verify fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        run: bash scripts/e2e-run.sh verify "${{ matrix.id }}" "$E2E_WORKDIR"
+
+  product-seed:
+    name: Product Seed (${{ matrix.id }})
+    needs: build-action
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - id: docker
+            setup: none
+            mode: docker
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: buildkit
+            setup: none
+            mode: buildkit
+            tools: ''
+            entries: ''
+            output: dynamic
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: bazel
+            setup: mise
+            mode: bazel
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: gradle
+            setup: mise
+            mode: gradle
+            tools: |
+              gradle@8.12
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: rust-sccache
+            setup: mise
+            mode: rust-sccache
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'true'
+            sccache_mode: proxy
+            cache_target: 'false'
+          - id: turbo-proxy
+            setup: mise
+            mode: turbo-proxy
+            tools: ''
+            entries: |
+              node-modules:node_modules
+              npm-cache:.npm-cache
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check BoringCache tokens
+        id: tokens
+        shell: bash
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping product E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set work directory
+        if: steps.tokens.outputs.enabled == 'true'
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/one-e2e/product-${{ matrix.id }}" >> "$GITHUB_ENV"
+
+      - name: Prepare fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        run: bash scripts/e2e-fixture.sh prepare "${{ matrix.id }}" "$E2E_WORKDIR"
+
+      - name: Set up Docker Buildx
+        if: steps.tokens.outputs.enabled == 'true'
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run boringcache/one
+        if: steps.tokens.outputs.enabled == 'true'
+        id: cache
+        uses: ./
+        with:
+          setup: ${{ matrix.setup }}
+          mode: ${{ matrix.mode }}
+          workspace: boringcache/one-e2e
+          cache-tag: ${{ format('mode-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          tools: ${{ matrix.tools }}
+          entries: ${{ matrix.entries }}
+          context: ${{ env.E2E_WORKDIR }}
+          dockerfile: Dockerfile
+          image: ${{ format('one-e2e-{0}', matrix.id) }}
+          tags: ${{ format('run-{0}', github.run_id) }}
+          buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
+          output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
+          gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+          sccache: ${{ matrix.enable_sccache }}
+          sccache-mode: ${{ matrix.sccache_mode }}
+          cache-target: ${{ matrix.cache_target }}
+          verbose: true
+
+      - name: Seed product mode
+        if: steps.tokens.outputs.enabled == 'true'
+        env:
+          E2E_IMAGE_REF: ${{ format('one-e2e-{0}:run-{1}', matrix.id, github.run_id) }}
+          E2E_BUILDKIT_OUTPUT: ${{ format('{0}/buildkit-image.tar', env.E2E_WORKDIR) }}
+          E2E_GRADLE_HOME: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+        run: bash scripts/e2e-run.sh seed "${{ matrix.id }}" "$E2E_WORKDIR"
+
+  product-verify:
+    name: Product Verify (${{ matrix.id }})
+    needs: product-seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - id: docker
+            setup: none
+            mode: docker
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: buildkit
+            setup: none
+            mode: buildkit
+            tools: ''
+            entries: ''
+            output: dynamic
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: bazel
+            setup: mise
+            mode: bazel
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: gradle
+            setup: mise
+            mode: gradle
+            tools: |
+              gradle@8.12
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+          - id: rust-sccache
+            setup: mise
+            mode: rust-sccache
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'true'
+            sccache_mode: proxy
+            cache_target: 'false'
+          - id: turbo-proxy
+            setup: mise
+            mode: turbo-proxy
+            tools: ''
+            entries: |
+              node-modules:node_modules
+              npm-cache:.npm-cache
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
+    env:
+      BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download action bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: built-dist
+          path: .
+
+      - name: Check BoringCache tokens
+        id: tokens
+        shell: bash
+        run: |
+          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping product E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set work directory
+        if: steps.tokens.outputs.enabled == 'true'
+        run: echo "E2E_WORKDIR=$RUNNER_TEMP/one-e2e/product-${{ matrix.id }}" >> "$GITHUB_ENV"
+
+      - name: Prepare fixture
+        if: steps.tokens.outputs.enabled == 'true'
+        run: bash scripts/e2e-fixture.sh prepare "${{ matrix.id }}" "$E2E_WORKDIR"
+
+      - name: Set up Docker Buildx
+        if: steps.tokens.outputs.enabled == 'true'
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Restore product mode
+        if: steps.tokens.outputs.enabled == 'true'
+        id: cache
+        uses: ./
+        with:
+          setup: ${{ matrix.setup }}
+          mode: ${{ matrix.mode }}
+          workspace: boringcache/one-e2e
+          cache-tag: ${{ format('mode-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          working-directory: ${{ env.E2E_WORKDIR }}
+          tools: ${{ matrix.tools }}
+          entries: ${{ matrix.entries }}
+          context: ${{ env.E2E_WORKDIR }}
+          dockerfile: Dockerfile
+          image: ${{ format('one-e2e-{0}', matrix.id) }}
+          tags: ${{ format('run-{0}', github.run_id) }}
+          buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
+          output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
+          gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+          sccache: ${{ matrix.enable_sccache }}
+          sccache-mode: ${{ matrix.sccache_mode }}
+          cache-target: ${{ matrix.cache_target }}
+          verbose: true
+
+      - name: Assert resolved mode
+        if: steps.tokens.outputs.enabled == 'true'
+        run: |
+          if [ "${{ steps.cache.outputs.resolved-mode }}" != "${{ matrix.mode }}" ]; then
+            echo "Expected mode ${{ matrix.mode }}, got ${{ steps.cache.outputs.resolved-mode }}" >&2
+            exit 1
+          fi
+
+      - name: Verify product mode
+        if: steps.tokens.outputs.enabled == 'true'
+        env:
+          E2E_IMAGE_REF: ${{ format('one-e2e-{0}:run-{1}', matrix.id, github.run_id) }}
+          E2E_BUILDKIT_OUTPUT: ${{ format('{0}/buildkit-image.tar', env.E2E_WORKDIR) }}
+          E2E_GRADLE_HOME: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+        run: bash scripts/e2e-run.sh verify "${{ matrix.id }}" "$E2E_WORKDIR"

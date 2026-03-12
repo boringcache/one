@@ -1,0 +1,38 @@
+{
+  "name": "boringcache-one",
+  "version": "0.1.0",
+  "description": "Primary mise-powered GitHub Action for the BoringCache suite.",
+  "main": "dist/restore/index.js",
+  "scripts": {
+    "build": "tsc && ncc build lib/restore.ts -o dist/restore && ncc build lib/save.ts -o dist/save",
+    "package": "ncc build lib/restore.ts -o dist/restore && ncc build lib/save.ts -o dist/save",
+    "test": "jest --passWithNoTests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/boringcache/one-action.git"
+  },
+  "keywords": [
+    "actions",
+    "cache",
+    "boringcache",
+    "mise"
+  ],
+  "author": "BoringCache",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/exec": "^1.1.1",
+    "@boringcache/action-core": "^1.12.4"
+  },
+  "devDependencies": {
+    "@actions/cache": "^4.1.0",
+    "@actions/tool-cache": "^2.0.1",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.19.28",
+    "@vercel/ncc": "^0.38.4",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.9.3"
+  }
+}
