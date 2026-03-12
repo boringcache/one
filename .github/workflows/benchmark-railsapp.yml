@@ -3,8 +3,19 @@ name: Rails App Cache Benchmark
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: one-benchmark-rails-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
+  BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+  BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+  BENCHMARK_WORKSPACE: boringcache/one-benchmarks
+  RAILS_APP_DIR: examples/rails_app
   BUILDX_CACHE_DIR: /tmp/.buildx-cache
 
 jobs:
@@ -15,7 +26,9 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -35,9 +48,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libyaml-dev libsqlite3-dev libvips42 pkg-config
       - name: Bundle install
+        working-directory: ${{ env.RAILS_APP_DIR }}
         run: |
           umask 022
-          cd examples/rails_app
           bundle config path vendor/bundle
           START_TIME=$(date +%s%N)
           bundle install --jobs 4 --retry 3
@@ -61,40 +74,33 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4.4"
 
-      - name: Cache CLI and gems (boringcache)
+      - name: Restore bundle cache with boringcache/one
         uses: ./
         id: cache-batch
         with:
-          workspace: boringcache/actions
-          entries: "boringcache-cli-${{ matrix.run }}:/usr/local/bin/boringcache,gems-boring-${{ matrix.run }}:examples/rails_app/vendor/bundle"
+          setup: external
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ${{ env.RAILS_APP_DIR }}
+          entries: ${{ format('rails-bundle-{0}:vendor/bundle', matrix.run) }}
           exclude: '*.out'
-
-      - name: Ensure BoringCache CLI
-        run: |
-          if ! command -v boringcache >/dev/null 2>&1; then
-            curl -sSL https://install.boringcache.com/install.sh | sh
-          else
-            echo "boringcache CLI already installed"
-          fi
-
-      - name: Authenticate BoringCache CLI
-        run: boringcache auth --token ${{ env.BORINGCACHE_API_TOKEN }}
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libyaml-dev libsqlite3-dev libvips42 pkg-config
       - name: Bundle install
+        working-directory: ${{ env.RAILS_APP_DIR }}
         run: |
           umask 022
-          cd examples/rails_app
           bundle config path vendor/bundle
           START_TIME=$(date +%s%N)
           bundle install --jobs 4 --retry 3
@@ -118,7 +124,9 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -136,9 +144,9 @@ jobs:
       - name: Build Docker image
         env:
           CACHE_DIR: ${{ env.BUILDX_CACHE_DIR }}
+        working-directory: ${{ env.RAILS_APP_DIR }}
         run: |
           umask 022
-          cd examples/rails_app
           CACHE_READ_DIR="${CACHE_DIR}"
           CACHE_WRITE_DIR="${CACHE_DIR}-new"
           rm -rf "${CACHE_WRITE_DIR}"
@@ -167,35 +175,28 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Restore CLI and Docker cache (boringcache)
+      - name: Restore Docker layer cache with boringcache/one
         uses: ./
         id: cache-batch-docker
         with:
-          workspace: boringcache/actions
-          entries: ${{ format('boringcache-cli-{0}:/usr/local/bin/boringcache,docker-boring-rails-{0}:{1}=>{1}-new', matrix.run, env.BUILDX_CACHE_DIR) }}
-
-      - name: Ensure BoringCache CLI
-        run: |
-          if ! command -v boringcache >/dev/null 2>&1; then
-            curl -sSL https://install.boringcache.com/install.sh | sh
-          else
-            echo "boringcache CLI already installed"
-          fi
-
-      - name: Authenticate BoringCache CLI
-        run: boringcache auth --token ${{ env.BORINGCACHE_API_TOKEN }}
+          setup: external
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ${{ env.RAILS_APP_DIR }}
+          entries: ${{ format('rails-docker-{0}:{1}=>{1}-new', matrix.run, env.BUILDX_CACHE_DIR) }}
 
       - name: Build Docker image
         env:
           CACHE_DIR: ${{ env.BUILDX_CACHE_DIR }}
+        working-directory: ${{ env.RAILS_APP_DIR }}
         run: |
           umask 022
-          cd examples/rails_app
           CACHE_READ_DIR="${CACHE_DIR}"
           CACHE_WRITE_DIR="${CACHE_DIR}-new"
           rm -rf "${CACHE_WRITE_DIR}"

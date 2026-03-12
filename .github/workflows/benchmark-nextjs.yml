@@ -3,8 +3,19 @@ name: Next.js Cache Benchmark
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: one-benchmark-nextjs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
+  BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+  BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+  BENCHMARK_WORKSPACE: boringcache/one-benchmarks
+  NEXTJS_APP_DIR: examples/nextjs_app
   BUILDX_CACHE_DIR: /tmp/.buildx-cache
 
 jobs:
@@ -15,10 +26,12 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -34,8 +47,8 @@ jobs:
             node-mods-actions-${{ runner.os }}-
 
       - name: Install dependencies
+        working-directory: ${{ env.NEXTJS_APP_DIR }}
         run: |
-          cd examples/nextjs_app
           START_TIME=$(date +%s%N)
           yarn install --frozen-lockfile
           END_TIME=$(date +%s%N)
@@ -57,37 +70,30 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
       - name: Enable Corepack
         run: corepack enable
 
-      - name: Restore CLI and node_modules (boringcache)
+      - name: Restore node_modules with boringcache/one
         uses: ./
         id: cache-batch-next
         with:
-          workspace: boringcache/actions
-          entries: "boringcache-cli-${{ matrix.run }}:/usr/local/bin/boringcache,node-mods-boring-next-${{ matrix.run }}:examples/nextjs_app/node_modules"
-
-      - name: Ensure BoringCache CLI
-        run: |
-          if ! command -v boringcache >/dev/null 2>&1; then
-            curl -sSL https://install.boringcache.com/install.sh | sh
-          else
-            echo "boringcache CLI already installed"
-          fi
-
-      - name: Authenticate BoringCache CLI
-        run: boringcache auth --token ${{ env.BORINGCACHE_API_TOKEN }}
+          setup: external
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ${{ env.NEXTJS_APP_DIR }}
+          entries: ${{ format('nextjs-node-modules-{0}:node_modules', matrix.run) }}
 
       - name: Install dependencies
+        working-directory: ${{ env.NEXTJS_APP_DIR }}
         run: |
-          cd examples/nextjs_app
           START_TIME=$(date +%s%N)
           yarn install --frozen-lockfile
           END_TIME=$(date +%s%N)
@@ -109,7 +115,9 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -127,9 +135,9 @@ jobs:
       - name: Build Docker image
         env:
           CACHE_DIR: ${{ env.BUILDX_CACHE_DIR }}
+        working-directory: ${{ env.NEXTJS_APP_DIR }}
         run: |
           umask 022
-          cd examples/nextjs_app
           CACHE_READ_DIR="${CACHE_DIR}"
           CACHE_WRITE_DIR="${CACHE_DIR}-new"
           rm -rf "${CACHE_WRITE_DIR}"
@@ -158,35 +166,28 @@ jobs:
         run: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Restore CLI and Docker cache (boringcache)
+      - name: Restore Docker layer cache with boringcache/one
         uses: ./
         id: cache-batch-docker-next
         with:
-          workspace: boringcache/actions
-          entries: ${{ format('boringcache-cli-{0}:/usr/local/bin/boringcache,docker-boring-next-{0}:{1}=>{1}-new', matrix.run, env.BUILDX_CACHE_DIR) }}
-
-      - name: Ensure BoringCache CLI
-        run: |
-          if ! command -v boringcache >/dev/null 2>&1; then
-            curl -sSL https://install.boringcache.com/install.sh | sh
-          else
-            echo "boringcache CLI already installed"
-          fi
-
-      - name: Authenticate BoringCache CLI
-        run: boringcache auth --token ${{ env.BORINGCACHE_API_TOKEN }}
+          setup: external
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ${{ env.NEXTJS_APP_DIR }}
+          entries: ${{ format('nextjs-docker-{0}:{1}=>{1}-new', matrix.run, env.BUILDX_CACHE_DIR) }}
 
       - name: Build Docker image
         env:
           CACHE_DIR: ${{ env.BUILDX_CACHE_DIR }}
+        working-directory: ${{ env.NEXTJS_APP_DIR }}
         run: |
           umask 022
-          cd examples/nextjs_app
           CACHE_READ_DIR="${CACHE_DIR}"
           CACHE_WRITE_DIR="${CACHE_DIR}-new"
           rm -rf "${CACHE_WRITE_DIR}"

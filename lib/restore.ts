@@ -75,6 +75,7 @@ async function restoreEntries(
 }
 
 export async function run(): Promise<void> {
+  const originalCwd = process.cwd();
   try {
     const inputs = getInputs();
     const plan = await buildPlan(inputs);
@@ -127,6 +128,8 @@ export async function run(): Promise<void> {
     core.saveState('verbose', String(inputs.verbose));
   } catch (error) {
     core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    process.chdir(originalCwd);
   }
 }
 

@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: one-release-${{ github.workflow }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     name: Build and Release Action
@@ -40,13 +44,14 @@ jobs:
           echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: "npm"
@@ -94,15 +99,15 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: "BoringCache Action ${{ env.RELEASE_TAG }}"
+          name: "BoringCache One ${{ env.RELEASE_TAG }}"
           body: |
-            **Cache once. Reuse everywhere.**
+            **One action for the BoringCache product suite.**
 
-            A universal build cache for CI, Docker, and local dev. Reuse what you already built—without re-uploading.
+            A single GitHub Action entrypoint for archive caching, mise-powered tool setup, and proxy-backed Docker, BuildKit, Bazel, Gradle, Turbo, and Rust+sccache flows.
 
-            Drop-in replacement for `actions/cache` with portable, verified archives.
+            Includes the bundled release artifact for this tag.
 
-            See [README](https://github.com/boringcache/action) for usage and migration guide.
+            See [README](https://github.com/boringcache/one-action) for usage.
           draft: false
           prerelease: false
           files: ./release-package.tar.gz

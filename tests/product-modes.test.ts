@@ -30,6 +30,7 @@ describe('product modes', () => {
       mockGetInput({
         mode: 'docker',
         setup: 'none',
+        workspace: 'boringcache/test-workspace',
         'working-directory': project,
         image: 'ghcr.io/boringcache/demo',
       });
@@ -39,7 +40,7 @@ describe('product modes', () => {
 
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'docker-registry',
-        workspace: 'default/default',
+        workspace: 'boringcache/test-workspace',
       }));
       expect(exec.exec).toHaveBeenCalledWith(
         'docker',

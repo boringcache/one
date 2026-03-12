@@ -2,6 +2,13 @@
 
 One action for the BoringCache product suite.
 
+Defaults are opinionated:
+
+- `setup: mise`
+- `mode: auto`
+
+In most workflows you only set `workspace` plus one of `entries`, `preset`, or a mode-specific input such as `image`.
+
 Use `boringcache/one` when you want a single GitHub Action entrypoint for:
 
 - archive caching
@@ -17,6 +24,8 @@ Choose this if you want BoringCache to feel closer to a buildpack:
 - restore the right cache or start the right proxy
 - run the build with one action entrypoint
 - save on the way out
+
+You usually do not need to set `setup` or `mode` unless you want a specific adapter such as Docker, Bazel, Gradle, Turbo, or Rust+sccache.
 
 ## Quick start
 
@@ -94,6 +103,18 @@ Rust with remote sccache:
 
 For Docker and BuildKit, `one` uses the runner's Docker/Buildx environment rather than trying to install a container daemon through `mise`. In practice that means `one` can create builders and manage cache flow for you, but the runner still needs Docker support.
 
+## Mode model
+
+- One invocation of `boringcache/one` runs one primary `mode`
+- That invocation can still install multiple tools through `mise`
+- That invocation can also restore generic archive entries alongside the primary mode
+
+In practice:
+
+- Ruby plus Node is one step
+- Docker plus Rails tooling can be one step
+- Bazel plus Gradle should be separate `boringcache/one` steps in the same job
+
 ## Trust model
 
 - On `pull_request` jobs, restore can run with `BORINGCACHE_RESTORE_TOKEN`
@@ -105,8 +126,8 @@ For Docker and BuildKit, `one` uses the runner's Docker/Buildx environment rathe
 
 | Input | Description |
 |-------|-------------|
-| `setup` | `mise`, `external`, or `none`. |
-| `mode` | `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `turbo-proxy`, or `rust-sccache`. |
+| `setup` | `mise`, `external`, or `none`. Defaults to `mise`. |
+| `mode` | `auto`, `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `turbo-proxy`, or `rust-sccache`. Defaults to `auto`. |
 | `preset` | `none`, `rails`, or `node-turbo`. |
 | `workspace` | Workspace in `org/repo` form. Defaults to the repository name. |
 | `working-directory` | Project root used for detection and relative paths. |

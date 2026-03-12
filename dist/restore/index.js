@@ -43900,6 +43900,7 @@ async function restoreEntries(workspace, entriesString, flagArgs, allowRestoreKe
 }
 async function run() {
     var _a;
+    const originalCwd = process.cwd();
     try {
         const inputs = (0, utils_1.getInputs)();
         const plan = await (0, utils_1.buildPlan)(inputs);
@@ -43934,6 +43935,9 @@ async function run() {
     }
     catch (error) {
         core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    finally {
+        process.chdir(originalCwd);
     }
 }
 if (require.main === require.cache[eval('__filename')]) {
