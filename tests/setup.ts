@@ -6,7 +6,10 @@ const mockExecBoringCache = jest.fn();
 const mockInstallMise = jest.fn();
 const mockInstallMiseTool = jest.fn();
 const mockActivateMiseTool = jest.fn();
+const mockReshimMise = jest.fn();
+const mockReadProjectMiseTools = jest.fn();
 const mockReadMiseTomlVersion = jest.fn();
+const mockReadToolVersionsValue = jest.fn();
 const mockStartRegistryProxy = jest.fn();
 const mockWaitForProxy = jest.fn();
 const mockStopRegistryProxy = jest.fn();
@@ -54,7 +57,10 @@ jest.mock('@boringcache/action-core', () => {
     installMise: mockInstallMise,
     installMiseTool: mockInstallMiseTool,
     activateMiseTool: mockActivateMiseTool,
+    reshimMise: mockReshimMise,
+    readProjectMiseTools: mockReadProjectMiseTools,
     readMiseTomlVersion: mockReadMiseTomlVersion,
+    readToolVersionsValue: mockReadToolVersionsValue,
     startRegistryProxy: mockStartRegistryProxy,
     waitForProxy: mockWaitForProxy,
     stopRegistryProxy: mockStopRegistryProxy,
@@ -84,7 +90,10 @@ beforeEach(() => {
   mockInstallMise.mockResolvedValue(undefined);
   mockInstallMiseTool.mockResolvedValue(undefined);
   mockActivateMiseTool.mockResolvedValue(undefined);
+  mockReshimMise.mockResolvedValue(undefined);
+  mockReadProjectMiseTools.mockResolvedValue([]);
   mockReadMiseTomlVersion.mockResolvedValue(null);
+  mockReadToolVersionsValue.mockResolvedValue(null);
   mockStartRegistryProxy.mockResolvedValue({ pid: 4321, port: 5000, readOnly: false });
   mockWaitForProxy.mockResolvedValue(undefined);
   mockStopRegistryProxy.mockResolvedValue(undefined);
@@ -115,8 +124,11 @@ export const actionCoreMocks = {
   execBoringCache: mockExecBoringCache,
   installMise: mockInstallMise,
   installMiseTool: mockInstallMiseTool,
+  reshimMise: mockReshimMise,
   findAvailablePort: mockFindAvailablePort,
   readMiseTomlVersion: mockReadMiseTomlVersion,
+  readProjectMiseTools: mockReadProjectMiseTools,
+  readToolVersionsValue: mockReadToolVersionsValue,
   startRegistryProxy: mockStartRegistryProxy,
   stopRegistryProxy: mockStopRegistryProxy,
   waitForProxy: mockWaitForProxy,

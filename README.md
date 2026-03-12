@@ -41,6 +41,10 @@ Archive caching:
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
+With the default `setup: mise`, `boringcache/one` resolves project tools from `mise.toml`, `.tool-versions`, and common version files such as `.ruby-version`, `.python-version`, `.go-version`, `.nvmrc`, and `rust-toolchain`. Use `tools` only when you want to override or add to what the project already declares.
+
+When `cache-runtime: true`, `one` caches `mise` installs and rebuilds shims after restore. It does not archive the shim directory itself.
+
 Mise-powered Rails-style workflow:
 
 ```yaml
@@ -136,7 +140,7 @@ In practice:
 | `working-directory` | Project root used for detection and relative paths. |
 | `cache-tag` | Optional cache tag or prefix override. |
 | `tools` | Explicit `mise` tools in `tool@version` form. |
-| `cache-runtime` | Cache the `mise` runtime directory. |
+| `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
 | `cli-version` | BoringCache CLI version to install. Set to `skip` to disable automatic CLI setup. |
 
 ## Archive inputs

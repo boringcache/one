@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { getMiseDataDir } from '@boringcache/action-core';
+import { getMiseInstallsDir } from '@boringcache/action-core';
 import {
   applyMiseSetup,
   buildPlan,
@@ -82,11 +82,82 @@ describe('one utils', () => {
 
       expect(plan.mode).toBe('archive');
       expect(plan.runtimeTools).toEqual([
-        { name: 'ruby', version: '3.3.6', label: 'Ruby', source: 'preset' },
-        { name: 'node', version: '22.4.1', label: 'Node.js', source: 'preset' },
+        { name: 'ruby', version: '3.3.6', label: 'Ruby', source: 'project' },
+        { name: 'node', version: '22.4.1', label: 'Node.js', source: 'project' },
       ]);
-      expect(plan.runtimeEntry).toBe(`bundler-mise-runtime-node-22.4.1-ruby-3.3.6:${getMiseDataDir()}`);
+      expect(plan.runtimeEntry).toBe(`bundler-mise-installs-node-22.4.1-ruby-3.3.6:${getMiseInstallsDir()}`);
       expect(plan.archiveEntries).toContain('bundler-node-22.4.1-ruby-3.3.6:vendor/bundle');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('auto-detects project tools for archive mode from mise config', async () => {
+    actionCoreMocks.readProjectMiseTools.mockResolvedValue([
+      { name: 'ruby', version: '4.0.1' },
+      { name: 'pnpm', version: '9.15.1' },
+    ]);
+
+    const plan = await buildPlan(buildInputs({
+      preset: 'none',
+      mode: 'auto',
+      cacheRuntime: true,
+      entries: 'bundler:vendor/bundle',
+    }));
+
+    expect(plan.mode).toBe('archive');
+    expect(plan.runtimeTools).toEqual([
+      { name: 'ruby', version: '4.0.1', label: 'Ruby', source: 'project' },
+      { name: 'pnpm', version: '9.15.1', label: 'pnpm', source: 'project' },
+    ]);
+    expect(plan.runtimeEntry).toBe(`bundler-mise-installs-pnpm-9.15.1-ruby-4.0.1:${getMiseInstallsDir()}`);
+  });
+
+  it('prefers project-defined versions over preset detection', async () => {
+    const project = await makeTempProject({
+      '.ruby-version': '3.3.6\n',
+      'package.json': '{"name":"demo"}\n',
+    });
+
+    actionCoreMocks.readProjectMiseTools.mockResolvedValue([
+      { name: 'ruby', version: '4.0.1' },
+      { name: 'node', version: '22.4.1' },
+    ]);
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        preset: 'rails',
+        workingDirectory: project,
+        cacheRuntime: true,
+        entries: 'bundler:vendor/bundle',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'ruby', version: '4.0.1', label: 'Ruby', source: 'project' },
+        { name: 'node', version: '22.4.1', label: 'Node.js', source: 'project' },
+      ]);
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('falls back to idiomatic version files when project config tools are absent', async () => {
+    const project = await makeTempProject({
+      '.python-version': '3.12.2\n',
+      '.go-version': '1.24.0\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        workingDirectory: project,
+        cacheRuntime: true,
+        entries: 'pip:.venv',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'python', version: '3.12.2', label: 'Python', source: 'project' },
+        { name: 'go', version: '1.24.0', label: 'Go', source: 'project' },
+      ]);
     } finally {
       await removeTempProject(project);
     }
@@ -106,7 +177,7 @@ describe('one utils', () => {
 
       expect(plan.mode).toBe('gradle');
       expect(plan.runtimeTools).toEqual([
-        { name: 'java', version: '21', label: 'Java', source: 'mode' },
+        { name: 'java', version: '21', label: 'Java', source: 'project' },
       ]);
     } finally {
       await removeTempProject(project);
@@ -125,6 +196,7 @@ describe('one utils', () => {
       { label: 'Node.js' },
     );
     expect(actionCoreMocks.activateMiseTool).not.toHaveBeenCalled();
+    expect(actionCoreMocks.reshimMise).toHaveBeenCalledTimes(1);
   });
 
   it('activates tools when the runtime cache hits', async () => {
@@ -139,6 +211,7 @@ describe('one utils', () => {
       { label: 'Ruby' },
     );
     expect(actionCoreMocks.installMiseTool).not.toHaveBeenCalled();
+    expect(actionCoreMocks.reshimMise).toHaveBeenCalledTimes(1);
   });
 
   it('uses readable runtime tool versions in the cache tag', () => {
@@ -147,7 +220,7 @@ describe('one utils', () => {
       { name: 'node', version: '22.4.1', label: 'Node.js', source: 'preset' },
     ]);
 
-    expect(entry).toBe(`rails-mise-runtime-node-22.4.1-ruby-3.3.6:${getMiseDataDir()}`);
+    expect(entry).toBe(`rails-mise-installs-node-22.4.1-ruby-3.3.6:${getMiseInstallsDir()}`);
   });
 
   it('scopes explicit archive entries to resolved mise tool versions', async () => {
@@ -157,7 +230,7 @@ describe('one utils', () => {
       entries: 'bundler:vendor/bundle',
     }));
 
-    expect(plan.runtimeEntry).toBe(`bundler-mise-runtime-ruby-4.0.1:${getMiseDataDir()}`);
+    expect(plan.runtimeEntry).toBe(`bundler-mise-installs-ruby-4.0.1:${getMiseInstallsDir()}`);
     expect(plan.archiveEntries).toBe('bundler-ruby-4.0.1:vendor/bundle');
   });
 

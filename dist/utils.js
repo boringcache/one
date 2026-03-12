@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseEntries = exports.installMiseTool = exports.installMise = exports.getMiseDataDir = exports.execBoringCache = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
+exports.parseEntries = exports.installMiseTool = exports.installMise = exports.getMiseInstallsDir = exports.execBoringCache = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
 exports.normalizeSetup = normalizeSetup;
 exports.normalizePreset = normalizePreset;
@@ -59,22 +59,29 @@ Object.defineProperty(exports, "activateMiseTool", { enumerable: true, get: func
 Object.defineProperty(exports, "convertCacheFormatToEntries", { enumerable: true, get: function () { return action_core_1.convertCacheFormatToEntries; } });
 Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return action_core_1.ensureBoringCache; } });
 Object.defineProperty(exports, "execBoringCache", { enumerable: true, get: function () { return action_core_1.execBoringCache; } });
-Object.defineProperty(exports, "getMiseDataDir", { enumerable: true, get: function () { return action_core_1.getMiseDataDir; } });
+Object.defineProperty(exports, "getMiseInstallsDir", { enumerable: true, get: function () { return action_core_1.getMiseInstallsDir; } });
 Object.defineProperty(exports, "installMise", { enumerable: true, get: function () { return action_core_1.installMise; } });
 Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: function () { return action_core_1.installMiseTool; } });
 Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return action_core_1.parseEntries; } });
 const modes_1 = require("./modes");
 const TOOL_LABELS = {
     bazel: 'Bazel',
+    bun: 'Bun',
     elixir: 'Elixir',
     erlang: 'Erlang',
     go: 'Go',
+    gradle: 'Gradle',
     java: 'Java',
+    maven: 'Maven',
     node: 'Node.js',
     nodejs: 'Node.js',
+    npm: 'npm',
+    pnpm: 'pnpm',
     python: 'Python',
     ruby: 'Ruby',
     rust: 'Rust',
+    turbo: 'Turbo',
+    yarn: 'Yarn',
 };
 function getInputs() {
     return {
@@ -158,9 +165,37 @@ async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirec
         return [];
     }
     const explicitTools = parseToolSpecs(toolsInput);
+    const projectTools = await detectProjectTools(workingDirectory);
     const presetTools = await detectPresetTools(preset, workingDirectory);
     const modeTools = await detectModeTools(mode, workingDirectory);
-    return mergeTools(explicitTools, presetTools, modeTools);
+    return mergeTools(explicitTools, projectTools, presetTools, modeTools);
+}
+async function detectProjectTools(workingDirectory) {
+    const tools = new Map();
+    for (const tool of await (0, action_core_1.readProjectMiseTools)(workingDirectory)) {
+        const normalizedName = normalizeToolName(tool.name);
+        tools.set(normalizedName, {
+            name: normalizedName,
+            version: tool.version,
+            label: TOOL_LABELS[normalizedName] || tool.name,
+            source: 'project',
+        });
+    }
+    const detectedTools = await Promise.all([
+        detectToolFromProjectFiles(workingDirectory, 'ruby', detectRubyVersion),
+        detectToolFromProjectFiles(workingDirectory, 'node', detectNodeVersion),
+        detectToolFromProjectFiles(workingDirectory, 'python', detectPythonVersion),
+        detectToolFromProjectFiles(workingDirectory, 'go', detectGoVersion),
+        detectToolFromProjectFiles(workingDirectory, 'java', detectJavaVersion),
+        detectToolFromProjectFiles(workingDirectory, 'bazel', detectBazelVersion),
+        detectToolFromProjectFiles(workingDirectory, 'rust', detectRustVersion),
+    ]);
+    for (const tool of detectedTools) {
+        if (tool && !tools.has(tool.name)) {
+            tools.set(tool.name, tool);
+        }
+    }
+    return Array.from(tools.values());
 }
 async function detectPresetTools(preset, workingDirectory) {
     switch (preset) {
@@ -233,7 +268,7 @@ async function detectRubyVersion(workingDirectory) {
     if (rubyVersion) {
         return rubyVersion;
     }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'ruby');
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'ruby');
     if (toolVersion) {
         return toolVersion;
     }
@@ -248,8 +283,8 @@ async function detectNodeVersion(workingDirectory) {
     if (nvmVersion) {
         return nvmVersion.replace(/^v/, '');
     }
-    const toolVersion = (await readToolVersionsValue(workingDirectory, 'nodejs'))
-        || (await readToolVersionsValue(workingDirectory, 'node'));
+    const toolVersion = (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'nodejs'))
+        || (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'node'));
     if (toolVersion) {
         return toolVersion;
     }
@@ -261,18 +296,42 @@ async function detectBazelVersion(workingDirectory) {
     if (bazelVersion) {
         return bazelVersion;
     }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'bazel');
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'bazel');
     if (toolVersion) {
         return toolVersion;
     }
     return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'bazel');
+}
+async function detectPythonVersion(workingDirectory) {
+    const pythonVersion = await readFirstLine(path.join(workingDirectory, '.python-version'));
+    if (pythonVersion) {
+        return pythonVersion;
+    }
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'python');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'python');
+}
+async function detectGoVersion(workingDirectory) {
+    const goVersion = await readFirstLine(path.join(workingDirectory, '.go-version'));
+    if (goVersion) {
+        return goVersion;
+    }
+    const toolVersion = (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'go'))
+        || (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'golang'));
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'go'))
+        || (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'golang'));
 }
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
     if (javaVersion) {
         return javaVersion;
     }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'java');
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'java');
     if (toolVersion) {
         return toolVersion;
     }
@@ -290,11 +349,23 @@ async function detectRustVersion(workingDirectory) {
     if (rustToolchain) {
         return rustToolchain;
     }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'rust');
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'rust');
     if (toolVersion) {
         return toolVersion;
     }
     return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'rust');
+}
+async function detectToolFromProjectFiles(workingDirectory, toolName, detector) {
+    const version = await detector(workingDirectory);
+    if (!version) {
+        return null;
+    }
+    return {
+        name: normalizeToolName(toolName),
+        version,
+        label: TOOL_LABELS[normalizeToolName(toolName)] || toolName,
+        source: 'project',
+    };
 }
 async function readFirstLine(filePath) {
     try {
@@ -309,23 +380,6 @@ async function readFirstLine(filePath) {
 async function readFile(filePath) {
     try {
         return await fs.promises.readFile(filePath, 'utf-8');
-    }
-    catch {
-        return null;
-    }
-}
-async function readToolVersionsValue(workingDirectory, toolName) {
-    var _a;
-    try {
-        const content = await fs.promises.readFile(path.join(workingDirectory, '.tool-versions'), 'utf-8');
-        const line = content
-            .split('\n')
-            .map((value) => value.trim())
-            .find((value) => value.startsWith(`${toolName} `));
-        if (!line) {
-            return null;
-        }
-        return ((_a = line.split(/\s+/)[1]) === null || _a === void 0 ? void 0 : _a.trim()) || null;
     }
     catch {
         return null;
@@ -362,13 +416,19 @@ function mergeTools(...toolSets) {
 }
 function normalizeToolName(name) {
     const normalized = name.trim().toLowerCase();
-    return normalized === 'nodejs' ? 'node' : normalized;
+    if (normalized === 'nodejs') {
+        return 'node';
+    }
+    if (normalized === 'golang') {
+        return 'go';
+    }
+    return normalized;
 }
 function buildRuntimeCacheEntry(cacheTagPrefix, tools) {
     if (tools.length === 0) {
         return null;
     }
-    return `${cacheTagPrefix}-mise-runtime-${buildRuntimeToolTag(tools)}:${(0, action_core_1.getMiseDataDir)()}`;
+    return `${cacheTagPrefix}-mise-installs-${buildRuntimeToolTag(tools)}:${(0, action_core_1.getMiseInstallsDir)()}`;
 }
 function slugTagPart(value) {
     const normalized = value
@@ -525,6 +585,7 @@ async function applyMiseSetup(runtimeTools, runtimeCacheHit) {
             await (0, action_core_1.installMiseTool)(tool.name, tool.version, { label: tool.label });
         }
     }
+    await (0, action_core_1.reshimMise)();
 }
 function serializeTools(runtimeTools) {
     return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');
