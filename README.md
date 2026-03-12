@@ -129,7 +129,7 @@ In practice:
 | `setup` | `mise`, `external`, or `none`. Defaults to `mise`. |
 | `mode` | `auto`, `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `turbo-proxy`, or `rust-sccache`. Defaults to `auto`. |
 | `preset` | `none`, `rails`, or `node-turbo`. |
-| `workspace` | Workspace in `org/repo` form. Defaults to the repository name. |
+| `workspace` | Workspace in `org/repo` form. Defaults to `BORINGCACHE_DEFAULT_WORKSPACE`, then the repository name. |
 | `working-directory` | Project root used for detection and relative paths. |
 | `cache-tag` | Optional cache tag or prefix override. |
 | `tools` | Explicit `mise` tools in `tool@version` form. |

@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -152,7 +151,7 @@ export function normalizePreset(value: string): Preset {
 export function resolveWorkspace(workspace: string): string {
   const resolved = workspace
     ? workspace.includes('/') ? workspace : `default/${workspace}`
-    : getInputsWorkspace({});
+    : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || getInputsWorkspace({}));
   if (!resolved.includes('/')) {
     return `default/${resolved}`;
   }
@@ -439,20 +438,62 @@ export function buildRuntimeCacheEntry(cacheTagPrefix: string, tools: ToolSpec[]
     return null;
   }
 
-  const fingerprint = tools
-    .map((tool) => `${tool.name}@${tool.version}`)
-    .sort()
-    .join(',');
-  const digest = crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 12);
-  return `${cacheTagPrefix}-mise-runtime-${digest}:${getMiseDataDir()}`;
+  return `${cacheTagPrefix}-mise-runtime-${buildRuntimeToolTag(tools)}:${getMiseDataDir()}`;
 }
 
-export function buildArchiveEntries(inputs: OneInputs): { entries: string; usesCacheFormat: boolean } {
+function slugTagPart(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '');
+
+  return normalized || 'unknown';
+}
+
+function buildRuntimeToolTag(tools: ToolSpec[]): string {
+  return tools
+    .map((tool) => `${slugTagPart(tool.name)}-${slugTagPart(tool.version)}`)
+    .sort()
+    .join('-');
+}
+
+function scopeTagToRuntimeTools(tag: string, tools: ToolSpec[]): string {
+  const runtimeTag = buildRuntimeToolTag(tools);
+  if (!runtimeTag || tag === runtimeTag || tag.endsWith(`-${runtimeTag}`)) {
+    return tag;
+  }
+  return `${tag}-${runtimeTag}`;
+}
+
+function scopeArchiveEntries(entries: string, tools: ToolSpec[]): string {
+  if (!entries.trim() || tools.length === 0) {
+    return entries;
+  }
+
+  return parseEntries(entries, 'restore', { resolvePaths: false })
+    .map((entry) => {
+      const scopedTag = scopeTagToRuntimeTools(entry.tag, tools);
+      const pathSpec = entry.restorePath === entry.savePath
+        ? entry.restorePath
+        : `${entry.restorePath}=>${entry.savePath}`;
+      return `${scopedTag}:${pathSpec}`;
+    })
+    .join(',');
+}
+
+export function buildArchiveEntries(
+  inputs: OneInputs,
+  runtimeTools: ToolSpec[],
+): { entries: string; usesCacheFormat: boolean } {
   let archiveEntries = '';
   let usesCacheFormat = false;
 
   if (inputs.entries) {
-    archiveEntries = inputs.entries;
+    archiveEntries = inputs.setup === 'mise'
+      ? scopeArchiveEntries(inputs.entries, runtimeTools)
+      : inputs.entries;
   } else if (inputs.path || inputs.key) {
     if (!inputs.path || !inputs.key) {
       throw new Error('actions/cache compatibility mode requires both path and key');
@@ -521,7 +562,7 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     ? buildRuntimeCacheEntry(getCacheTagPrefix(inputs, runtimeTools), runtimeTools)
     : null;
 
-  const archiveEntries = buildArchiveEntries(inputs);
+  const archiveEntries = buildArchiveEntries(inputs, runtimeTools);
   validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
 
   return {

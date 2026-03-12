@@ -51,7 +51,6 @@ exports.serializeTools = serializeTools;
 exports.getRestoreKeyCandidates = getRestoreKeyCandidates;
 exports.getPlatformSuffix = getPlatformSuffix;
 const core = __importStar(require("@actions/core"));
-const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
@@ -128,7 +127,7 @@ function normalizePreset(value) {
 function resolveWorkspace(workspace) {
     const resolved = workspace
         ? workspace.includes('/') ? workspace : `default/${workspace}`
-        : (0, action_core_1.getInputsWorkspace)({});
+        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || (0, action_core_1.getInputsWorkspace)({}));
     if (!resolved.includes('/')) {
         return `default/${resolved}`;
     }
@@ -369,18 +368,51 @@ function buildRuntimeCacheEntry(cacheTagPrefix, tools) {
     if (tools.length === 0) {
         return null;
     }
-    const fingerprint = tools
-        .map((tool) => `${tool.name}@${tool.version}`)
-        .sort()
-        .join(',');
-    const digest = crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 12);
-    return `${cacheTagPrefix}-mise-runtime-${digest}:${(0, action_core_1.getMiseDataDir)()}`;
+    return `${cacheTagPrefix}-mise-runtime-${buildRuntimeToolTag(tools)}:${(0, action_core_1.getMiseDataDir)()}`;
 }
-function buildArchiveEntries(inputs) {
+function slugTagPart(value) {
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[.-]+|[.-]+$/g, '');
+    return normalized || 'unknown';
+}
+function buildRuntimeToolTag(tools) {
+    return tools
+        .map((tool) => `${slugTagPart(tool.name)}-${slugTagPart(tool.version)}`)
+        .sort()
+        .join('-');
+}
+function scopeTagToRuntimeTools(tag, tools) {
+    const runtimeTag = buildRuntimeToolTag(tools);
+    if (!runtimeTag || tag === runtimeTag || tag.endsWith(`-${runtimeTag}`)) {
+        return tag;
+    }
+    return `${tag}-${runtimeTag}`;
+}
+function scopeArchiveEntries(entries, tools) {
+    if (!entries.trim() || tools.length === 0) {
+        return entries;
+    }
+    return (0, action_core_1.parseEntries)(entries, 'restore', { resolvePaths: false })
+        .map((entry) => {
+        const scopedTag = scopeTagToRuntimeTools(entry.tag, tools);
+        const pathSpec = entry.restorePath === entry.savePath
+            ? entry.restorePath
+            : `${entry.restorePath}=>${entry.savePath}`;
+        return `${scopedTag}:${pathSpec}`;
+    })
+        .join(',');
+}
+function buildArchiveEntries(inputs, runtimeTools) {
     let archiveEntries = '';
     let usesCacheFormat = false;
     if (inputs.entries) {
-        archiveEntries = inputs.entries;
+        archiveEntries = inputs.setup === 'mise'
+            ? scopeArchiveEntries(inputs.entries, runtimeTools)
+            : inputs.entries;
     }
     else if (inputs.path || inputs.key) {
         if (!inputs.path || !inputs.key) {
@@ -428,7 +460,7 @@ async function buildPlan(inputs) {
     const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
         ? buildRuntimeCacheEntry(getCacheTagPrefix(inputs, runtimeTools), runtimeTools)
         : null;
-    const archiveEntries = buildArchiveEntries(inputs);
+    const archiveEntries = buildArchiveEntries(inputs, runtimeTools);
     validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
     return {
         workspace,

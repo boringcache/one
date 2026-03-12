@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import { getMiseDataDir } from '@boringcache/action-core';
 import {
   applyMiseSetup,
   buildPlan,
@@ -84,8 +85,8 @@ describe('one utils', () => {
         { name: 'ruby', version: '3.3.6', label: 'Ruby', source: 'preset' },
         { name: 'node', version: '22.4.1', label: 'Node.js', source: 'preset' },
       ]);
-      expect(plan.runtimeEntry).toContain('-mise-runtime-');
-      expect(plan.archiveEntries).toContain('bundler:vendor/bundle');
+      expect(plan.runtimeEntry).toBe(`bundler-mise-runtime-node-22.4.1-ruby-3.3.6:${getMiseDataDir()}`);
+      expect(plan.archiveEntries).toContain('bundler-node-22.4.1-ruby-3.3.6:vendor/bundle');
     } finally {
       await removeTempProject(project);
     }
@@ -140,12 +141,36 @@ describe('one utils', () => {
     expect(actionCoreMocks.installMiseTool).not.toHaveBeenCalled();
   });
 
-  it('hashes runtime tools into a stable cache tag', () => {
+  it('uses readable runtime tool versions in the cache tag', () => {
     const entry = buildRuntimeCacheEntry('rails', [
       { name: 'ruby', version: '3.3.6', label: 'Ruby', source: 'preset' },
       { name: 'node', version: '22.4.1', label: 'Node.js', source: 'preset' },
     ]);
 
-    expect(entry).toMatch(/^rails-mise-runtime-[0-9a-f]{12}:/);
+    expect(entry).toBe(`rails-mise-runtime-node-22.4.1-ruby-3.3.6:${getMiseDataDir()}`);
+  });
+
+  it('scopes explicit archive entries to resolved mise tool versions', async () => {
+    const plan = await buildPlan(buildInputs({
+      tools: 'ruby@4.0.1',
+      cacheRuntime: true,
+      entries: 'bundler:vendor/bundle',
+    }));
+
+    expect(plan.runtimeEntry).toBe(`bundler-mise-runtime-ruby-4.0.1:${getMiseDataDir()}`);
+    expect(plan.archiveEntries).toBe('bundler-ruby-4.0.1:vendor/bundle');
+  });
+
+  it('prefers BORINGCACHE_DEFAULT_WORKSPACE over the repository name', async () => {
+    process.env.BORINGCACHE_DEFAULT_WORKSPACE = 'boringcache/web';
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+
+    const plan = await buildPlan(buildInputs({
+      workspace: '',
+      tools: 'ruby@4.0.1',
+      entries: 'bundler:vendor/bundle',
+    }));
+
+    expect(plan.workspace).toBe('boringcache/web');
   });
 });

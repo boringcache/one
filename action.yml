@@ -19,7 +19,7 @@ inputs:
     default: 'none'
     required: false
   workspace:
-    description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses repository name.'
+    description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses BORINGCACHE_DEFAULT_WORKSPACE or the repository name.'
     required: false
   cache-tag:
     description: 'Optional cache tag or prefix. Defaults vary by mode.'
