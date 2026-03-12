@@ -52,7 +52,10 @@ Mise-powered Rails-style workflow:
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+    RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
 ```
+
+If the app uses Rails credentials, set `RAILS_MASTER_KEY` in the workflow environment for the Rails steps that run after `boringcache/one`. The Rails preset sets up Ruby and Node toolchains; it does not materialize app secrets for you.
 
 Docker build with cache:
 
