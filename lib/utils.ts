@@ -572,18 +572,39 @@ function scopeTagToRuntimeTools(tag: string, tools: ToolSpec[], versionScope: Mi
   return `${tag}-${runtimeTag}`;
 }
 
+function prefixArchiveTag(tag: string, cacheTag: string): string {
+  const prefix = cacheTag.trim();
+  if (!prefix) {
+    return tag;
+  }
+  if (tag === prefix || tag.startsWith(`${prefix}-`)) {
+    return tag;
+  }
+  return `${prefix}-${tag}`;
+}
+
 function scopeArchiveEntries(
   entries: string,
+  cacheTag: string,
   tools: ToolSpec[],
   versionScope: MiseVersionScope,
 ): string {
   if (!entries.trim() || tools.length === 0) {
-    return entries;
+    return parseEntries(entries, 'restore', { resolvePaths: false })
+      .map((entry) => {
+        const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
+        const pathSpec = entry.restorePath === entry.savePath
+          ? entry.restorePath
+          : `${entry.restorePath}=>${entry.savePath}`;
+        return `${prefixedTag}:${pathSpec}`;
+      })
+      .join(',');
   }
 
   return parseEntries(entries, 'restore', { resolvePaths: false })
     .map((entry) => {
-      const scopedTag = scopeTagToRuntimeTools(entry.tag, tools, versionScope);
+      const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
+      const scopedTag = scopeTagToRuntimeTools(prefixedTag, tools, versionScope);
       const pathSpec = entry.restorePath === entry.savePath
         ? entry.restorePath
         : `${entry.restorePath}=>${entry.savePath}`;
@@ -601,8 +622,8 @@ export function buildArchiveEntries(
 
   if (inputs.entries) {
     archiveEntries = inputs.setup === 'mise'
-      ? scopeArchiveEntries(inputs.entries, runtimeTools, inputs.toolVersionScope)
-      : inputs.entries;
+      ? scopeArchiveEntries(inputs.entries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
+      : scopeArchiveEntries(inputs.entries, inputs.cacheTag, [], inputs.toolVersionScope);
   } else if (inputs.path || inputs.key) {
     if (!inputs.path || !inputs.key) {
       throw new Error('actions/cache compatibility mode requires both path and key');

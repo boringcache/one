@@ -461,13 +461,32 @@ function scopeTagToRuntimeTools(tag, tools, versionScope) {
     }
     return `${tag}-${runtimeTag}`;
 }
-function scopeArchiveEntries(entries, tools, versionScope) {
+function prefixArchiveTag(tag, cacheTag) {
+    const prefix = cacheTag.trim();
+    if (!prefix) {
+        return tag;
+    }
+    if (tag === prefix || tag.startsWith(`${prefix}-`)) {
+        return tag;
+    }
+    return `${prefix}-${tag}`;
+}
+function scopeArchiveEntries(entries, cacheTag, tools, versionScope) {
     if (!entries.trim() || tools.length === 0) {
-        return entries;
+        return (0, action_core_1.parseEntries)(entries, 'restore', { resolvePaths: false })
+            .map((entry) => {
+            const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
+            const pathSpec = entry.restorePath === entry.savePath
+                ? entry.restorePath
+                : `${entry.restorePath}=>${entry.savePath}`;
+            return `${prefixedTag}:${pathSpec}`;
+        })
+            .join(',');
     }
     return (0, action_core_1.parseEntries)(entries, 'restore', { resolvePaths: false })
         .map((entry) => {
-        const scopedTag = scopeTagToRuntimeTools(entry.tag, tools, versionScope);
+        const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
+        const scopedTag = scopeTagToRuntimeTools(prefixedTag, tools, versionScope);
         const pathSpec = entry.restorePath === entry.savePath
             ? entry.restorePath
             : `${entry.restorePath}=>${entry.savePath}`;
@@ -480,8 +499,8 @@ function buildArchiveEntries(inputs, runtimeTools) {
     let usesCacheFormat = false;
     if (inputs.entries) {
         archiveEntries = inputs.setup === 'mise'
-            ? scopeArchiveEntries(inputs.entries, runtimeTools, inputs.toolVersionScope)
-            : inputs.entries;
+            ? scopeArchiveEntries(inputs.entries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
+            : scopeArchiveEntries(inputs.entries, inputs.cacheTag, [], inputs.toolVersionScope);
     }
     else if (inputs.path || inputs.key) {
         if (!inputs.path || !inputs.key) {

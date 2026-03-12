@@ -261,7 +261,18 @@ describe('one utils', () => {
 
     expect(buildRuntimeCacheTag('web', 'web-mise-ruby', plan.runtimeTools, 'patch')).toBe('web-mise-ruby');
     expect(plan.runtimeEntry).toBe(`web-mise-ruby:${getMiseInstallsDir()}`);
-    expect(plan.archiveEntries).toBe('bundler-ruby-4.0.1:vendor/bundle');
+    expect(plan.archiveEntries).toBe('web-bundler-ruby-4.0.1:vendor/bundle');
+  });
+
+  it('prefixes archive entries with cache-tag for deterministic namespacing', async () => {
+    const plan = await buildPlan(buildInputs({
+      setup: 'none',
+      cacheTag: 'archive-poison-123',
+      entries: 'marker:marker.txt',
+    }));
+
+    expect(plan.archiveEntries).toBe('archive-poison-123-marker:marker.txt');
+    expect(plan.cacheTagPrefix).toBe('archive-poison-123');
   });
 
   it('prefers BORINGCACHE_DEFAULT_WORKSPACE over the repository name', async () => {

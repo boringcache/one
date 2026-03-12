@@ -45,7 +45,7 @@ With the default `setup: mise`, `boringcache/one` resolves project tools from `m
 
 When `cache-runtime: true`, `one` caches `mise` installs and rebuilds shims after restore. It does not archive the shim directory itself.
 
-Generated tags are deterministic and readable. With `cache-tag: web`, `tools: ruby@4.0.1`, and the default `tool-version-scope: patch`, the runtime cache tag becomes `web-mise-ruby-4.0.1` and an archive entry such as `bundler:vendor/bundle` resolves to `bundler-ruby-4.0.1`.
+Generated tags are deterministic and readable. With `cache-tag: web`, `tools: ruby@4.0.1`, and the default `tool-version-scope: patch`, the runtime cache tag becomes `web-mise-ruby-4.0.1` and an archive entry such as `bundler:vendor/bundle` resolves to `web-bundler-ruby-4.0.1`.
 
 If you want the exact same runtime tag across GitHub Actions, local CLI use, and Docker-based workflows, set `runtime-cache-tag` explicitly.
 
@@ -129,6 +129,7 @@ In practice:
 ## Tag model
 
 - `cache-tag` gives `one` a stable human prefix for generated tags
+- for archive `entries`, `cache-tag` prefixes each entry tag unless you already included that prefix yourself
 - `runtime-cache-tag` lets you set the exact runtime cache tag when you need local and CI reuse to line up exactly
 - `tool-version-scope` controls how generated tags encode versions: `patch`, `minor`, or `major`
 - `resolved-entries` and `runtime-cache-tag` outputs show the exact tags `one` used, so you can reuse them with the CLI
@@ -145,7 +146,7 @@ Example:
     entries: bundler:vendor/bundle
 ```
 
-That resolves to tags like `web-mise-ruby-4.0` and `bundler-ruby-4.0`, which are deterministic across the same tool versions on local Ubuntu, Docker-based Ubuntu, and GitHub-hosted Ubuntu runners.
+That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which are deterministic across the same tool versions on local Ubuntu, Docker-based Ubuntu, and GitHub-hosted Ubuntu runners.
 
 ## Trust model
 
