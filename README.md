@@ -25,8 +25,6 @@ Archive caching:
 ```yaml
 - uses: boringcache/one@v1
   with:
-    setup: none
-    mode: archive
     workspace: my-org/my-project
     entries: deps:node_modules,build:dist
   env:
@@ -39,7 +37,6 @@ Mise-powered Rails-style workflow:
 ```yaml
 - uses: boringcache/one@v1
   with:
-    setup: mise
     preset: rails
     workspace: my-org/my-project
     entries: bundler:vendor/bundle
@@ -53,7 +50,6 @@ Docker build with cache:
 ```yaml
 - uses: boringcache/one@v1
   with:
-    setup: none
     mode: docker
     workspace: my-org/my-project
     image: ghcr.io/${{ github.repository }}
@@ -68,7 +64,6 @@ Rust with remote sccache:
 ```yaml
 - uses: boringcache/one@v1
   with:
-    setup: mise
     mode: rust-sccache
     workspace: my-org/my-project
     sccache: true
