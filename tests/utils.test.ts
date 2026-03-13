@@ -41,6 +41,8 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     tools: '',
     toolVersionScope: 'patch',
     cacheRuntime: false,
+    mavenVersion: '',
+    mavenLocalRepo: '~/.m2/repository',
     readOnly: false,
     proxyPort: '',
     proxyNoGit: false,
@@ -182,6 +184,65 @@ describe('one utils', () => {
       expect(plan.mode).toBe('gradle');
       expect(plan.runtimeTools).toEqual([
         { name: 'java', version: '21', label: 'Java', source: 'project' },
+      ]);
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('detects package-manager tools and default archive entries for turbo mode', async () => {
+    const project = await makeTempProject({
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        mode: 'turbo-proxy',
+        workingDirectory: project,
+        cacheTag: 'web',
+        entries: '',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'node', version: '22.4.1', label: 'Node.js', source: 'project' },
+        { name: 'pnpm', version: '9.15.1', label: 'pnpm', source: 'project' },
+      ]);
+      expect(plan.archiveEntries).toBe(
+        'web-pnpm-store-node-22.4.1-pnpm-9.15.1:.pnpm-store,web-node-modules-node-22.4.1-pnpm-9.15.1:node_modules',
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('adds a default local repository archive entry for maven mode', async () => {
+    const plan = await buildPlan(buildInputs({
+      setup: 'none',
+      mode: 'maven',
+      cacheTag: 'service',
+      entries: '',
+    }));
+
+    expect(plan.archiveEntries).toBe('service-maven-repo:~/.m2/repository');
+  });
+
+  it('detects Java from pom.xml for maven mode and falls back to the default Maven runtime', async () => {
+    const project = await makeTempProject({
+      'pom.xml': `<project><properties><maven.compiler.release>21</maven.compiler.release></properties></project>\n`,
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        mode: 'maven',
+        workingDirectory: project,
+        entries: '',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'java', version: '21', label: 'Java', source: 'project' },
+        { name: 'maven', version: '3.9.9', label: 'Maven', source: 'mode' },
       ]);
     } finally {
       await removeTempProject(project);

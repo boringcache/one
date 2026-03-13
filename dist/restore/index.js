@@ -42913,6 +42913,7 @@ const fs = __importStar(__nccwpck_require__(79896));
 const os = __importStar(__nccwpck_require__(70857));
 const path = __importStar(__nccwpck_require__(16928));
 const action_core_1 = __nccwpck_require__(68701);
+const utils_1 = __nccwpck_require__(2219);
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -42930,6 +42931,8 @@ async function runModeRestore(plan, inputs) {
             return runBazelRestore(plan, inputs);
         case 'gradle':
             return runGradleRestore(plan, inputs);
+        case 'maven':
+            return runMavenRestore(plan, inputs);
         case 'rust-sccache':
             return runRustRestore(plan, inputs);
         case 'turbo-proxy':
@@ -42948,6 +42951,7 @@ async function runModeSave(mode) {
             return;
         case 'bazel':
         case 'gradle':
+        case 'maven':
         case 'turbo-proxy':
             await stopProxyFromState();
             return;
@@ -42995,6 +42999,9 @@ function addLocalBinPaths() {
     const home = os.homedir();
     core.addPath(path.join(home, '.local', 'bin'));
     core.addPath(path.join(home, '.boringcache', 'bin'));
+}
+function registryProxyLogPath(port) {
+    return path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
 }
 async function execBoringCache(args, options) {
     return (0, action_core_1.execBoringCache)(args, options);
@@ -43345,6 +43352,15 @@ function resolveGradleHome(input) {
     }
     return path.resolve(gradleHome);
 }
+function resolveUserPath(input, workingDirectory) {
+    if (input.startsWith('~')) {
+        return path.join(os.homedir(), input.slice(1));
+    }
+    if (path.isAbsolute(input)) {
+        return input;
+    }
+    return path.resolve(workingDirectory, input);
+}
 function writeGradleInitScript(gradleHome, port, readOnly) {
     const initDir = path.join(gradleHome, 'init.d');
     fs.mkdirSync(initDir, { recursive: true });
@@ -43363,6 +43379,49 @@ function writeGradleInitScript(gradleHome, port, readOnly) {
 function enableGradleBuildCache(gradleHome) {
     fs.mkdirSync(gradleHome, { recursive: true });
     fs.appendFileSync(path.join(gradleHome, 'gradle.properties'), '\norg.gradle.caching=true\n');
+}
+function ensureMavenBuildCacheExtension(extensionsPath, version) {
+    const extensionBlock = [
+        '  <extension>',
+        '    <groupId>org.apache.maven.extensions</groupId>',
+        '    <artifactId>maven-build-cache-extension</artifactId>',
+        `    <version>${version}</version>`,
+        '  </extension>',
+    ].join('\n');
+    fs.mkdirSync(path.dirname(extensionsPath), { recursive: true });
+    if (fs.existsSync(extensionsPath)) {
+        const existing = fs.readFileSync(extensionsPath, 'utf8');
+        if (existing.includes('<artifactId>maven-build-cache-extension</artifactId>')) {
+            return;
+        }
+        if (existing.includes('</extensions>')) {
+            fs.writeFileSync(extensionsPath, existing.replace('</extensions>', `${extensionBlock}\n</extensions>`));
+            return;
+        }
+    }
+    const content = `<?xml version="1.0" encoding="UTF-8"?>
+<extensions xmlns="http://maven.apache.org/EXTENSIONS/1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://maven.apache.org/EXTENSIONS/1.0.0 https://maven.apache.org/xsd/core-extensions-1.0.0.xsd">
+${extensionBlock}
+</extensions>
+`;
+    fs.writeFileSync(extensionsPath, content);
+}
+function writeMavenBuildCacheConfig(configPath, port, readOnly, cacheId) {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const content = `<?xml version="1.0" encoding="UTF-8"?>
+<cache xmlns="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0 https://maven.apache.org/xsd/build-cache-config-1.2.0.xsd">
+  <configuration>
+    <remote enabled="true" saveToRemote="${!readOnly}" transport="resolver" id="${cacheId}">
+      <url>http://127.0.0.1:${port}</url>
+    </remote>
+  </configuration>
+</cache>
+`;
+    fs.writeFileSync(configPath, content);
 }
 async function execRustBoringCache(args) {
     rustLastOutput = '';
@@ -43469,12 +43528,15 @@ function configureSccacheEnv(cacheSize) {
     core.exportVariable('SCCACHE_DIR', sccacheDir);
     process.env.SCCACHE_CACHE_SIZE = cacheSize;
     core.exportVariable('SCCACHE_CACHE_SIZE', cacheSize);
+    core.exportVariable('CC', 'sccache cc');
+    core.exportVariable('CXX', 'sccache c++');
+    core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
     fs.mkdirSync(sccacheDir, { recursive: true });
 }
 async function startSccacheServer() {
     await exec.exec('sccache', ['--start-server'], { ignoreReturnCode: true });
 }
-async function installSccache() {
+async function installSccache(versionInput = '0.13.0') {
     addLocalBinPaths();
     try {
         let output = '';
@@ -43493,28 +43555,28 @@ async function installSccache() {
     }
     catch {
     }
-    const version = 'v0.13.0';
+    const normalizedVersion = versionInput.startsWith('v') ? versionInput : `v${versionInput}`;
     let assetName = null;
     if (process.platform === 'linux') {
         if (process.arch === 'x64') {
-            assetName = `sccache-${version}-x86_64-unknown-linux-musl`;
+            assetName = `sccache-${normalizedVersion}-x86_64-unknown-linux-musl`;
         }
         else if (process.arch === 'arm64') {
-            assetName = `sccache-${version}-aarch64-unknown-linux-musl`;
+            assetName = `sccache-${normalizedVersion}-aarch64-unknown-linux-musl`;
         }
     }
     else if (process.platform === 'darwin' && process.arch === 'arm64') {
-        assetName = `sccache-${version}-aarch64-apple-darwin`;
+        assetName = `sccache-${normalizedVersion}-aarch64-apple-darwin`;
     }
     else if (process.platform === 'win32' && process.arch === 'x64') {
-        assetName = `sccache-${version}-x86_64-pc-windows-msvc`;
+        assetName = `sccache-${normalizedVersion}-x86_64-pc-windows-msvc`;
     }
     if (!assetName) {
         await exec.exec('cargo', ['install', 'sccache', '--locked']);
         return;
     }
     const extension = process.platform === 'win32' ? '.zip' : '.tar.gz';
-    const url = `https://github.com/mozilla/sccache/releases/download/${version}/${assetName}${extension}`;
+    const url = `https://github.com/mozilla/sccache/releases/download/${normalizedVersion}/${assetName}${extension}`;
     const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sccache-'));
     const archivePath = path.join(tempDir, `sccache${extension}`);
     try {
@@ -43572,10 +43634,50 @@ function configureTurboRemoteEnv(apiUrl, token, team) {
     core.exportVariable('TURBO_TOKEN', token);
     core.exportVariable('TURBO_TEAM', team || 'team_boringcache');
 }
+function configureNodePackageManagerEnv(packageManager) {
+    if (!packageManager) {
+        return;
+    }
+    ensureDir(packageManager.cacheDir);
+    switch (packageManager.name) {
+        case 'pnpm':
+            core.exportVariable('PNPM_STORE_DIR', packageManager.cacheDir);
+            core.exportVariable('NPM_CONFIG_STORE_DIR', packageManager.cacheDir);
+            break;
+        case 'yarn':
+            core.exportVariable('YARN_CACHE_FOLDER', packageManager.cacheDir);
+            core.exportVariable('YARN_ENABLE_GLOBAL_CACHE', 'false');
+            break;
+        case 'npm':
+            core.exportVariable('npm_config_cache', packageManager.cacheDir);
+            core.exportVariable('NPM_CONFIG_CACHE', packageManager.cacheDir);
+            break;
+    }
+}
+async function ensureCorepackPackageManager(workingDirectory, packageManager, runtimeTools) {
+    if (!packageManager || packageManager.name === 'npm' || runtimeTools.some((tool) => tool.name === packageManager.name)) {
+        return;
+    }
+    const corepackEnabled = await exec.exec('corepack', ['enable'], { cwd: workingDirectory, ignoreReturnCode: true });
+    if (corepackEnabled !== 0) {
+        core.notice(`corepack enable failed for ${packageManager.name}; continuing without corepack bootstrap`);
+        return;
+    }
+    if (packageManager.packageManagerField) {
+        await exec.exec('corepack', ['install'], { cwd: workingDirectory, ignoreReturnCode: true });
+        return;
+    }
+    if (packageManager.version) {
+        await exec.exec('corepack', ['prepare', `${packageManager.name}@${packageManager.version}`, '--activate'], { cwd: workingDirectory, ignoreReturnCode: true });
+    }
+}
 function configureSccacheProxyEnv(port) {
     const endpoint = `http://127.0.0.1:${port}/`;
     core.exportVariable('SCCACHE_WEBDAV_ENDPOINT', endpoint);
     core.exportVariable('RUSTC_WRAPPER', 'sccache');
+    core.exportVariable('CC', 'sccache cc');
+    core.exportVariable('CXX', 'sccache c++');
+    core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
 }
 function getModeCacheTag(inputCacheTag, defaultPrefix) {
     return (0, action_core_1.getCacheTagPrefix)(inputCacheTag, defaultPrefix);
@@ -43637,6 +43739,8 @@ async function runDockerRestore(plan, inputs) {
         });
         await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
+        core.setOutput('proxy-port', String(proxy.port));
+        core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
         const ref = getRegistryRef(proxy.port, cacheTag, refHost);
         const registryCache = getRegistryCacheFlags(ref, cacheMode);
         await buildDockerImage({
@@ -43777,6 +43881,8 @@ async function runBuildkitRestore(plan, inputs) {
         });
         await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
+        core.setOutput('proxy-port', String(proxy.port));
+        core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
         const ref = getRegistryRef(proxy.port, cacheTag, refHost);
         const registryCache = getRegistryCacheFlags(ref, cacheMode);
         await buildWithBuildctl({
@@ -43882,7 +43988,7 @@ async function runBazelRestore(plan, inputs) {
     writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : inputs.readOnly);
     core.setOutput('cache-tag', cacheTag);
     core.setOutput('proxy-port', String(proxy.port));
-    core.setOutput('proxy-log-path', path.join(os.tmpdir(), `boringcache-proxy-${proxy.port}.log`));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
     return {};
 }
@@ -43911,6 +44017,42 @@ async function runGradleRestore(plan, inputs) {
     }
     core.setOutput('cache-tag', cacheTag);
     core.setOutput('proxy-port', String(proxy.port));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+    core.setOutput('workspace', plan.workspace);
+    return {};
+}
+async function runMavenRestore(plan, inputs) {
+    var _a;
+    const cacheTag = inputs.cacheTag || getModeCacheTag('', 'maven');
+    const proxyPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const workingDirectory = plan.workingDirectory;
+    const extensionsPath = resolveUserPath(core.getInput('maven-extensions-path') || '.mvn/extensions.xml', workingDirectory);
+    const buildCacheConfigPath = resolveUserPath(core.getInput('maven-build-cache-config-path') || '.mvn/maven-build-cache-config.xml', workingDirectory);
+    const localRepo = resolveUserPath(core.getInput('maven-local-repo') || '~/.m2/repository', workingDirectory);
+    const extensionVersion = core.getInput('maven-build-cache-extension-version') || '1.2.2';
+    const cacheId = core.getInput('maven-build-cache-id') || 'boringcache';
+    const proxy = await (0, action_core_1.startRegistryProxy)({
+        command: 'cache-registry',
+        workspace: plan.workspace,
+        tag: cacheTag,
+        host: '127.0.0.1',
+        port: proxyPort,
+        noGit: inputs.proxyNoGit,
+        noPlatform: inputs.proxyNoPlatform,
+        verbose: inputs.verbose,
+        readOnly: inputs.readOnly,
+    });
+    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    saveModeState('proxy-pid', String(proxy.pid));
+    ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);
+    writeMavenBuildCacheConfig(buildCacheConfigPath, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : inputs.readOnly, cacheId);
+    ensureDir(localRepo);
+    core.setOutput('cache-tag', cacheTag);
+    core.setOutput('proxy-port', String(proxy.port));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+    core.setOutput('maven-extensions-path', extensionsPath);
+    core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
+    core.setOutput('maven-local-repo', localRepo);
     core.setOutput('workspace', plan.workspace);
     return {};
 }
@@ -43920,6 +44062,13 @@ async function runTurboProxyRestore(plan, inputs) {
     const turboToken = core.getInput('turbo-token') || 'boringcache';
     const turboTeam = core.getInput('turbo-team') || '';
     const preferredPort = parseInt(core.getInput('turbo-port') || inputs.proxyPort || '4227', 10);
+    const packageManager = await (0, utils_1.detectNodePackageManager)(plan.workingDirectory);
+    configureNodePackageManagerEnv(packageManager);
+    await ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools);
+    if (packageManager) {
+        core.setOutput('package-manager', packageManager.name);
+        core.setOutput('package-manager-cache-dir', packageManager.cacheDir);
+    }
     if (turboApiUrl) {
         configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
         core.setOutput('workspace', plan.workspace);
@@ -43937,6 +44086,7 @@ async function runTurboProxyRestore(plan, inputs) {
     configureTurboRemoteEnv(`http://127.0.0.1:${proxy.port}`, turboToken, turboTeam);
     core.setOutput('cache-tag', cacheTag);
     core.setOutput('proxy-port', String(proxy.port));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
     return {};
 }
@@ -43949,6 +44099,7 @@ async function runRustRestore(plan, inputs) {
     const cacheCargoBin = core.getInput('cache-cargo-bin') === 'true';
     const cacheTarget = core.getInput('cache-target') !== 'false';
     const useSccache = core.getInput('sccache') === 'true';
+    const sccacheVersion = core.getInput('sccache-version') || '0.13.0';
     const sccacheMode = core.getInput('sccache-mode') || 'local';
     const sccacheCacheSize = core.getInput('sccache-cache-size') || '5G';
     const targets = core.getInput('targets');
@@ -44010,13 +44161,15 @@ async function runRustRestore(plan, inputs) {
         saveModeState('target-tag', targetTag);
     }
     if (useSccache) {
-        await installSccache();
+        await installSccache(sccacheVersion);
         if (sccacheMode === 'proxy') {
             const proxy = await startPortableCacheProxy(plan.workspace, await (0, action_core_1.findAvailablePort)(), cacheTagPrefix, inputs.readOnly);
             configureSccacheProxyEnv(proxy.port);
             await startSccacheServer();
             saveModeState('proxy-pid', String(proxy.pid));
             saveModeState('proxy-port', String(proxy.port));
+            core.setOutput('proxy-port', String(proxy.port));
+            core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
         }
         else {
             configureSccacheEnv(sccacheCacheSize);
@@ -44183,6 +44336,12 @@ const MODE_SPECS = {
         compatibilityWrappers: ['boringcache/gradle-action'],
         description: 'Gradle build cache proxy integration.',
     },
+    maven: {
+        resolved: 'maven',
+        implemented: true,
+        compatibilityWrappers: [],
+        description: 'Maven build cache proxy and archive integration.',
+    },
     'rust-sccache': {
         resolved: 'rust-sccache',
         implemented: true,
@@ -44205,11 +44364,12 @@ function normalizeMode(value) {
         case 'buildkit':
         case 'bazel':
         case 'gradle':
+        case 'maven':
         case 'rust-sccache':
         case 'turbo-proxy':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, rust-sccache, or turbo-proxy.`);
+            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.`);
     }
 }
 function resolveModeSpec(mode) {
@@ -44410,6 +44570,7 @@ exports.normalizeToolVersionScope = normalizeToolVersionScope;
 exports.resolveWorkspace = resolveWorkspace;
 exports.parseToolSpecs = parseToolSpecs;
 exports.resolveRuntimeTools = resolveRuntimeTools;
+exports.detectNodePackageManager = detectNodePackageManager;
 exports.buildRuntimeCacheTag = buildRuntimeCacheTag;
 exports.buildRuntimeCacheEntry = buildRuntimeCacheEntry;
 exports.buildArchiveEntries = buildArchiveEntries;
@@ -44467,6 +44628,8 @@ function getInputs() {
         tools: core.getInput('tools'),
         toolVersionScope: normalizeToolVersionScope(core.getInput('tool-version-scope')),
         cacheRuntime: core.getBooleanInput('cache-runtime'),
+        mavenVersion: core.getInput('maven-version') || '3.9.9',
+        mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
         readOnly: core.getBooleanInput('read-only'),
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
@@ -44570,6 +44733,7 @@ async function detectProjectTools(workingDirectory) {
         detectToolFromProjectFiles(workingDirectory, 'python', detectPythonVersion),
         detectToolFromProjectFiles(workingDirectory, 'go', detectGoVersion),
         detectToolFromProjectFiles(workingDirectory, 'java', detectJavaVersion),
+        detectToolFromProjectFiles(workingDirectory, 'maven', detectMavenVersion),
         detectToolFromProjectFiles(workingDirectory, 'bazel', detectBazelVersion),
         detectToolFromProjectFiles(workingDirectory, 'rust', detectRustVersion),
     ]);
@@ -44577,6 +44741,10 @@ async function detectProjectTools(workingDirectory) {
         if (tool && !tools.has(tool.name)) {
             tools.set(tool.name, tool);
         }
+    }
+    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory);
+    if (packageManagerTool && !tools.has(packageManagerTool.name)) {
+        tools.set(packageManagerTool.name, packageManagerTool);
     }
     return Array.from(tools.values());
 }
@@ -44598,6 +44766,8 @@ async function detectModeTools(mode, workingDirectory) {
             return detectBazelTools(workingDirectory);
         case 'gradle':
             return detectGradleTools(workingDirectory);
+        case 'maven':
+            return detectMavenTools(workingDirectory);
         case 'rust-sccache':
             return detectRustTools(workingDirectory);
         default:
@@ -44616,14 +44786,23 @@ async function detectRailsTools(workingDirectory) {
             tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
         }
     }
+    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
+    if (packageManagerTool) {
+        tools.push(packageManagerTool);
+    }
     return tools;
 }
 async function detectNodeTurboTools(workingDirectory) {
+    const tools = [];
     const nodeVersion = await detectNodeVersion(workingDirectory);
-    if (!nodeVersion) {
-        return [];
+    if (nodeVersion) {
+        tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
     }
-    return [{ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' }];
+    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
+    if (packageManagerTool) {
+        tools.push(packageManagerTool);
+    }
+    return tools;
 }
 async function detectBazelTools(workingDirectory) {
     const bazelVersion = await detectBazelVersion(workingDirectory);
@@ -44638,6 +44817,18 @@ async function detectGradleTools(workingDirectory) {
         return [];
     }
     return [{ name: 'java', version: javaVersion, label: 'Java', source: 'mode' }];
+}
+async function detectMavenTools(workingDirectory) {
+    const tools = [];
+    const javaVersion = await detectJavaVersion(workingDirectory);
+    if (javaVersion) {
+        tools.push({ name: 'java', version: javaVersion, label: 'Java', source: 'mode' });
+    }
+    const mavenVersion = await detectMavenVersion(workingDirectory);
+    if (mavenVersion) {
+        tools.push({ name: 'maven', version: mavenVersion, label: 'Maven', source: 'mode' });
+    }
+    return tools;
 }
 async function detectRustTools(workingDirectory) {
     const rustVersion = await detectRustVersion(workingDirectory);
@@ -44718,7 +44909,33 @@ async function detectJavaVersion(workingDirectory) {
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'java');
+    const miseVersion = await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'java');
+    if (miseVersion) {
+        return miseVersion;
+    }
+    const pomXml = await readFile(path.join(workingDirectory, 'pom.xml'));
+    if (pomXml) {
+        const pomMatch = pomXml.match(/<maven\.compiler\.(?:release|source|target)>\s*([^<\s]+)\s*<\/maven\.compiler\.(?:release|source|target)>/)
+            || pomXml.match(/<java\.version>\s*([^<\s]+)\s*<\/java\.version>/);
+        if (pomMatch === null || pomMatch === void 0 ? void 0 : pomMatch[1]) {
+            return pomMatch[1].trim();
+        }
+    }
+    return null;
+}
+async function detectMavenVersion(workingDirectory) {
+    const wrapperProps = await readFile(path.join(workingDirectory, '.mvn', 'wrapper', 'maven-wrapper.properties'));
+    if (wrapperProps) {
+        const match = wrapperProps.match(/apache-maven-([0-9]+(?:\.[0-9]+)*)-bin/i);
+        if (match === null || match === void 0 ? void 0 : match[1]) {
+            return match[1];
+        }
+    }
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'maven');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'maven');
 }
 async function detectRustVersion(workingDirectory) {
     const rustToolchainToml = await readFile(path.join(workingDirectory, 'rust-toolchain.toml'));
@@ -44776,6 +44993,87 @@ async function needsNodeRuntime(workingDirectory) {
         }
     }
     return false;
+}
+async function readPackageJson(workingDirectory) {
+    const packageJson = await readFile(path.join(workingDirectory, 'package.json'));
+    if (!packageJson) {
+        return null;
+    }
+    try {
+        return JSON.parse(packageJson);
+    }
+    catch {
+        return null;
+    }
+}
+function normalizePackageManagerName(name) {
+    const normalized = name.trim().toLowerCase();
+    if (normalized === 'npm' || normalized === 'pnpm' || normalized === 'yarn') {
+        return normalized;
+    }
+    return null;
+}
+function packageManagerCacheDir(workingDirectory, name) {
+    switch (name) {
+        case 'pnpm':
+            return path.join(workingDirectory, '.pnpm-store');
+        case 'yarn':
+            return path.join(workingDirectory, '.yarn-cache');
+        case 'npm':
+            return path.join(workingDirectory, '.npm-cache');
+    }
+}
+async function detectNodePackageManager(workingDirectory) {
+    const packageJson = await readPackageJson(workingDirectory);
+    const packageManagerField = typeof (packageJson === null || packageJson === void 0 ? void 0 : packageJson.packageManager) === 'string'
+        ? packageJson.packageManager.trim()
+        : '';
+    let name = null;
+    let version = null;
+    if (packageManagerField) {
+        const atIndex = packageManagerField.lastIndexOf('@');
+        if (atIndex > 0) {
+            name = normalizePackageManagerName(packageManagerField.slice(0, atIndex));
+            version = packageManagerField.slice(atIndex + 1).trim().split('+')[0] || null;
+        }
+    }
+    if (!name) {
+        if (await pathExists(path.join(workingDirectory, 'pnpm-lock.yaml'))) {
+            name = 'pnpm';
+        }
+        else if (await pathExists(path.join(workingDirectory, 'yarn.lock'))) {
+            name = 'yarn';
+        }
+        else if (await pathExists(path.join(workingDirectory, 'package-lock.json'))
+            || await pathExists(path.join(workingDirectory, 'npm-shrinkwrap.json'))) {
+            name = 'npm';
+        }
+        else if (packageJson) {
+            name = 'npm';
+        }
+    }
+    if (!name) {
+        return null;
+    }
+    return {
+        name,
+        version,
+        packageManagerField: packageManagerField || null,
+        cacheDir: packageManagerCacheDir(workingDirectory, name),
+        nodeModulesDir: path.join(workingDirectory, 'node_modules'),
+    };
+}
+async function detectNodePackageManagerTool(workingDirectory, source = 'project') {
+    const packageManager = await detectNodePackageManager(workingDirectory);
+    if (!(packageManager === null || packageManager === void 0 ? void 0 : packageManager.version)) {
+        return null;
+    }
+    return {
+        name: packageManager.name,
+        version: packageManager.version,
+        label: TOOL_LABELS[packageManager.name] || packageManager.name,
+        source,
+    };
 }
 async function pathExists(filePath) {
     try {
@@ -44840,9 +45138,17 @@ function prefixArchiveTag(tag, cacheTag) {
     }
     return `${prefix}-${tag}`;
 }
+function normalizeEntriesInput(entries) {
+    return entries
+        .split(/\r?\n/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .join(',');
+}
 function scopeArchiveEntries(entries, cacheTag, tools, versionScope) {
+    const normalizedEntries = normalizeEntriesInput(entries);
     if (!entries.trim() || tools.length === 0) {
-        return (0, action_core_1.parseEntries)(entries, 'restore', { resolvePaths: false })
+        return (0, action_core_1.parseEntries)(normalizedEntries, 'restore', { resolvePaths: false })
             .map((entry) => {
             const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
             const pathSpec = entry.restorePath === entry.savePath
@@ -44852,7 +45158,7 @@ function scopeArchiveEntries(entries, cacheTag, tools, versionScope) {
         })
             .join(',');
     }
-    return (0, action_core_1.parseEntries)(entries, 'restore', { resolvePaths: false })
+    return (0, action_core_1.parseEntries)(normalizedEntries, 'restore', { resolvePaths: false })
         .map((entry) => {
         const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
         const scopedTag = scopeTagToRuntimeTools(prefixedTag, tools, versionScope);
@@ -44863,13 +45169,34 @@ function scopeArchiveEntries(entries, cacheTag, tools, versionScope) {
     })
         .join(',');
 }
-function buildArchiveEntries(inputs, runtimeTools) {
+async function detectDefaultArchiveEntries(inputs) {
+    if (inputs.mode === 'maven') {
+        return `maven-repo:${inputs.mavenLocalRepo}`;
+    }
+    if (inputs.mode === 'turbo-proxy' || inputs.preset === 'node-turbo') {
+        const packageManager = await detectNodePackageManager(inputs.workingDirectory);
+        if (!packageManager) {
+            return '';
+        }
+        switch (packageManager.name) {
+            case 'pnpm':
+                return 'pnpm-store:.pnpm-store\nnode-modules:node_modules';
+            case 'yarn':
+                return 'yarn-cache:.yarn-cache\nnode-modules:node_modules';
+            case 'npm':
+                return 'npm-cache:.npm-cache\nnode-modules:node_modules';
+        }
+    }
+    return '';
+}
+async function buildArchiveEntries(inputs, runtimeTools) {
     let archiveEntries = '';
     let usesCacheFormat = false;
-    if (inputs.entries) {
+    let sourceEntries = inputs.entries;
+    if (sourceEntries) {
         archiveEntries = inputs.setup === 'mise'
-            ? scopeArchiveEntries(inputs.entries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
-            : scopeArchiveEntries(inputs.entries, inputs.cacheTag, [], inputs.toolVersionScope);
+            ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
+            : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
     }
     else if (inputs.path || inputs.key) {
         if (!inputs.path || !inputs.key) {
@@ -44882,6 +45209,14 @@ function buildArchiveEntries(inputs, runtimeTools) {
             enableCrossOsArchive: inputs.enableCrossOsArchive,
         }, 'restore');
         usesCacheFormat = true;
+    }
+    else {
+        sourceEntries = await detectDefaultArchiveEntries(inputs);
+        if (sourceEntries) {
+            archiveEntries = inputs.setup === 'mise'
+                ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
+                : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
+        }
     }
     return {
         entries: archiveEntries,
@@ -44913,7 +45248,19 @@ async function buildPlan(inputs) {
     const workspace = resolveWorkspace(inputs.workspace);
     const modeSpec = (0, modes_1.resolveModeSpec)(inputs.mode);
     (0, modes_1.assertImplementedMode)(modeSpec);
+    const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
     const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory);
+    if (inputs.setup === 'mise'
+        && modeSpec.resolved === 'maven'
+        && resolvedMavenVersion
+        && !runtimeTools.some((tool) => tool.name === 'maven')) {
+        runtimeTools.push({
+            name: 'maven',
+            version: resolvedMavenVersion,
+            label: 'Maven',
+            source: 'mode',
+        });
+    }
     const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools);
     const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
         ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
@@ -44921,7 +45268,7 @@ async function buildPlan(inputs) {
     const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
         ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
         : null;
-    const archiveEntries = buildArchiveEntries(inputs, runtimeTools);
+    const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
     validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
     return {
         workspace,
@@ -44943,7 +45290,7 @@ function getCacheTagPrefix(inputs, runtimeTools) {
         return inputs.cacheTag;
     }
     if (inputs.entries) {
-        const firstEntry = (0, action_core_1.parseEntries)(inputs.entries, 'restore', { resolvePaths: false })[0];
+        const firstEntry = (0, action_core_1.parseEntries)(normalizeEntriesInput(inputs.entries), 'restore', { resolvePaths: false })[0];
         if (firstEntry) {
             return firstEntry.tag;
         }

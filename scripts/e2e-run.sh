@@ -180,7 +180,7 @@ case "$case_id" in
   rails-preset) run_rails_preset ;;
   python) run_python ;;
   go) run_go ;;
-  java-maven) run_java_maven ;;
+  java-maven|maven) run_java_maven ;;
   elixir) run_elixir ;;
   docker) run_docker ;;
   buildkit) run_buildkit ;;

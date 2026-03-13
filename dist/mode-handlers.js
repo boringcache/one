@@ -41,6 +41,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const action_core_1 = require("@boringcache/action-core");
+const utils_1 = require("./utils");
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -58,6 +59,8 @@ async function runModeRestore(plan, inputs) {
             return runBazelRestore(plan, inputs);
         case 'gradle':
             return runGradleRestore(plan, inputs);
+        case 'maven':
+            return runMavenRestore(plan, inputs);
         case 'rust-sccache':
             return runRustRestore(plan, inputs);
         case 'turbo-proxy':
@@ -76,6 +79,7 @@ async function runModeSave(mode) {
             return;
         case 'bazel':
         case 'gradle':
+        case 'maven':
         case 'turbo-proxy':
             await stopProxyFromState();
             return;
@@ -123,6 +127,9 @@ function addLocalBinPaths() {
     const home = os.homedir();
     core.addPath(path.join(home, '.local', 'bin'));
     core.addPath(path.join(home, '.boringcache', 'bin'));
+}
+function registryProxyLogPath(port) {
+    return path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
 }
 async function execBoringCache(args, options) {
     return (0, action_core_1.execBoringCache)(args, options);
@@ -473,6 +480,15 @@ function resolveGradleHome(input) {
     }
     return path.resolve(gradleHome);
 }
+function resolveUserPath(input, workingDirectory) {
+    if (input.startsWith('~')) {
+        return path.join(os.homedir(), input.slice(1));
+    }
+    if (path.isAbsolute(input)) {
+        return input;
+    }
+    return path.resolve(workingDirectory, input);
+}
 function writeGradleInitScript(gradleHome, port, readOnly) {
     const initDir = path.join(gradleHome, 'init.d');
     fs.mkdirSync(initDir, { recursive: true });
@@ -491,6 +507,49 @@ function writeGradleInitScript(gradleHome, port, readOnly) {
 function enableGradleBuildCache(gradleHome) {
     fs.mkdirSync(gradleHome, { recursive: true });
     fs.appendFileSync(path.join(gradleHome, 'gradle.properties'), '\norg.gradle.caching=true\n');
+}
+function ensureMavenBuildCacheExtension(extensionsPath, version) {
+    const extensionBlock = [
+        '  <extension>',
+        '    <groupId>org.apache.maven.extensions</groupId>',
+        '    <artifactId>maven-build-cache-extension</artifactId>',
+        `    <version>${version}</version>`,
+        '  </extension>',
+    ].join('\n');
+    fs.mkdirSync(path.dirname(extensionsPath), { recursive: true });
+    if (fs.existsSync(extensionsPath)) {
+        const existing = fs.readFileSync(extensionsPath, 'utf8');
+        if (existing.includes('<artifactId>maven-build-cache-extension</artifactId>')) {
+            return;
+        }
+        if (existing.includes('</extensions>')) {
+            fs.writeFileSync(extensionsPath, existing.replace('</extensions>', `${extensionBlock}\n</extensions>`));
+            return;
+        }
+    }
+    const content = `<?xml version="1.0" encoding="UTF-8"?>
+<extensions xmlns="http://maven.apache.org/EXTENSIONS/1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://maven.apache.org/EXTENSIONS/1.0.0 https://maven.apache.org/xsd/core-extensions-1.0.0.xsd">
+${extensionBlock}
+</extensions>
+`;
+    fs.writeFileSync(extensionsPath, content);
+}
+function writeMavenBuildCacheConfig(configPath, port, readOnly, cacheId) {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const content = `<?xml version="1.0" encoding="UTF-8"?>
+<cache xmlns="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0 https://maven.apache.org/xsd/build-cache-config-1.2.0.xsd">
+  <configuration>
+    <remote enabled="true" saveToRemote="${!readOnly}" transport="resolver" id="${cacheId}">
+      <url>http://127.0.0.1:${port}</url>
+    </remote>
+  </configuration>
+</cache>
+`;
+    fs.writeFileSync(configPath, content);
 }
 async function execRustBoringCache(args) {
     rustLastOutput = '';
@@ -597,12 +656,15 @@ function configureSccacheEnv(cacheSize) {
     core.exportVariable('SCCACHE_DIR', sccacheDir);
     process.env.SCCACHE_CACHE_SIZE = cacheSize;
     core.exportVariable('SCCACHE_CACHE_SIZE', cacheSize);
+    core.exportVariable('CC', 'sccache cc');
+    core.exportVariable('CXX', 'sccache c++');
+    core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
     fs.mkdirSync(sccacheDir, { recursive: true });
 }
 async function startSccacheServer() {
     await exec.exec('sccache', ['--start-server'], { ignoreReturnCode: true });
 }
-async function installSccache() {
+async function installSccache(versionInput = '0.13.0') {
     addLocalBinPaths();
     try {
         let output = '';
@@ -621,28 +683,28 @@ async function installSccache() {
     }
     catch {
     }
-    const version = 'v0.13.0';
+    const normalizedVersion = versionInput.startsWith('v') ? versionInput : `v${versionInput}`;
     let assetName = null;
     if (process.platform === 'linux') {
         if (process.arch === 'x64') {
-            assetName = `sccache-${version}-x86_64-unknown-linux-musl`;
+            assetName = `sccache-${normalizedVersion}-x86_64-unknown-linux-musl`;
         }
         else if (process.arch === 'arm64') {
-            assetName = `sccache-${version}-aarch64-unknown-linux-musl`;
+            assetName = `sccache-${normalizedVersion}-aarch64-unknown-linux-musl`;
         }
     }
     else if (process.platform === 'darwin' && process.arch === 'arm64') {
-        assetName = `sccache-${version}-aarch64-apple-darwin`;
+        assetName = `sccache-${normalizedVersion}-aarch64-apple-darwin`;
     }
     else if (process.platform === 'win32' && process.arch === 'x64') {
-        assetName = `sccache-${version}-x86_64-pc-windows-msvc`;
+        assetName = `sccache-${normalizedVersion}-x86_64-pc-windows-msvc`;
     }
     if (!assetName) {
         await exec.exec('cargo', ['install', 'sccache', '--locked']);
         return;
     }
     const extension = process.platform === 'win32' ? '.zip' : '.tar.gz';
-    const url = `https://github.com/mozilla/sccache/releases/download/${version}/${assetName}${extension}`;
+    const url = `https://github.com/mozilla/sccache/releases/download/${normalizedVersion}/${assetName}${extension}`;
     const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sccache-'));
     const archivePath = path.join(tempDir, `sccache${extension}`);
     try {
@@ -700,10 +762,50 @@ function configureTurboRemoteEnv(apiUrl, token, team) {
     core.exportVariable('TURBO_TOKEN', token);
     core.exportVariable('TURBO_TEAM', team || 'team_boringcache');
 }
+function configureNodePackageManagerEnv(packageManager) {
+    if (!packageManager) {
+        return;
+    }
+    ensureDir(packageManager.cacheDir);
+    switch (packageManager.name) {
+        case 'pnpm':
+            core.exportVariable('PNPM_STORE_DIR', packageManager.cacheDir);
+            core.exportVariable('NPM_CONFIG_STORE_DIR', packageManager.cacheDir);
+            break;
+        case 'yarn':
+            core.exportVariable('YARN_CACHE_FOLDER', packageManager.cacheDir);
+            core.exportVariable('YARN_ENABLE_GLOBAL_CACHE', 'false');
+            break;
+        case 'npm':
+            core.exportVariable('npm_config_cache', packageManager.cacheDir);
+            core.exportVariable('NPM_CONFIG_CACHE', packageManager.cacheDir);
+            break;
+    }
+}
+async function ensureCorepackPackageManager(workingDirectory, packageManager, runtimeTools) {
+    if (!packageManager || packageManager.name === 'npm' || runtimeTools.some((tool) => tool.name === packageManager.name)) {
+        return;
+    }
+    const corepackEnabled = await exec.exec('corepack', ['enable'], { cwd: workingDirectory, ignoreReturnCode: true });
+    if (corepackEnabled !== 0) {
+        core.notice(`corepack enable failed for ${packageManager.name}; continuing without corepack bootstrap`);
+        return;
+    }
+    if (packageManager.packageManagerField) {
+        await exec.exec('corepack', ['install'], { cwd: workingDirectory, ignoreReturnCode: true });
+        return;
+    }
+    if (packageManager.version) {
+        await exec.exec('corepack', ['prepare', `${packageManager.name}@${packageManager.version}`, '--activate'], { cwd: workingDirectory, ignoreReturnCode: true });
+    }
+}
 function configureSccacheProxyEnv(port) {
     const endpoint = `http://127.0.0.1:${port}/`;
     core.exportVariable('SCCACHE_WEBDAV_ENDPOINT', endpoint);
     core.exportVariable('RUSTC_WRAPPER', 'sccache');
+    core.exportVariable('CC', 'sccache cc');
+    core.exportVariable('CXX', 'sccache c++');
+    core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
 }
 function getModeCacheTag(inputCacheTag, defaultPrefix) {
     return (0, action_core_1.getCacheTagPrefix)(inputCacheTag, defaultPrefix);
@@ -765,6 +867,8 @@ async function runDockerRestore(plan, inputs) {
         });
         await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
+        core.setOutput('proxy-port', String(proxy.port));
+        core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
         const ref = getRegistryRef(proxy.port, cacheTag, refHost);
         const registryCache = getRegistryCacheFlags(ref, cacheMode);
         await buildDockerImage({
@@ -905,6 +1009,8 @@ async function runBuildkitRestore(plan, inputs) {
         });
         await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
+        core.setOutput('proxy-port', String(proxy.port));
+        core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
         const ref = getRegistryRef(proxy.port, cacheTag, refHost);
         const registryCache = getRegistryCacheFlags(ref, cacheMode);
         await buildWithBuildctl({
@@ -1010,7 +1116,7 @@ async function runBazelRestore(plan, inputs) {
     writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : inputs.readOnly);
     core.setOutput('cache-tag', cacheTag);
     core.setOutput('proxy-port', String(proxy.port));
-    core.setOutput('proxy-log-path', path.join(os.tmpdir(), `boringcache-proxy-${proxy.port}.log`));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
     return {};
 }
@@ -1039,6 +1145,42 @@ async function runGradleRestore(plan, inputs) {
     }
     core.setOutput('cache-tag', cacheTag);
     core.setOutput('proxy-port', String(proxy.port));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+    core.setOutput('workspace', plan.workspace);
+    return {};
+}
+async function runMavenRestore(plan, inputs) {
+    var _a;
+    const cacheTag = inputs.cacheTag || getModeCacheTag('', 'maven');
+    const proxyPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const workingDirectory = plan.workingDirectory;
+    const extensionsPath = resolveUserPath(core.getInput('maven-extensions-path') || '.mvn/extensions.xml', workingDirectory);
+    const buildCacheConfigPath = resolveUserPath(core.getInput('maven-build-cache-config-path') || '.mvn/maven-build-cache-config.xml', workingDirectory);
+    const localRepo = resolveUserPath(core.getInput('maven-local-repo') || '~/.m2/repository', workingDirectory);
+    const extensionVersion = core.getInput('maven-build-cache-extension-version') || '1.2.2';
+    const cacheId = core.getInput('maven-build-cache-id') || 'boringcache';
+    const proxy = await (0, action_core_1.startRegistryProxy)({
+        command: 'cache-registry',
+        workspace: plan.workspace,
+        tag: cacheTag,
+        host: '127.0.0.1',
+        port: proxyPort,
+        noGit: inputs.proxyNoGit,
+        noPlatform: inputs.proxyNoPlatform,
+        verbose: inputs.verbose,
+        readOnly: inputs.readOnly,
+    });
+    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    saveModeState('proxy-pid', String(proxy.pid));
+    ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);
+    writeMavenBuildCacheConfig(buildCacheConfigPath, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : inputs.readOnly, cacheId);
+    ensureDir(localRepo);
+    core.setOutput('cache-tag', cacheTag);
+    core.setOutput('proxy-port', String(proxy.port));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+    core.setOutput('maven-extensions-path', extensionsPath);
+    core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
+    core.setOutput('maven-local-repo', localRepo);
     core.setOutput('workspace', plan.workspace);
     return {};
 }
@@ -1048,6 +1190,13 @@ async function runTurboProxyRestore(plan, inputs) {
     const turboToken = core.getInput('turbo-token') || 'boringcache';
     const turboTeam = core.getInput('turbo-team') || '';
     const preferredPort = parseInt(core.getInput('turbo-port') || inputs.proxyPort || '4227', 10);
+    const packageManager = await (0, utils_1.detectNodePackageManager)(plan.workingDirectory);
+    configureNodePackageManagerEnv(packageManager);
+    await ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools);
+    if (packageManager) {
+        core.setOutput('package-manager', packageManager.name);
+        core.setOutput('package-manager-cache-dir', packageManager.cacheDir);
+    }
     if (turboApiUrl) {
         configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
         core.setOutput('workspace', plan.workspace);
@@ -1065,6 +1214,7 @@ async function runTurboProxyRestore(plan, inputs) {
     configureTurboRemoteEnv(`http://127.0.0.1:${proxy.port}`, turboToken, turboTeam);
     core.setOutput('cache-tag', cacheTag);
     core.setOutput('proxy-port', String(proxy.port));
+    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
     return {};
 }
@@ -1077,6 +1227,7 @@ async function runRustRestore(plan, inputs) {
     const cacheCargoBin = core.getInput('cache-cargo-bin') === 'true';
     const cacheTarget = core.getInput('cache-target') !== 'false';
     const useSccache = core.getInput('sccache') === 'true';
+    const sccacheVersion = core.getInput('sccache-version') || '0.13.0';
     const sccacheMode = core.getInput('sccache-mode') || 'local';
     const sccacheCacheSize = core.getInput('sccache-cache-size') || '5G';
     const targets = core.getInput('targets');
@@ -1138,13 +1289,15 @@ async function runRustRestore(plan, inputs) {
         saveModeState('target-tag', targetTag);
     }
     if (useSccache) {
-        await installSccache();
+        await installSccache(sccacheVersion);
         if (sccacheMode === 'proxy') {
             const proxy = await startPortableCacheProxy(plan.workspace, await (0, action_core_1.findAvailablePort)(), cacheTagPrefix, inputs.readOnly);
             configureSccacheProxyEnv(proxy.port);
             await startSccacheServer();
             saveModeState('proxy-pid', String(proxy.pid));
             saveModeState('proxy-port', String(proxy.port));
+            core.setOutput('proxy-port', String(proxy.port));
+            core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
         }
         else {
             configureSccacheEnv(sccacheCacheSize);

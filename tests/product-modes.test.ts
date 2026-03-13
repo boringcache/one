@@ -126,8 +126,42 @@ describe('product modes', () => {
     }
   });
 
+  it('writes Maven build-cache config and detects Java/Maven tooling', async () => {
+    const project = await makeTempProject({
+      '.java-version': '21\n',
+      '.mvn/wrapper/maven-wrapper.properties': 'distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.9/apache-maven-3.9.9-bin.zip\n',
+    });
+
+    try {
+      mockGetInput({
+        mode: 'maven',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('java', '21', { label: 'Java' });
+      expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('maven', '3.9.9', { label: 'Maven' });
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'cache-registry',
+      }));
+      expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'maven');
+      expect(core.setOutput).toHaveBeenCalledWith(
+        'maven-build-cache-config-path',
+        path.join(project, '.mvn', 'maven-build-cache-config.xml'),
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('configures turbo proxy mode and exports turbo env', async () => {
-    const project = await makeTempProject({ '.node-version': '22.4.1\n' });
+    const project = await makeTempProject({
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
 
     try {
       mockGetInput({
@@ -139,8 +173,11 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('node', '22.4.1', { label: 'Node.js' });
+      expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('pnpm', '9.15.1', { label: 'pnpm' });
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalled();
       expect(core.exportVariable).toHaveBeenCalledWith('TURBO_API', 'http://127.0.0.1:5000');
+      expect(core.exportVariable).toHaveBeenCalledWith('PNPM_STORE_DIR', path.join(project, '.pnpm-store'));
+      expect(core.setOutput).toHaveBeenCalledWith('package-manager', 'pnpm');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'turbo-proxy');
     } finally {
       await removeTempProject(project);
@@ -176,6 +213,8 @@ describe('product modes', () => {
 
       expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('rust', '1.89.0', { label: 'Rust' });
       expect(exec.exec).not.toHaveBeenCalledWith('rustup', expect.anything(), expect.anything());
+      expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
+      expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'rust-sccache');
     } finally {
       await removeTempProject(project);

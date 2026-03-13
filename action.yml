@@ -11,7 +11,7 @@ inputs:
     default: 'mise'
     required: false
   mode:
-    description: 'Product mode: auto, archive, docker, buildkit, bazel, gradle, rust-sccache, or turbo-proxy.'
+    description: 'Product mode: auto, archive, docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.'
     default: 'auto'
     required: false
   preset:
@@ -150,6 +150,30 @@ inputs:
     description: 'Set org.gradle.caching=true in gradle.properties.'
     default: 'true'
     required: false
+  maven-version:
+    description: 'Maven version to install when setup=mise and the project does not already pin it.'
+    default: '3.9.9'
+    required: false
+  maven-local-repo:
+    description: 'Local Maven repository path. Used for archive defaults in Maven mode.'
+    default: '~/.m2/repository'
+    required: false
+  maven-extensions-path:
+    description: 'Path to .mvn/extensions.xml. Maven mode ensures the build-cache extension is present here.'
+    default: '.mvn/extensions.xml'
+    required: false
+  maven-build-cache-config-path:
+    description: 'Path to .mvn/maven-build-cache-config.xml written by Maven mode.'
+    default: '.mvn/maven-build-cache-config.xml'
+    required: false
+  maven-build-cache-extension-version:
+    description: 'Version of org.apache.maven.extensions:maven-build-cache-extension to configure in Maven mode.'
+    default: '1.2.2'
+    required: false
+  maven-build-cache-id:
+    description: 'Logical Maven remote build-cache id for the generated config.'
+    default: 'boringcache'
+    required: false
   rust-version:
     description: 'Rust version or channel to install when not handled by mise.'
     required: false
@@ -181,6 +205,10 @@ inputs:
   sccache:
     description: 'Enable sccache for Rust builds.'
     default: 'false'
+    required: false
+  sccache-version:
+    description: 'sccache version to install when the binary is not already available.'
+    default: '0.13.0'
     required: false
   sccache-cache-size:
     description: 'Maximum local sccache cache size.'
@@ -268,7 +296,7 @@ outputs:
   proxy-port:
     description: 'Resolved proxy port for proxy-backed modes'
   proxy-log-path:
-    description: 'Proxy log file path for Bazel mode'
+    description: 'Proxy log file path for proxy-backed modes'
   image-id:
     description: 'Built Docker image ID when available'
   digest:
@@ -289,6 +317,16 @@ outputs:
     description: 'Resolved sccache cache tag'
   sccache-hit:
     description: 'Whether the sccache cache was restored'
+  package-manager:
+    description: 'Detected Node.js package manager for Turbo mode'
+  package-manager-cache-dir:
+    description: 'Resolved package-manager cache directory exported by Turbo mode'
+  maven-extensions-path:
+    description: 'Resolved Maven extensions.xml path'
+  maven-build-cache-config-path:
+    description: 'Resolved Maven build-cache config path'
+  maven-local-repo:
+    description: 'Resolved Maven local repository path'
 runs:
   using: 'node24'
   main: 'dist/restore/index.js'

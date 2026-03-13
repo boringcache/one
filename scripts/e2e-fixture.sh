@@ -438,7 +438,7 @@ prepare_case() {
     rails-preset) prepare_rails_preset ;;
     python) prepare_python ;;
     go) prepare_go ;;
-    java-maven) prepare_java_maven ;;
+    java-maven|maven) prepare_java_maven ;;
     elixir) prepare_elixir ;;
     docker) prepare_docker ;;
     buildkit) prepare_buildkit ;;

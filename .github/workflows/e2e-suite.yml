@@ -442,6 +442,15 @@ jobs:
             enable_sccache: 'false'
             sccache_mode: ''
             cache_target: ''
+          - id: maven
+            setup: mise
+            mode: maven
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
           - id: rust-sccache
             setup: mise
             mode: rust-sccache
@@ -455,9 +464,7 @@ jobs:
             setup: mise
             mode: turbo-proxy
             tools: ''
-            entries: |
-              node-modules:node_modules
-              npm-cache:.npm-cache
+            entries: ''
             output: ''
             enable_sccache: 'false'
             sccache_mode: ''
@@ -521,6 +528,7 @@ jobs:
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+          maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
           sccache: ${{ matrix.enable_sccache }}
           sccache-mode: ${{ matrix.sccache_mode }}
           cache-target: ${{ matrix.cache_target }}
@@ -581,6 +589,15 @@ jobs:
             enable_sccache: 'false'
             sccache_mode: ''
             cache_target: ''
+          - id: maven
+            setup: mise
+            mode: maven
+            tools: ''
+            entries: ''
+            output: ''
+            enable_sccache: 'false'
+            sccache_mode: ''
+            cache_target: ''
           - id: rust-sccache
             setup: mise
             mode: rust-sccache
@@ -594,9 +611,7 @@ jobs:
             setup: mise
             mode: turbo-proxy
             tools: ''
-            entries: |
-              node-modules:node_modules
-              npm-cache:.npm-cache
+            entries: ''
             output: ''
             enable_sccache: 'false'
             sccache_mode: ''
@@ -660,6 +675,7 @@ jobs:
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
+          maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
           sccache: ${{ matrix.enable_sccache }}
           sccache-mode: ${{ matrix.sccache_mode }}
           cache-target: ${{ matrix.cache_target }}

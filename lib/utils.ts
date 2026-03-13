@@ -50,6 +50,14 @@ export interface ToolSpec {
   source: 'input' | 'project' | 'preset' | 'mode';
 }
 
+export interface NodePackageManagerInfo {
+  name: 'npm' | 'pnpm' | 'yarn';
+  version: string | null;
+  packageManagerField: string | null;
+  cacheDir: string;
+  nodeModulesDir: string;
+}
+
 export interface OneInputs {
   cliVersion: string;
   setup: SetupMode;
@@ -62,6 +70,8 @@ export interface OneInputs {
   tools: string;
   toolVersionScope: MiseVersionScope;
   cacheRuntime: boolean;
+  mavenVersion: string;
+  mavenLocalRepo: string;
   readOnly: boolean;
   proxyPort: string;
   proxyNoGit: boolean;
@@ -127,6 +137,8 @@ export function getInputs(): OneInputs {
     tools: core.getInput('tools'),
     toolVersionScope: normalizeToolVersionScope(core.getInput('tool-version-scope')),
     cacheRuntime: core.getBooleanInput('cache-runtime'),
+    mavenVersion: core.getInput('maven-version') || '3.9.9',
+    mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
     readOnly: core.getBooleanInput('read-only'),
     proxyPort: core.getInput('proxy-port'),
     proxyNoGit: core.getBooleanInput('proxy-no-git'),
@@ -246,6 +258,7 @@ async function detectProjectTools(workingDirectory: string): Promise<ToolSpec[]>
     detectToolFromProjectFiles(workingDirectory, 'python', detectPythonVersion),
     detectToolFromProjectFiles(workingDirectory, 'go', detectGoVersion),
     detectToolFromProjectFiles(workingDirectory, 'java', detectJavaVersion),
+    detectToolFromProjectFiles(workingDirectory, 'maven', detectMavenVersion),
     detectToolFromProjectFiles(workingDirectory, 'bazel', detectBazelVersion),
     detectToolFromProjectFiles(workingDirectory, 'rust', detectRustVersion),
   ]);
@@ -254,6 +267,11 @@ async function detectProjectTools(workingDirectory: string): Promise<ToolSpec[]>
     if (tool && !tools.has(tool.name)) {
       tools.set(tool.name, tool);
     }
+  }
+
+  const packageManagerTool = await detectNodePackageManagerTool(workingDirectory);
+  if (packageManagerTool && !tools.has(packageManagerTool.name)) {
+    tools.set(packageManagerTool.name, packageManagerTool);
   }
 
   return Array.from(tools.values());
@@ -278,6 +296,8 @@ async function detectModeTools(mode: OneMode, workingDirectory: string): Promise
       return detectBazelTools(workingDirectory);
     case 'gradle':
       return detectGradleTools(workingDirectory);
+    case 'maven':
+      return detectMavenTools(workingDirectory);
     case 'rust-sccache':
       return detectRustTools(workingDirectory);
     default:
@@ -300,16 +320,27 @@ async function detectRailsTools(workingDirectory: string): Promise<ToolSpec[]> {
     }
   }
 
+  const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
+  if (packageManagerTool) {
+    tools.push(packageManagerTool);
+  }
+
   return tools;
 }
 
 async function detectNodeTurboTools(workingDirectory: string): Promise<ToolSpec[]> {
+  const tools: ToolSpec[] = [];
   const nodeVersion = await detectNodeVersion(workingDirectory);
-  if (!nodeVersion) {
-    return [];
+  if (nodeVersion) {
+    tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
   }
 
-  return [{ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' }];
+  const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
+  if (packageManagerTool) {
+    tools.push(packageManagerTool);
+  }
+
+  return tools;
 }
 
 async function detectBazelTools(workingDirectory: string): Promise<ToolSpec[]> {
@@ -328,6 +359,21 @@ async function detectGradleTools(workingDirectory: string): Promise<ToolSpec[]> 
   }
 
   return [{ name: 'java', version: javaVersion, label: 'Java', source: 'mode' }];
+}
+
+async function detectMavenTools(workingDirectory: string): Promise<ToolSpec[]> {
+  const tools: ToolSpec[] = [];
+  const javaVersion = await detectJavaVersion(workingDirectory);
+  if (javaVersion) {
+    tools.push({ name: 'java', version: javaVersion, label: 'Java', source: 'mode' });
+  }
+
+  const mavenVersion = await detectMavenVersion(workingDirectory);
+  if (mavenVersion) {
+    tools.push({ name: 'maven', version: mavenVersion, label: 'Maven', source: 'mode' });
+  }
+
+  return tools;
 }
 
 async function detectRustTools(workingDirectory: string): Promise<ToolSpec[]> {
@@ -429,7 +475,38 @@ async function detectJavaVersion(workingDirectory: string): Promise<string | nul
     return toolVersion;
   }
 
-  return readMiseTomlVersion(workingDirectory, 'java');
+  const miseVersion = await readMiseTomlVersion(workingDirectory, 'java');
+  if (miseVersion) {
+    return miseVersion;
+  }
+
+  const pomXml = await readFile(path.join(workingDirectory, 'pom.xml'));
+  if (pomXml) {
+    const pomMatch = pomXml.match(/<maven\.compiler\.(?:release|source|target)>\s*([^<\s]+)\s*<\/maven\.compiler\.(?:release|source|target)>/)
+      || pomXml.match(/<java\.version>\s*([^<\s]+)\s*<\/java\.version>/);
+    if (pomMatch?.[1]) {
+      return pomMatch[1].trim();
+    }
+  }
+
+  return null;
+}
+
+async function detectMavenVersion(workingDirectory: string): Promise<string | null> {
+  const wrapperProps = await readFile(path.join(workingDirectory, '.mvn', 'wrapper', 'maven-wrapper.properties'));
+  if (wrapperProps) {
+    const match = wrapperProps.match(/apache-maven-([0-9]+(?:\.[0-9]+)*)-bin/i);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  const toolVersion = await readToolVersionsValue(workingDirectory, 'maven');
+  if (toolVersion) {
+    return toolVersion;
+  }
+
+  return readMiseTomlVersion(workingDirectory, 'maven');
 }
 
 async function detectRustVersion(workingDirectory: string): Promise<string | null> {
@@ -498,6 +575,100 @@ async function needsNodeRuntime(workingDirectory: string): Promise<boolean> {
     }
   }
   return false;
+}
+
+async function readPackageJson(workingDirectory: string): Promise<Record<string, unknown> | null> {
+  const packageJson = await readFile(path.join(workingDirectory, 'package.json'));
+  if (!packageJson) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(packageJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePackageManagerName(name: string): NodePackageManagerInfo['name'] | null {
+  const normalized = name.trim().toLowerCase();
+  if (normalized === 'npm' || normalized === 'pnpm' || normalized === 'yarn') {
+    return normalized;
+  }
+  return null;
+}
+
+function packageManagerCacheDir(workingDirectory: string, name: NodePackageManagerInfo['name']): string {
+  switch (name) {
+    case 'pnpm':
+      return path.join(workingDirectory, '.pnpm-store');
+    case 'yarn':
+      return path.join(workingDirectory, '.yarn-cache');
+    case 'npm':
+      return path.join(workingDirectory, '.npm-cache');
+  }
+}
+
+export async function detectNodePackageManager(workingDirectory: string): Promise<NodePackageManagerInfo | null> {
+  const packageJson = await readPackageJson(workingDirectory);
+  const packageManagerField = typeof packageJson?.packageManager === 'string'
+    ? packageJson.packageManager.trim()
+    : '';
+
+  let name: NodePackageManagerInfo['name'] | null = null;
+  let version: string | null = null;
+
+  if (packageManagerField) {
+    const atIndex = packageManagerField.lastIndexOf('@');
+    if (atIndex > 0) {
+      name = normalizePackageManagerName(packageManagerField.slice(0, atIndex));
+      version = packageManagerField.slice(atIndex + 1).trim().split('+')[0] || null;
+    }
+  }
+
+  if (!name) {
+    if (await pathExists(path.join(workingDirectory, 'pnpm-lock.yaml'))) {
+      name = 'pnpm';
+    } else if (await pathExists(path.join(workingDirectory, 'yarn.lock'))) {
+      name = 'yarn';
+    } else if (
+      await pathExists(path.join(workingDirectory, 'package-lock.json'))
+      || await pathExists(path.join(workingDirectory, 'npm-shrinkwrap.json'))
+    ) {
+      name = 'npm';
+    } else if (packageJson) {
+      name = 'npm';
+    }
+  }
+
+  if (!name) {
+    return null;
+  }
+
+  return {
+    name,
+    version,
+    packageManagerField: packageManagerField || null,
+    cacheDir: packageManagerCacheDir(workingDirectory, name),
+    nodeModulesDir: path.join(workingDirectory, 'node_modules'),
+  };
+}
+
+async function detectNodePackageManagerTool(
+  workingDirectory: string,
+  source: ToolSpec['source'] = 'project',
+): Promise<ToolSpec | null> {
+  const packageManager = await detectNodePackageManager(workingDirectory);
+  if (!packageManager?.version) {
+    return null;
+  }
+
+  return {
+    name: packageManager.name,
+    version: packageManager.version,
+    label: TOOL_LABELS[packageManager.name] || packageManager.name,
+    source,
+  };
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -583,14 +754,23 @@ function prefixArchiveTag(tag: string, cacheTag: string): string {
   return `${prefix}-${tag}`;
 }
 
+function normalizeEntriesInput(entries: string): string {
+  return entries
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .join(',');
+}
+
 function scopeArchiveEntries(
   entries: string,
   cacheTag: string,
   tools: ToolSpec[],
   versionScope: MiseVersionScope,
 ): string {
+  const normalizedEntries = normalizeEntriesInput(entries);
   if (!entries.trim() || tools.length === 0) {
-    return parseEntries(entries, 'restore', { resolvePaths: false })
+    return parseEntries(normalizedEntries, 'restore', { resolvePaths: false })
       .map((entry) => {
         const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
         const pathSpec = entry.restorePath === entry.savePath
@@ -601,7 +781,7 @@ function scopeArchiveEntries(
       .join(',');
   }
 
-  return parseEntries(entries, 'restore', { resolvePaths: false })
+  return parseEntries(normalizedEntries, 'restore', { resolvePaths: false })
     .map((entry) => {
       const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
       const scopedTag = scopeTagToRuntimeTools(prefixedTag, tools, versionScope);
@@ -613,17 +793,42 @@ function scopeArchiveEntries(
     .join(',');
 }
 
-export function buildArchiveEntries(
+async function detectDefaultArchiveEntries(inputs: OneInputs): Promise<string> {
+  if (inputs.mode === 'maven') {
+    return `maven-repo:${inputs.mavenLocalRepo}`;
+  }
+
+  if (inputs.mode === 'turbo-proxy' || inputs.preset === 'node-turbo') {
+    const packageManager = await detectNodePackageManager(inputs.workingDirectory);
+    if (!packageManager) {
+      return '';
+    }
+
+    switch (packageManager.name) {
+      case 'pnpm':
+        return 'pnpm-store:.pnpm-store\nnode-modules:node_modules';
+      case 'yarn':
+        return 'yarn-cache:.yarn-cache\nnode-modules:node_modules';
+      case 'npm':
+        return 'npm-cache:.npm-cache\nnode-modules:node_modules';
+    }
+  }
+
+  return '';
+}
+
+export async function buildArchiveEntries(
   inputs: OneInputs,
   runtimeTools: ToolSpec[],
-): { entries: string; usesCacheFormat: boolean } {
+): Promise<{ entries: string; usesCacheFormat: boolean }> {
   let archiveEntries = '';
   let usesCacheFormat = false;
+  let sourceEntries = inputs.entries;
 
-  if (inputs.entries) {
+  if (sourceEntries) {
     archiveEntries = inputs.setup === 'mise'
-      ? scopeArchiveEntries(inputs.entries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
-      : scopeArchiveEntries(inputs.entries, inputs.cacheTag, [], inputs.toolVersionScope);
+      ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
+      : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
   } else if (inputs.path || inputs.key) {
     if (!inputs.path || !inputs.key) {
       throw new Error('actions/cache compatibility mode requires both path and key');
@@ -635,6 +840,13 @@ export function buildArchiveEntries(
       enableCrossOsArchive: inputs.enableCrossOsArchive,
     }, 'restore');
     usesCacheFormat = true;
+  } else {
+    sourceEntries = await detectDefaultArchiveEntries(inputs);
+    if (sourceEntries) {
+      archiveEntries = inputs.setup === 'mise'
+        ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
+        : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
+    }
   }
 
   return {
@@ -680,6 +892,7 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
   const workspace = resolveWorkspace(inputs.workspace);
   const modeSpec = resolveModeSpec(inputs.mode);
   assertImplementedMode(modeSpec);
+  const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
 
   const runtimeTools = await resolveRuntimeTools(
     inputs.setup,
@@ -688,6 +901,19 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     inputs.tools,
     inputs.workingDirectory,
   );
+  if (
+    inputs.setup === 'mise'
+    && modeSpec.resolved === 'maven'
+    && resolvedMavenVersion
+    && !runtimeTools.some((tool) => tool.name === 'maven')
+  ) {
+    runtimeTools.push({
+      name: 'maven',
+      version: resolvedMavenVersion,
+      label: 'Maven',
+      source: 'mode',
+    });
+  }
   const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools);
   const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
     ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
@@ -696,7 +922,7 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
     : null;
 
-  const archiveEntries = buildArchiveEntries(inputs, runtimeTools);
+  const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
   validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
 
   return {
@@ -721,7 +947,7 @@ export function getCacheTagPrefix(inputs: OneInputs, runtimeTools: ToolSpec[]): 
   }
 
   if (inputs.entries) {
-    const firstEntry = parseEntries(inputs.entries, 'restore', { resolvePaths: false })[0];
+    const firstEntry = parseEntries(normalizeEntriesInput(inputs.entries), 'restore', { resolvePaths: false })[0];
     if (firstEntry) {
       return firstEntry.tag;
     }

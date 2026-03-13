@@ -4,6 +4,7 @@ describe('mode registry', () => {
   it('normalizes supported modes', () => {
     expect(normalizeMode('docker')).toBe('docker');
     expect(normalizeMode('archive')).toBe('archive');
+    expect(normalizeMode('maven')).toBe('maven');
   });
 
   it('resolves auto to archive for the current MVP', () => {

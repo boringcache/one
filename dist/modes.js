@@ -34,6 +34,12 @@ const MODE_SPECS = {
         compatibilityWrappers: ['boringcache/gradle-action'],
         description: 'Gradle build cache proxy integration.',
     },
+    maven: {
+        resolved: 'maven',
+        implemented: true,
+        compatibilityWrappers: [],
+        description: 'Maven build cache proxy and archive integration.',
+    },
     'rust-sccache': {
         resolved: 'rust-sccache',
         implemented: true,
@@ -56,11 +62,12 @@ function normalizeMode(value) {
         case 'buildkit':
         case 'bazel':
         case 'gradle':
+        case 'maven':
         case 'rust-sccache':
         case 'turbo-proxy':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, rust-sccache, or turbo-proxy.`);
+            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.`);
     }
 }
 function resolveModeSpec(mode) {

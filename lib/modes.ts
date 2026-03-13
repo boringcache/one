@@ -5,6 +5,7 @@ export type OneMode =
   | 'buildkit'
   | 'bazel'
   | 'gradle'
+  | 'maven'
   | 'rust-sccache'
   | 'turbo-proxy';
 
@@ -49,6 +50,12 @@ const MODE_SPECS: Record<ResolvedMode, Omit<ModeSpec, 'requested'>> = {
     compatibilityWrappers: ['boringcache/gradle-action'],
     description: 'Gradle build cache proxy integration.',
   },
+  maven: {
+    resolved: 'maven',
+    implemented: true,
+    compatibilityWrappers: [],
+    description: 'Maven build cache proxy and archive integration.',
+  },
   'rust-sccache': {
     resolved: 'rust-sccache',
     implemented: true,
@@ -72,12 +79,13 @@ export function normalizeMode(value: string): OneMode {
     case 'buildkit':
     case 'bazel':
     case 'gradle':
+    case 'maven':
     case 'rust-sccache':
     case 'turbo-proxy':
       return normalized;
     default:
       throw new Error(
-        `Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, rust-sccache, or turbo-proxy.`,
+        `Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.`,
       );
   }
 }

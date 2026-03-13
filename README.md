@@ -14,7 +14,7 @@ Use `boringcache/one` when you want a single GitHub Action entrypoint for:
 - archive caching
 - mise-powered language and build tool setup
 - Docker and BuildKit cache flows
-- Bazel, Gradle, Turbo, and Rust+sccache proxy-backed modes
+- Bazel, Gradle, Maven, Turbo, and Rust+sccache proxy-backed modes
 
 ## When to use it
 
@@ -93,6 +93,37 @@ Rust with remote sccache:
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
+Turbo monorepo with automatic package-manager cache defaults:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    mode: turbo-proxy
+    workspace: my-org/my-project
+    cache-tag: web
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+When you omit `entries` in `mode: turbo-proxy`, `one` detects `npm`, `pnpm`, or `yarn` from the project and defaults archive entries for the package-manager cache plus `node_modules`. It also exports project-local cache directories such as `PNPM_STORE_DIR`, `YARN_CACHE_FOLDER`, or `npm_config_cache`.
+
+Maven with generated build-cache config:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    mode: maven
+    workspace: my-org/my-project
+    cache-tag: service
+    maven-local-repo: .m2/repository
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+In `mode: maven`, `one` starts the cache-registry proxy, ensures `.mvn/extensions.xml` contains the Maven build-cache extension, writes `.mvn/maven-build-cache-config.xml`, and defaults the archive cache to the Maven local repository when you do not pass `entries`.
+
 ## What it handles
 
 - `mode: archive` for generic portable directory caches
@@ -100,6 +131,7 @@ Rust with remote sccache:
 - `mode: buildkit` for direct `buildctl` flows
 - `mode: bazel` for remote cache proxy wiring
 - `mode: gradle` for Gradle remote build cache wiring
+- `mode: maven` for Maven build cache extension and proxy wiring
 - `mode: turbo-proxy` for Turbo remote cache proxy wiring
 - `mode: rust-sccache` for Rust toolchain, cargo caches, and remote `sccache`
 - `setup: mise` for installing toolchains such as Node, pnpm, Yarn, Ruby, Python, Go, Java, Maven, Gradle, Rust, Elixir, Erlang, and Bazel
@@ -125,6 +157,7 @@ In practice:
 - Ruby plus Node is one step
 - Docker plus Rails tooling can be one step
 - Bazel plus Gradle should be separate `boringcache/one` steps in the same job
+- Maven plus Docker should be separate `boringcache/one` steps in the same job
 
 ## Tag model
 
@@ -160,7 +193,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | Input | Description |
 |-------|-------------|
 | `setup` | `mise`, `external`, or `none`. Defaults to `mise`. |
-| `mode` | `auto`, `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `turbo-proxy`, or `rust-sccache`. Defaults to `auto`. |
+| `mode` | `auto`, `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `maven`, `turbo-proxy`, or `rust-sccache`. Defaults to `auto`. |
 | `preset` | `none`, `rails`, or `node-turbo`. |
 | `workspace` | Workspace in `org/repo` form. Defaults to `BORINGCACHE_DEFAULT_WORKSPACE`, then the repository name. |
 | `working-directory` | Project root used for detection and relative paths. |
@@ -190,7 +223,8 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `buildkit-host`, `output`, `ssh` | BuildKit-only inputs. |
 | `bazel-version` | Bazel version for Bazelisk. |
 | `gradle-home`, `enable-build-cache` | Gradle mode inputs. |
-| `rust-version`, `toolchain`, `targets`, `components`, `sccache`, `sccache-mode` | Rust mode inputs. |
+| `maven-local-repo`, `maven-extensions-path`, `maven-build-cache-config-path`, `maven-build-cache-extension-version`, `maven-build-cache-id` | Maven mode inputs. |
+| `rust-version`, `toolchain`, `targets`, `components`, `sccache`, `sccache-version`, `sccache-mode` | Rust mode inputs. |
 | `turbo-api-url`, `turbo-token`, `turbo-team`, `turbo-port` | Turbo proxy mode inputs. |
 | `read-only`, `proxy-port`, `proxy-no-git`, `proxy-no-platform` | Shared proxy-mode controls. |
 
@@ -203,7 +237,9 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `resolved-mode` | Effective mode used by the action. |
 | `resolved-tools` | Resolved `mise` tools as newline-separated `tool@version` values. |
 | `workspace`, `cache-tag`, `runtime-cache-tag`, `resolved-entries`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
+| `package-manager`, `package-manager-cache-dir` | Turbo mode outputs. |
 | `image-id`, `digest`, `buildx-name`, `buildx-platforms` | Docker and BuildKit outputs. |
+| `maven-extensions-path`, `maven-build-cache-config-path`, `maven-local-repo` | Maven mode outputs. |
 | `rust-version`, `cargo-tag`, `target-tag`, `cargo-bin-tag`, `sccache-tag`, `sccache-hit` | Rust mode outputs. |
 
 ## Learn more
