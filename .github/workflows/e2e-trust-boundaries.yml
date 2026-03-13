@@ -93,7 +93,7 @@ jobs:
         with:
           setup: none
           mode: archive
-          workspace: boringcache/one-trust
+          workspace: boringcache/actions
           cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
@@ -146,7 +146,7 @@ jobs:
         with:
           setup: none
           mode: archive
-          workspace: boringcache/one-trust
+          workspace: boringcache/actions
           cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
@@ -218,7 +218,7 @@ jobs:
         with:
           setup: none
           mode: archive
-          workspace: boringcache/one-trust
+          workspace: boringcache/actions
           cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
@@ -292,7 +292,7 @@ jobs:
         with:
           setup: mise
           mode: ${{ matrix.mode }}
-          workspace: boringcache/one-trust
+          workspace: boringcache/actions
           cache-tag: ${{ format('readonly-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}

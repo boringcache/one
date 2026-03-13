@@ -203,7 +203,7 @@ jobs:
           setup: ${{ matrix.setup }}
           mode: ${{ matrix.mode }}
           preset: ${{ matrix.preset }}
-          workspace: boringcache/one-e2e
+          workspace: boringcache/actions
           cache-tag: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
@@ -373,7 +373,7 @@ jobs:
           setup: ${{ matrix.setup }}
           mode: ${{ matrix.mode }}
           preset: ${{ matrix.preset }}
-          workspace: boringcache/one-e2e
+          workspace: boringcache/actions
           cache-tag: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
@@ -521,7 +521,7 @@ jobs:
         with:
           setup: ${{ matrix.setup }}
           mode: ${{ matrix.mode }}
-          workspace: boringcache/one-e2e
+          workspace: boringcache/actions
           cache-tag: ${{ format('mode-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
@@ -669,7 +669,7 @@ jobs:
         with:
           setup: ${{ matrix.setup }}
           mode: ${{ matrix.mode }}
-          workspace: boringcache/one-e2e
+          workspace: boringcache/actions
           cache-tag: ${{ format('mode-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
