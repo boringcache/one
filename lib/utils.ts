@@ -8,6 +8,7 @@ import {
   buildMiseToolTag,
   convertCacheFormatToEntries,
   ensureBoringCache,
+  exportMiseEnv,
   execBoringCache,
   getInputsWorkspace,
   getMiseInstallsDir,
@@ -35,6 +36,7 @@ export {
   activateMiseTool,
   convertCacheFormatToEntries,
   ensureBoringCache,
+  exportMiseEnv,
   execBoringCache,
   getMiseInstallsDir,
   hasMiseToolVersion,
@@ -994,7 +996,7 @@ export function buildFlagArgs(inputs: OneInputs): string[] {
   return flagArgs;
 }
 
-export async function applyMiseSetup(runtimeTools: ToolSpec[], _runtimeCacheHit: boolean): Promise<boolean> {
+export async function applyMiseSetup(runtimeTools: ToolSpec[], _runtimeCacheHit: boolean, cwd?: string): Promise<boolean> {
   void _runtimeCacheHit;
 
   if (runtimeTools.length === 0) {
@@ -1030,6 +1032,7 @@ export async function applyMiseSetup(runtimeTools: ToolSpec[], _runtimeCacheHit:
   }
 
   await reshimMise();
+  await exportMiseEnv(cwd);
   return true;
 }
 

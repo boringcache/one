@@ -8,6 +8,7 @@ const mockInstallMiseTool = jest.fn();
 const mockActivateMiseTool = jest.fn();
 const mockHasMiseToolVersion = jest.fn();
 const mockHasToolVersionOnPath = jest.fn();
+const mockExportMiseEnv = jest.fn();
 const mockReshimMise = jest.fn();
 const mockReadProjectMiseTools = jest.fn();
 const mockReadMiseTomlVersion = jest.fn();
@@ -61,6 +62,7 @@ jest.mock('@boringcache/action-core', () => {
     activateMiseTool: mockActivateMiseTool,
     hasMiseToolVersion: mockHasMiseToolVersion,
     hasToolVersionOnPath: mockHasToolVersionOnPath,
+    exportMiseEnv: mockExportMiseEnv,
     reshimMise: mockReshimMise,
     readProjectMiseTools: mockReadProjectMiseTools,
     readMiseTomlVersion: mockReadMiseTomlVersion,
@@ -96,6 +98,7 @@ beforeEach(() => {
   mockActivateMiseTool.mockResolvedValue(undefined);
   mockHasMiseToolVersion.mockResolvedValue(false);
   mockHasToolVersionOnPath.mockResolvedValue(false);
+  mockExportMiseEnv.mockResolvedValue(undefined);
   mockReshimMise.mockResolvedValue(undefined);
   mockReadProjectMiseTools.mockResolvedValue([]);
   mockReadMiseTomlVersion.mockResolvedValue(null);
@@ -128,6 +131,7 @@ export const actionCoreMocks = {
   activateMiseTool: mockActivateMiseTool,
   ensureBoringCache: mockEnsureBoringCache,
   execBoringCache: mockExecBoringCache,
+  exportMiseEnv: mockExportMiseEnv,
   hasMiseToolVersion: mockHasMiseToolVersion,
   hasToolVersionOnPath: mockHasToolVersionOnPath,
   installMise: mockInstallMise,

@@ -265,6 +265,7 @@ describe('one utils', () => {
     );
     expect(actionCoreMocks.activateMiseTool).not.toHaveBeenCalled();
     expect(actionCoreMocks.reshimMise).toHaveBeenCalledTimes(1);
+    expect(actionCoreMocks.exportMiseEnv).toHaveBeenCalledWith(undefined);
   });
 
   it('activates tools when the requested version is already installed in mise', async () => {
@@ -282,6 +283,7 @@ describe('one utils', () => {
     );
     expect(actionCoreMocks.installMiseTool).not.toHaveBeenCalled();
     expect(actionCoreMocks.reshimMise).toHaveBeenCalledTimes(1);
+    expect(actionCoreMocks.exportMiseEnv).toHaveBeenCalledWith(undefined);
   });
 
   it('skips mise entirely when matching tools are already on PATH', async () => {
@@ -296,6 +298,7 @@ describe('one utils', () => {
     expect(actionCoreMocks.installMiseTool).not.toHaveBeenCalled();
     expect(actionCoreMocks.activateMiseTool).not.toHaveBeenCalled();
     expect(actionCoreMocks.reshimMise).not.toHaveBeenCalled();
+    expect(actionCoreMocks.exportMiseEnv).not.toHaveBeenCalled();
   });
 
   it('uses readable runtime tool versions in the cache tag', () => {

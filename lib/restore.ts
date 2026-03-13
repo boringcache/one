@@ -96,7 +96,7 @@ export async function run(): Promise<void> {
 
     let usedMiseRuntime = false;
     if (plan.setup === 'mise') {
-      usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit);
+      usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
     }
 
     const archiveRestore = await restoreEntries(

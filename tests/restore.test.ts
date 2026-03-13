@@ -103,4 +103,17 @@ describe('restore action', () => {
     expect(actionCoreMocks.installMise).not.toHaveBeenCalled();
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-entries', '');
   });
+
+  it('exports mise environment after installing runtime tools', async () => {
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      tools: 'java@21',
+    });
+    mockGetBooleanInput({ 'cache-runtime': true });
+
+    await restoreRun();
+
+    expect(actionCoreMocks.installMise).toHaveBeenCalled();
+    expect(actionCoreMocks.exportMiseEnv).toHaveBeenCalledWith(process.cwd());
+  });
 });

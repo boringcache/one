@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
+exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
 exports.normalizeSetup = normalizeSetup;
 exports.normalizePreset = normalizePreset;
@@ -61,6 +61,7 @@ const action_core_1 = require("@boringcache/action-core");
 Object.defineProperty(exports, "activateMiseTool", { enumerable: true, get: function () { return action_core_1.activateMiseTool; } });
 Object.defineProperty(exports, "convertCacheFormatToEntries", { enumerable: true, get: function () { return action_core_1.convertCacheFormatToEntries; } });
 Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return action_core_1.ensureBoringCache; } });
+Object.defineProperty(exports, "exportMiseEnv", { enumerable: true, get: function () { return action_core_1.exportMiseEnv; } });
 Object.defineProperty(exports, "execBoringCache", { enumerable: true, get: function () { return action_core_1.execBoringCache; } });
 Object.defineProperty(exports, "getMiseInstallsDir", { enumerable: true, get: function () { return action_core_1.getMiseInstallsDir; } });
 Object.defineProperty(exports, "hasMiseToolVersion", { enumerable: true, get: function () { return action_core_1.hasMiseToolVersion; } });
@@ -800,7 +801,7 @@ function buildFlagArgs(inputs) {
     }
     return flagArgs;
 }
-async function applyMiseSetup(runtimeTools, _runtimeCacheHit) {
+async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     void _runtimeCacheHit;
     if (runtimeTools.length === 0) {
         return false;
@@ -827,6 +828,7 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit) {
         }
     }
     await (0, action_core_1.reshimMise)();
+    await (0, action_core_1.exportMiseEnv)(cwd);
     return true;
 }
 function serializeTools(runtimeTools) {

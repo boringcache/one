@@ -88,7 +88,7 @@ async function run() {
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', inputs.verbose ? ['--verbose'] : [], false);
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
-            usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit);
+            usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
         }
         const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, (0, utils_1.buildFlagArgs)(inputs), plan.usesCacheFormat);
         const modeRestore = await (0, mode_handlers_1.runModeRestore)(plan, inputs);
