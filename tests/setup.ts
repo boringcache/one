@@ -80,6 +80,16 @@ beforeEach(() => {
   jest.resetAllMocks();
   process.env = { ...originalEnv };
   delete process.env.BORINGCACHE_DEFAULT_WORKSPACE;
+  delete process.env.BORINGCACHE_DEFAULT_BRANCH;
+  delete process.env.BORINGCACHE_GIT_BRANCH;
+  delete process.env.BORINGCACHE_GIT_SHA;
+  delete process.env.CI;
+  delete process.env.GITHUB_ACTIONS;
+  delete process.env.GITHUB_HEAD_REF;
+  delete process.env.GITHUB_REF;
+  delete process.env.GITHUB_REF_NAME;
+  delete process.env.GITHUB_REPOSITORY;
+  delete process.env.GITHUB_SHA;
   process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
 
   mockEnsureBoringCache.mockImplementation(async (options: { version: string; token?: string }) => {
