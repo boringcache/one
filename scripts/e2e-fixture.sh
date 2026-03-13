@@ -65,7 +65,7 @@ source 'https://rubygems.org'
 gem 'rake', '~> 13.2'
 EOF
   cat >"$workdir/Rakefile" <<'EOF'
-task default do
+task :default do
   puts 'ruby-e2e-ok'
 end
 EOF
@@ -89,7 +89,7 @@ source 'https://rubygems.org'
 gem 'rake', '~> 13.2'
 EOF
   cat >"$workdir/Rakefile" <<'EOF'
-task default do
+task :default do
   puts 'rails-preset-ruby-ok'
 end
 EOF
@@ -388,6 +388,7 @@ EOF
 {
   "name": "turbo-proxy-e2e",
   "private": true,
+  "packageManager": "npm@10.8.2",
   "workspaces": [
     "packages/*"
   ],
