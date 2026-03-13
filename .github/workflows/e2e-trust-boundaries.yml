@@ -98,6 +98,8 @@ jobs:
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
             marker:restore=>marker.txt
+          verify: wait
+          verify-require-server-signature: true
           verbose: true
 
   archive-poison-attempt:
@@ -149,30 +151,9 @@ jobs:
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
             marker:restore=>marker.txt
+          verify: check
+          verify-require-server-signature: true
           verbose: true
-
-      - name: Wait for trusted cache to become readable
-        if: steps.tokens.outputs.enabled == 'true'
-        env:
-          BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '1'
-        run: |
-          set -euo pipefail
-          target="$E2E_WORKDIR/restore/marker.txt"
-          if [ -f "$target" ]; then
-            exit 0
-          fi
-
-          for attempt in 1 2 3 4 5; do
-            echo "Trusted archive not materialized yet; retrying restore (${attempt}/5)..."
-            boringcache restore "${{ steps.cache.outputs.workspace }}" "${{ steps.cache.outputs.resolved-entries }}" --verbose || true
-            if [ -f "$target" ]; then
-              exit 0
-            fi
-            sleep $((attempt * 2))
-          done
-
-          echo "Trusted archive did not materialize after retries" >&2
-          exit 1
 
       - name: Assert trusted contents
         if: steps.tokens.outputs.enabled == 'true'
@@ -242,30 +223,9 @@ jobs:
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
             marker:restore=>marker.txt
+          verify: check
+          verify-require-server-signature: true
           verbose: true
-
-      - name: Wait for trusted cache to become readable
-        if: steps.tokens.outputs.enabled == 'true'
-        env:
-          BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '1'
-        run: |
-          set -euo pipefail
-          target="$E2E_WORKDIR/restore/marker.txt"
-          if [ -f "$target" ]; then
-            exit 0
-          fi
-
-          for attempt in 1 2 3 4 5; do
-            echo "Trusted archive not materialized yet; retrying restore (${attempt}/5)..."
-            boringcache restore "${{ steps.cache.outputs.workspace }}" "${{ steps.cache.outputs.resolved-entries }}" --verbose || true
-            if [ -f "$target" ]; then
-              exit 0
-            fi
-            sleep $((attempt * 2))
-          done
-
-          echo "Trusted archive did not materialize after retries" >&2
-          exit 1
 
       - name: Assert original cache is intact
         if: steps.tokens.outputs.enabled == 'true'

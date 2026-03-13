@@ -211,6 +211,7 @@ jobs:
           path: ${{ matrix.path }}
           key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
           restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
+          verify: wait
           verbose: true
 
       - name: Seed fixture
@@ -380,6 +381,7 @@ jobs:
           path: ${{ matrix.path }}
           key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
           restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
+          verify: check
           verbose: true
 
       - name: Assert cache restore
@@ -535,6 +537,7 @@ jobs:
           sccache: ${{ matrix.enable_sccache }}
           sccache-mode: ${{ matrix.sccache_mode }}
           cache-target: ${{ matrix.cache_target }}
+          verify: wait
           verbose: true
 
       - name: Seed product mode
@@ -682,6 +685,7 @@ jobs:
           sccache: ${{ matrix.enable_sccache }}
           sccache-mode: ${{ matrix.sccache_mode }}
           cache-target: ${{ matrix.cache_target }}
+          verify: check
           verbose: true
 
       - name: Assert resolved mode
