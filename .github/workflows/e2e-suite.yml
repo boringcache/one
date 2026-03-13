@@ -14,6 +14,9 @@ concurrency:
   group: one-e2e-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build-action:
     name: Build Action
@@ -39,7 +42,7 @@ jobs:
         run: npm run build
 
       - name: Upload action bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: built-dist
           path: dist
@@ -168,7 +171,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: built-dist
           path: .
@@ -337,7 +340,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: built-dist
           path: .
@@ -480,7 +483,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: built-dist
           path: .
@@ -627,7 +630,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: built-dist
           path: .

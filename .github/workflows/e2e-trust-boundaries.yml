@@ -14,6 +14,9 @@ concurrency:
   group: one-trust-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build-action:
     name: Build Action
@@ -94,27 +97,8 @@ jobs:
           cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
-            marker:marker.txt
+            marker:restore=>marker.txt
           verbose: true
-
-      - name: Wait for trusted cache to become visible
-        if: steps.tokens.outputs.enabled == 'true'
-        env:
-          BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '1'
-          RESOLVED_ENTRY: ${{ steps.cache.outputs.resolved-entries }}
-        run: |
-          set -euo pipefail
-          tag="${RESOLVED_ENTRY%%:*}"
-          for attempt in 1 2 3 4 5; do
-            if boringcache check "${{ steps.cache.outputs.workspace }}" "$tag" --fail-on-miss --verbose; then
-              exit 0
-            fi
-            echo "Trusted archive not visible yet; retrying check (${attempt}/5)..."
-            sleep $((attempt * 2))
-          done
-
-          echo "Trusted archive did not become visible after retries" >&2
-          exit 1
 
   archive-poison-attempt:
     name: Archive Poison Attempt
@@ -164,7 +148,7 @@ jobs:
           cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
-            marker:marker.txt
+            marker:restore=>marker.txt
           verbose: true
 
       - name: Wait for trusted cache to become readable
@@ -173,7 +157,7 @@ jobs:
           BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '1'
         run: |
           set -euo pipefail
-          target="$E2E_WORKDIR/marker.txt"
+          target="$E2E_WORKDIR/restore/marker.txt"
           if [ -f "$target" ]; then
             exit 0
           fi
@@ -193,7 +177,7 @@ jobs:
       - name: Assert trusted contents
         if: steps.tokens.outputs.enabled == 'true'
         run: |
-          grep "trusted-seed" "$E2E_WORKDIR/marker.txt"
+          grep "trusted-seed" "$E2E_WORKDIR/restore/marker.txt"
 
       - name: Attempt manual poison save without save token
         if: steps.tokens.outputs.enabled == 'true'
@@ -257,7 +241,7 @@ jobs:
           cache-tag: ${{ format('archive-poison-{0}-{1}', github.run_id, github.run_attempt) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
-            marker:marker.txt
+            marker:restore=>marker.txt
           verbose: true
 
       - name: Wait for trusted cache to become readable
@@ -266,7 +250,7 @@ jobs:
           BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '1'
         run: |
           set -euo pipefail
-          target="$E2E_WORKDIR/marker.txt"
+          target="$E2E_WORKDIR/restore/marker.txt"
           if [ -f "$target" ]; then
             exit 0
           fi
@@ -286,8 +270,8 @@ jobs:
       - name: Assert original cache is intact
         if: steps.tokens.outputs.enabled == 'true'
         run: |
-          grep "trusted-seed" "$E2E_WORKDIR/marker.txt"
-          if grep -q "poisoned" "$E2E_WORKDIR/marker.txt"; then
+          grep "trusted-seed" "$E2E_WORKDIR/restore/marker.txt"
+          if grep -q "poisoned" "$E2E_WORKDIR/restore/marker.txt"; then
             echo "Poisoned content should not have been published" >&2
             exit 1
           fi
@@ -319,7 +303,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: built-dist
           path: .
