@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import * as fs from 'fs';
 import { hasSaveToken, missingSaveTokenMessage } from '@boringcache/action-core';
 import {
   buildPlan,
@@ -20,6 +21,23 @@ function toSaveEntries(entriesString: string): string {
   return parseEntries(entriesString, 'restore', { resolvePaths: false })
     .map((entry) => `${entry.tag}:${entry.savePath}`)
     .join(',');
+}
+
+function filterVerifiableGenericTags(entriesString: string, verifyTags: string[]): string[] {
+  if (!entriesString.trim() || verifyTags.length === 0) {
+    return verifyTags;
+  }
+
+  const existingGenericTags = new Set(
+    parseEntries(entriesString, 'restore', { resolvePaths: false })
+      .filter((entry) => fs.existsSync(entry.savePath))
+      .map((entry) => entry.tag),
+  );
+  const declaredGenericTags = new Set(
+    parseEntries(entriesString, 'restore', { resolvePaths: false }).map((entry) => entry.tag),
+  );
+
+  return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
 }
 
 export async function run(): Promise<void> {
@@ -123,8 +141,10 @@ export async function run(): Promise<void> {
 
     await execBoringCache(args);
 
-    if (verifyMode !== 'none' && verifySaveTags.length > 0) {
-      await verifyResolvedTags(genericWorkspace, verifySaveTags, {
+    const verifiableSaveTags = filterVerifiableGenericTags(genericEntries, verifySaveTags);
+
+    if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
+      await verifyResolvedTags(genericWorkspace, verifiableSaveTags, {
         mode: verifyMode,
         timeoutSeconds: verifyTimeoutSeconds,
         requireServerSignature: verifyRequireServerSignature,

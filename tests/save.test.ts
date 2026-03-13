@@ -1,5 +1,8 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { run as saveRun } from '../lib/save';
 import { actionCoreMocks, mockGetBooleanInput, mockGetInput, mockGetState } from './setup';
 
@@ -83,6 +86,41 @@ describe('save action', () => {
       ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
+  });
+
+  it('does not verify generic tags for entries skipped as missing paths', async () => {
+    const originalCwd = process.cwd();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-save-test-'));
+    fs.mkdirSync(path.join(tempDir, 'node_modules'));
+
+    try {
+      mockGetInput({});
+      mockGetBooleanInput({});
+      mockGetState({
+        'resolved-mode': 'archive',
+        'generic-cache-entries': 'deps:node_modules,cache:.yarn-cache',
+        'generic-cache-workspace': 'my-org/my-project',
+        'cli-version': 'skip',
+        'verify-mode': 'check',
+        'verify-timeout-seconds': '60',
+        'verify-require-server-signature': 'false',
+        'verify-save-tags': 'deps,cache',
+      });
+
+      process.chdir(tempDir);
+
+      await saveRun();
+
+      expect(exec.exec).toHaveBeenNthCalledWith(
+        2,
+        'boringcache',
+        ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
+        expect.objectContaining({ ignoreReturnCode: true }),
+      );
+    } finally {
+      process.chdir(originalCwd);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('rebuilds the plan when state is absent', async () => {

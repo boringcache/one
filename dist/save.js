@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.run = run;
 const core = __importStar(require("@actions/core"));
+const fs = __importStar(require("fs"));
 const action_core_1 = require("@boringcache/action-core");
 const utils_1 = require("./utils");
 const mode_handlers_1 = require("./mode-handlers");
@@ -45,6 +46,16 @@ function toSaveEntries(entriesString) {
     return (0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false })
         .map((entry) => `${entry.tag}:${entry.savePath}`)
         .join(',');
+}
+function filterVerifiableGenericTags(entriesString, verifyTags) {
+    if (!entriesString.trim() || verifyTags.length === 0) {
+        return verifyTags;
+    }
+    const existingGenericTags = new Set((0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false })
+        .filter((entry) => fs.existsSync(entry.savePath))
+        .map((entry) => entry.tag));
+    const declaredGenericTags = new Set((0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false }).map((entry) => entry.tag));
+    return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
 }
 async function run() {
     const originalCwd = process.cwd();
@@ -134,8 +145,9 @@ async function run() {
             args.push('--fail-on-cache-error');
         }
         await (0, utils_1.execBoringCache)(args);
-        if (verifyMode !== 'none' && verifySaveTags.length > 0) {
-            await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifySaveTags, {
+        const verifiableSaveTags = filterVerifiableGenericTags(genericEntries, verifySaveTags);
+        if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
+            await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifiableSaveTags, {
                 mode: verifyMode,
                 timeoutSeconds: verifyTimeoutSeconds,
                 requireServerSignature: verifyRequireServerSignature,
