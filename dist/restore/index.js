@@ -44871,6 +44871,7 @@ async function run() {
             await (0, utils_1.ensureBoringCache)({ version: inputs.cliVersion, platform: cliPlatform });
         }
         process.chdir(plan.workingDirectory);
+        await (0, utils_1.applyPresetCacheEnv)(plan);
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', inputs.verbose ? ['--verbose'] : [], false);
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
@@ -45003,6 +45004,7 @@ exports.buildPlan = buildPlan;
 exports.getCacheTagPrefix = getCacheTagPrefix;
 exports.buildFlagArgs = buildFlagArgs;
 exports.applyMiseSetup = applyMiseSetup;
+exports.applyPresetCacheEnv = applyPresetCacheEnv;
 exports.serializeTools = serializeTools;
 exports.getRestoreKeyCandidates = getRestoreKeyCandidates;
 exports.getPlatformSuffix = getPlatformSuffix;
@@ -45041,6 +45043,7 @@ const TOOL_LABELS = {
     ruby: 'Ruby',
     rust: 'Rust',
     turbo: 'Turbo',
+    uv: 'uv',
     yarn: 'Yarn',
 };
 function getInputs() {
@@ -45058,6 +45061,7 @@ function getInputs() {
         toolVersionScope: normalizeToolVersionScope(core.getInput('tool-version-scope')),
         cacheRuntime: core.getBooleanInput('cache-runtime'),
         mavenVersion: core.getInput('maven-version') || '3.9.9',
+        uvVersion: core.getInput('uv-version') || '0.9.21',
         mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
         readOnly: core.getBooleanInput('read-only'),
         verify: normalizeVerifyMode(core.getInput('verify')),
@@ -45113,10 +45117,13 @@ function normalizePreset(value) {
     switch ((value || 'none').trim().toLowerCase()) {
         case 'none':
         case 'rails':
+        case 'ruby':
+        case 'node':
         case 'node-turbo':
+        case 'python-uv':
             return (value || 'none').trim().toLowerCase();
         default:
-            throw new Error(`Unsupported preset "${value}". Expected none, rails, or node-turbo.`);
+            throw new Error(`Unsupported preset "${value}". Expected none, rails, ruby, node, node-turbo, or python-uv.`);
     }
 }
 function normalizeToolVersionScope(value) {
@@ -45516,13 +45523,13 @@ function parseToolSpecs(input) {
         };
     });
 }
-async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory) {
+async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory, uvVersion) {
     if (setup !== 'mise') {
         return [];
     }
     const explicitTools = parseToolSpecs(toolsInput);
     const projectTools = await detectProjectTools(workingDirectory);
-    const presetTools = await detectPresetTools(preset, workingDirectory);
+    const presetTools = await detectPresetTools(preset, workingDirectory, uvVersion);
     const modeTools = await detectModeTools(mode, workingDirectory);
     return mergeTools(explicitTools, projectTools, presetTools, modeTools);
 }
@@ -45558,12 +45565,18 @@ async function detectProjectTools(workingDirectory) {
     }
     return Array.from(tools.values());
 }
-async function detectPresetTools(preset, workingDirectory) {
+async function detectPresetTools(preset, workingDirectory, uvVersion) {
     switch (preset) {
         case 'rails':
             return detectRailsTools(workingDirectory);
+        case 'ruby':
+            return detectRubyTools(workingDirectory);
+        case 'node':
+            return detectNodeTools(workingDirectory);
         case 'node-turbo':
             return detectNodeTurboTools(workingDirectory);
+        case 'python-uv':
+            return detectPythonUvTools(workingDirectory, uvVersion);
         default:
             return [];
     }
@@ -45584,12 +45597,15 @@ async function detectModeTools(mode, workingDirectory) {
             return [];
     }
 }
-async function detectRailsTools(workingDirectory) {
-    const tools = [];
+async function detectRubyTools(workingDirectory) {
     const rubyVersion = await detectRubyVersion(workingDirectory);
-    if (rubyVersion) {
-        tools.push({ name: 'ruby', version: rubyVersion, label: 'Ruby', source: 'preset' });
+    if (!rubyVersion) {
+        return [];
     }
+    return [{ name: 'ruby', version: rubyVersion, label: 'Ruby', source: 'preset' }];
+}
+async function detectRailsTools(workingDirectory) {
+    const tools = await detectRubyTools(workingDirectory);
     if (await needsNodeRuntime(workingDirectory)) {
         const nodeVersion = await detectNodeVersion(workingDirectory);
         if (nodeVersion) {
@@ -45602,7 +45618,7 @@ async function detectRailsTools(workingDirectory) {
     }
     return tools;
 }
-async function detectNodeTurboTools(workingDirectory) {
+async function detectNodeTools(workingDirectory) {
     const tools = [];
     const nodeVersion = await detectNodeVersion(workingDirectory);
     if (nodeVersion) {
@@ -45612,6 +45628,23 @@ async function detectNodeTurboTools(workingDirectory) {
     if (packageManagerTool) {
         tools.push(packageManagerTool);
     }
+    return tools;
+}
+async function detectNodeTurboTools(workingDirectory) {
+    return detectNodeTools(workingDirectory);
+}
+async function detectPythonUvTools(workingDirectory, defaultUvVersion) {
+    const tools = [];
+    const pythonVersion = await detectPythonVersion(workingDirectory);
+    if (pythonVersion) {
+        tools.push({ name: 'python', version: pythonVersion, label: 'Python', source: 'preset' });
+    }
+    tools.push({
+        name: 'uv',
+        version: (await detectUvVersion(workingDirectory)) || defaultUvVersion,
+        label: 'uv',
+        source: 'preset',
+    });
     return tools;
 }
 async function detectBazelTools(workingDirectory) {
@@ -45709,6 +45742,13 @@ async function detectGoVersion(workingDirectory) {
     }
     return (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'go'))
         || (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'golang'));
+}
+async function detectUvVersion(workingDirectory) {
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'uv');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'uv');
 }
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
@@ -45983,21 +46023,60 @@ async function detectDefaultArchiveEntries(inputs) {
     if (inputs.mode === 'maven') {
         return `maven-repo:${inputs.mavenLocalRepo}`;
     }
-    if (inputs.mode === 'turbo-proxy' || inputs.preset === 'node-turbo') {
-        const packageManager = await detectNodePackageManager(inputs.workingDirectory);
-        if (!packageManager) {
-            return '';
-        }
-        switch (packageManager.name) {
-            case 'pnpm':
-                return 'pnpm-store:.pnpm-store\nnode-modules:node_modules';
-            case 'yarn':
-                return 'yarn-cache:.yarn-cache\nnode-modules:node_modules';
-            case 'npm':
-                return 'npm-cache:.npm-cache\nnode-modules:node_modules';
-        }
+    if (inputs.preset === 'ruby') {
+        return `bundler:${defaultBundlerPath(inputs.workingDirectory)}`;
+    }
+    if (inputs.preset === 'rails') {
+        return joinDefaultEntries(`bundler:${defaultBundlerPath(inputs.workingDirectory)}`, await detectNodeDefaultArchiveEntries(inputs.workingDirectory));
+    }
+    if (inputs.mode === 'turbo-proxy' || inputs.preset === 'node' || inputs.preset === 'node-turbo') {
+        return await detectNodeDefaultArchiveEntries(inputs.workingDirectory);
+    }
+    if (inputs.preset === 'python-uv') {
+        return `uv-cache:${defaultUvCacheDir(inputs.workingDirectory)}`;
     }
     return '';
+}
+function joinDefaultEntries(...groups) {
+    return groups
+        .flatMap((group) => group.split(/\r?\n/))
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .join('\n');
+}
+function defaultBundlerPath(workingDirectory) {
+    var _a;
+    const configured = (_a = process.env.BUNDLE_PATH) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!configured) {
+        return 'vendor/bundle';
+    }
+    return path.isAbsolute(configured)
+        ? configured
+        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
+}
+function defaultUvCacheDir(workingDirectory) {
+    var _a;
+    const configured = (_a = process.env.UV_CACHE_DIR) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!configured) {
+        return '.uv-cache';
+    }
+    return path.isAbsolute(configured)
+        ? configured
+        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
+}
+async function detectNodeDefaultArchiveEntries(workingDirectory) {
+    const packageManager = await detectNodePackageManager(workingDirectory);
+    if (!packageManager) {
+        return '';
+    }
+    switch (packageManager.name) {
+        case 'pnpm':
+            return 'pnpm-store:.pnpm-store\nnode-modules:node_modules';
+        case 'yarn':
+            return 'yarn-cache:.yarn-cache\nnode-modules:node_modules';
+        case 'npm':
+            return 'npm-cache:.npm-cache\nnode-modules:node_modules';
+    }
 }
 async function buildArchiveEntries(inputs, runtimeTools) {
     let archiveEntries = '';
@@ -46064,7 +46143,7 @@ async function buildPlan(inputs) {
     const modeSpec = (0, modes_1.resolveModeSpec)(inputs.mode);
     (0, modes_1.assertImplementedMode)(modeSpec);
     const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
-    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory);
+    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory, inputs.uvVersion);
     if (inputs.setup === 'mise'
         && modeSpec.resolved === 'maven'
         && resolvedMavenVersion
@@ -46166,6 +46245,70 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     await (0, action_core_1.reshimMise)();
     await (0, action_core_1.exportMiseEnv)(cwd);
     return true;
+}
+function resolveCacheEnvPath(workingDirectory, configuredPath) {
+    return path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.resolve(workingDirectory, configuredPath);
+}
+async function configureNodePresetEnv(workingDirectory) {
+    const packageManager = await detectNodePackageManager(workingDirectory);
+    if (!packageManager) {
+        return;
+    }
+    const configuredCacheDir = packageManager.name === 'pnpm'
+        ? process.env.PNPM_STORE_DIR || process.env.NPM_CONFIG_STORE_DIR || packageManager.cacheDir
+        : packageManager.name === 'yarn'
+            ? process.env.YARN_CACHE_FOLDER || packageManager.cacheDir
+            : process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || packageManager.cacheDir;
+    const cacheDir = resolveCacheEnvPath(workingDirectory, configuredCacheDir);
+    await fs.promises.mkdir(cacheDir, { recursive: true });
+    switch (packageManager.name) {
+        case 'pnpm':
+            core.exportVariable('PNPM_STORE_DIR', cacheDir);
+            core.exportVariable('NPM_CONFIG_STORE_DIR', cacheDir);
+            break;
+        case 'yarn':
+            core.exportVariable('YARN_CACHE_FOLDER', cacheDir);
+            core.exportVariable('YARN_ENABLE_GLOBAL_CACHE', 'false');
+            break;
+        case 'npm':
+            core.exportVariable('npm_config_cache', cacheDir);
+            core.exportVariable('NPM_CONFIG_CACHE', cacheDir);
+            break;
+    }
+}
+async function configureRubyPresetEnv(workingDirectory) {
+    var _a;
+    const bundlePath = resolveCacheEnvPath(workingDirectory, ((_a = process.env.BUNDLE_PATH) === null || _a === void 0 ? void 0 : _a.trim()) || 'vendor/bundle');
+    await fs.promises.mkdir(bundlePath, { recursive: true });
+    core.exportVariable('BUNDLE_PATH', bundlePath);
+}
+async function configurePythonUvPresetEnv(workingDirectory) {
+    var _a;
+    const uvCacheDir = resolveCacheEnvPath(workingDirectory, ((_a = process.env.UV_CACHE_DIR) === null || _a === void 0 ? void 0 : _a.trim()) || '.uv-cache');
+    await fs.promises.mkdir(uvCacheDir, { recursive: true });
+    core.exportVariable('UV_CACHE_DIR', uvCacheDir);
+}
+async function applyPresetCacheEnv(plan) {
+    switch (plan.preset) {
+        case 'rails':
+            await configureRubyPresetEnv(plan.workingDirectory);
+            await configureNodePresetEnv(plan.workingDirectory);
+            break;
+        case 'ruby':
+            await configureRubyPresetEnv(plan.workingDirectory);
+            break;
+        case 'node':
+        case 'node-turbo':
+            await configureNodePresetEnv(plan.workingDirectory);
+            break;
+        case 'python-uv':
+            await configurePythonUvPresetEnv(plan.workingDirectory);
+            break;
+        default:
+            break;
+    }
 }
 function serializeTools(runtimeTools) {
     return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');

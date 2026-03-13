@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import { hasSaveToken } from '@boringcache/action-core';
 import {
+  applyPresetCacheEnv,
   applyMiseSetup,
   buildGenericVerificationSpecs,
   buildFlagArgs,
@@ -90,6 +91,7 @@ export async function run(): Promise<void> {
     }
 
     process.chdir(plan.workingDirectory);
+    await applyPresetCacheEnv(plan);
 
     const runtimeRestore = await restoreEntries(
       plan.workspace,

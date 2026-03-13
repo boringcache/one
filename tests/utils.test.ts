@@ -44,6 +44,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     toolVersionScope: 'patch',
     cacheRuntime: false,
     mavenVersion: '',
+    uvVersion: '0.9.21',
     mavenLocalRepo: '~/.m2/repository',
     readOnly: false,
     verify: 'none',
@@ -98,6 +99,55 @@ describe('one utils', () => {
       expect(plan.runtimeTag).toBe('bundler-mise-node-22.4.1-ruby-3.3.6');
       expect(plan.runtimeEntry).toBe(`bundler-mise-node-22.4.1-ruby-3.3.6:${getMiseInstallsDir()}`);
       expect(plan.archiveEntries).toContain('bundler-node-22.4.1-ruby-3.3.6:vendor/bundle');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('adds default bundler archive entries for the ruby preset', async () => {
+    const project = await makeTempProject({
+      '.ruby-version': '3.4.1\n',
+      'Gemfile.lock': 'GEM\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        preset: 'ruby',
+        workingDirectory: project,
+        entries: '',
+        cacheTag: 'app',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'ruby', version: '3.4.1', label: 'Ruby', source: 'project' },
+      ]);
+      expect(plan.archiveEntries).toBe('app-bundler-ruby-3.4.1:vendor/bundle');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('adds bundler and node cache defaults for the rails preset', async () => {
+    const project = await makeTempProject({
+      '.ruby-version': '3.3.6\n',
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        preset: 'rails',
+        workingDirectory: project,
+        entries: '',
+        cacheTag: 'web',
+      }));
+
+      expect(plan.archiveEntries).toBe(
+        'web-bundler-node-22.4.1-pnpm-9.15.1-ruby-3.3.6:vendor/bundle,'
+        + 'web-pnpm-store-node-22.4.1-pnpm-9.15.1-ruby-3.3.6:.pnpm-store,'
+        + 'web-node-modules-node-22.4.1-pnpm-9.15.1-ruby-3.3.6:node_modules',
+      );
     } finally {
       await removeTempProject(project);
     }
@@ -217,6 +267,58 @@ describe('one utils', () => {
       expect(plan.archiveEntries).toBe(
         'web-pnpm-store-node-22.4.1-pnpm-9.15.1:.pnpm-store,web-node-modules-node-22.4.1-pnpm-9.15.1:node_modules',
       );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('detects package-manager tools and default archive entries for the node preset', async () => {
+    const project = await makeTempProject({
+      '.node-version': '22.5.0\n',
+      'package.json': '{"name":"demo","packageManager":"yarn@1.22.22"}\n',
+      'yarn.lock': '# lockfile\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        preset: 'node',
+        workingDirectory: project,
+        cacheTag: 'frontend',
+        entries: '',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'node', version: '22.5.0', label: 'Node.js', source: 'project' },
+        { name: 'yarn', version: '1.22.22', label: 'Yarn', source: 'project' },
+      ]);
+      expect(plan.archiveEntries).toBe(
+        'frontend-yarn-cache-node-22.5.0-yarn-1.22.22:.yarn-cache,frontend-node-modules-node-22.5.0-yarn-1.22.22:node_modules',
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('adds python and uv tools plus uv cache defaults for the python-uv preset', async () => {
+    const project = await makeTempProject({
+      '.python-version': '3.12.7\n',
+      'pyproject.toml': '[project]\nname = "demo"\n',
+      'uv.lock': 'version = 1\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        preset: 'python-uv',
+        workingDirectory: project,
+        cacheTag: 'api',
+        entries: '',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'python', version: '3.12.7', label: 'Python', source: 'project' },
+        { name: 'uv', version: '0.9.21', label: 'uv', source: 'preset' },
+      ]);
+      expect(plan.archiveEntries).toBe('api-uv-cache-python-3.12.7-uv-0.9.21:.uv-cache');
     } finally {
       await removeTempProject(project);
     }

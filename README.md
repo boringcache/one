@@ -83,14 +83,57 @@ Mise-powered Rails-style workflow:
   with:
     preset: rails
     workspace: my-org/my-project
-    entries: bundler:vendor/bundle
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
     RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
 ```
 
+The Rails preset defaults Bundler plus the detected Node package-manager cache and `node_modules`. It also exports `BUNDLE_PATH` and the package-manager cache env so those directories are actually used.
+
 If the app uses Rails credentials, set `RAILS_MASTER_KEY` in the workflow environment for the Rails steps that run after `boringcache/one`. The Rails preset sets up Ruby and Node toolchains; it does not materialize app secrets for you.
+
+Generic Ruby workflow:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    preset: ruby
+    workspace: my-org/my-project
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+The Ruby preset defaults a Bundler cache at `vendor/bundle` and exports `BUNDLE_PATH` there.
+
+Generic Node workflow:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    preset: node
+    workspace: my-org/my-project
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+The Node preset detects `npm`, `pnpm`, or `yarn`, defaults the package-manager cache plus `node_modules`, and exports the matching local cache directory env vars.
+
+Python with uv:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    preset: python-uv
+    workspace: my-org/my-project
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+The `python-uv` preset installs `uv` through `mise`, defaults a project-local `UV_CACHE_DIR`, and archives `.uv-cache`. Add extra entries such as `.venv` only if your workflow wants them.
 
 Docker build with cache:
 
@@ -184,6 +227,7 @@ In `mode: maven`, `one` starts the cache-registry proxy, ensures `.mvn/extension
 - `mode: turbo-proxy` for Turbo remote cache proxy wiring
 - `mode: rust-sccache` for Rust toolchain, cargo caches, and remote `sccache`
 - `setup: mise` for installing toolchains such as Node, pnpm, Yarn, Ruby, Python, Go, Java, Maven, Gradle, Rust, Elixir, Erlang, and Bazel
+- `preset: rails`, `ruby`, `node`, `node-turbo`, or `python-uv` for opinionated workflow defaults on top of `mise`
 
 ## Setup model
 
@@ -248,12 +292,13 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 |-------|-------------|
 | `setup` | `mise`, `external`, or `none`. Defaults to `mise`. |
 | `mode` | `auto`, `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `maven`, `turbo-proxy`, or `rust-sccache`. Defaults to `auto`. |
-| `preset` | `none`, `rails`, or `node-turbo`. |
+| `preset` | `none`, `rails`, `ruby`, `node`, `node-turbo`, or `python-uv`. |
 | `workspace` | Workspace in `org/repo` form. Defaults to `BORINGCACHE_DEFAULT_WORKSPACE`, then the repository name. |
 | `working-directory` | Project root used for detection and relative paths. |
 | `cache-tag` | Human-readable cache tag or prefix for generated tags. |
 | `runtime-cache-tag` | Optional exact tag override for the `mise` installs cache. |
 | `tools` | Explicit `mise` tools in `tool@version` form. |
+| `uv-version` | Default `uv` version for `preset: python-uv` when the project does not already pin `uv`. |
 | `tool-version-scope` | `patch`, `minor`, or `major` for generated tool-scoped tags. |
 | `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
 | `verify` / `verify-timeout-seconds` / `verify-require-server-signature` | Optional exact-tag verification controls. |

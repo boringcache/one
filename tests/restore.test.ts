@@ -1,5 +1,8 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import { run as restoreRun } from '../lib/restore';
 import { actionCoreMocks, mockGetBooleanInput, mockGetInput } from './setup';
 
@@ -161,5 +164,50 @@ describe('restore action', () => {
       ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
+  });
+
+  it('exports bundler and package-manager cache env for the rails preset', async () => {
+    const project = await fs.mkdtemp(path.join(os.tmpdir(), 'one-restore-rails-'));
+    await fs.writeFile(path.join(project, '.ruby-version'), '3.3.6\n');
+    await fs.writeFile(path.join(project, '.node-version'), '22.4.1\n');
+    await fs.writeFile(path.join(project, 'package.json'), '{"name":"demo","packageManager":"pnpm@9.15.1"}\n');
+    await fs.writeFile(path.join(project, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
+
+    try {
+      mockGetInput({
+        workspace: 'my-org/my-project',
+        preset: 'rails',
+        'working-directory': project,
+      });
+
+      await restoreRun();
+
+      expect(core.exportVariable).toHaveBeenCalledWith('BUNDLE_PATH', path.join(project, 'vendor/bundle'));
+      expect(core.exportVariable).toHaveBeenCalledWith('PNPM_STORE_DIR', path.join(project, '.pnpm-store'));
+      expect(core.exportVariable).toHaveBeenCalledWith('NPM_CONFIG_STORE_DIR', path.join(project, '.pnpm-store'));
+    } finally {
+      await fs.rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('exports UV_CACHE_DIR for the python-uv preset', async () => {
+    const project = await fs.mkdtemp(path.join(os.tmpdir(), 'one-restore-python-'));
+    await fs.writeFile(path.join(project, '.python-version'), '3.12.7\n');
+    await fs.writeFile(path.join(project, 'pyproject.toml'), '[project]\nname = "demo"\n');
+    await fs.writeFile(path.join(project, 'uv.lock'), 'version = 1\n');
+
+    try {
+      mockGetInput({
+        workspace: 'my-org/my-project',
+        preset: 'python-uv',
+        'working-directory': project,
+      });
+
+      await restoreRun();
+
+      expect(core.exportVariable).toHaveBeenCalledWith('UV_CACHE_DIR', path.join(project, '.uv-cache'));
+    } finally {
+      await fs.rm(project, { recursive: true, force: true });
+    }
   });
 });

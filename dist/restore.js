@@ -86,6 +86,7 @@ async function run() {
             await (0, utils_1.ensureBoringCache)({ version: inputs.cliVersion, platform: cliPlatform });
         }
         process.chdir(plan.workingDirectory);
+        await (0, utils_1.applyPresetCacheEnv)(plan);
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', inputs.verbose ? ['--verbose'] : [], false);
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
