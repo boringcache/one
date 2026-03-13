@@ -23,11 +23,13 @@ function toSaveEntries(entriesString: string): string {
 }
 
 export async function run(): Promise<void> {
+  const originalCwd = process.cwd();
   try {
     const inputs = getInputs();
     const cliVersion = core.getState('cli-version') || inputs.cliVersion;
     const cliPlatform = core.getState('cli-platform') || inputs.cliPlatform || undefined;
     let resolvedMode = core.getState('resolved-mode') as ResolvedMode | '';
+    let workingDirectory = core.getState('working-directory');
 
     let genericEntries = core.getState('generic-cache-entries');
     let genericWorkspace = core.getState('generic-cache-workspace');
@@ -51,6 +53,9 @@ export async function run(): Promise<void> {
     if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
       const plan = await buildPlan(inputs);
       resolvedMode = plan.mode;
+      if (!workingDirectory) {
+        workingDirectory = plan.workingDirectory;
+      }
       if (!genericWorkspace) {
         genericWorkspace = plan.workspace;
       }
@@ -64,6 +69,10 @@ export async function run(): Promise<void> {
       enableCrossOsArchive = inputs.enableCrossOsArchive;
       force = inputs.force;
       verbose = inputs.verbose;
+    }
+
+    if (workingDirectory) {
+      process.chdir(workingDirectory);
     }
 
     if (!hasSaveToken()) {
@@ -121,6 +130,8 @@ export async function run(): Promise<void> {
     }
   } catch (error) {
     core.setFailed(`boringcache/one save failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    process.chdir(originalCwd);
   }
 }
 

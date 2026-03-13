@@ -25,6 +25,7 @@ describe('restore action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('runtime-cache-tag', '');
     expect(core.setOutput).toHaveBeenCalledWith('resolved-entries', 'deps:node_modules,build:dist');
     expect(core.setOutput).toHaveBeenCalledWith('resolved-tags', 'deps,build');
+    expect(core.saveState).toHaveBeenCalledWith('working-directory', process.cwd());
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-entries', 'deps:node_modules,build:dist');
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-workspace', 'my-org/my-project');
     expect(core.saveState).toHaveBeenCalledWith('resolved-tags', 'deps,build');

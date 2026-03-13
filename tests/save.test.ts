@@ -26,10 +26,12 @@ describe('save action', () => {
   });
 
   it('reuses saved state and forwards save flags', async () => {
+    const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     mockGetInput({});
     mockGetBooleanInput({});
     mockGetState({
       'resolved-mode': 'archive',
+      'working-directory': '/tmp/project',
       'generic-cache-entries': 'deps:node_modules',
       'generic-cache-workspace': 'my-org/my-project',
       'generic-cache-exclude': '*.log',
@@ -43,11 +45,14 @@ describe('save action', () => {
     await saveRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.5' });
+    expect(chdirSpy).toHaveBeenNthCalledWith(1, '/tmp/project');
+    expect(chdirSpy).toHaveBeenLastCalledWith(expect.any(String));
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
       ['save', 'my-org/my-project', 'deps:node_modules', '--force', '--no-platform', '--verbose', '--exclude', '*.log'],
       undefined,
     );
+    chdirSpy.mockRestore();
   });
 
   it('verifies deferred save tags after saving', async () => {

@@ -120,6 +120,7 @@ async function run() {
         core.saveState('resolved-mode', plan.mode);
         core.saveState('cli-version', inputs.cliVersion);
         core.saveState('cli-platform', cliPlatform || '');
+        core.saveState('working-directory', plan.workingDirectory);
         core.saveState('generic-cache-entries', genericSaveEntries);
         core.saveState('generic-cache-workspace', plan.workspace);
         core.saveState('runtime-mise-used', String(usedMiseRuntime));

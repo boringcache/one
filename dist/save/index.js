@@ -44822,11 +44822,13 @@ function toSaveEntries(entriesString) {
         .join(',');
 }
 async function run() {
+    const originalCwd = process.cwd();
     try {
         const inputs = (0, utils_1.getInputs)();
         const cliVersion = core.getState('cli-version') || inputs.cliVersion;
         const cliPlatform = core.getState('cli-platform') || inputs.cliPlatform || undefined;
         let resolvedMode = core.getState('resolved-mode');
+        let workingDirectory = core.getState('working-directory');
         let genericEntries = core.getState('generic-cache-entries');
         let genericWorkspace = core.getState('generic-cache-workspace');
         let exclude = core.getState('generic-cache-exclude');
@@ -44844,6 +44846,9 @@ async function run() {
         if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
             const plan = await (0, utils_1.buildPlan)(inputs);
             resolvedMode = plan.mode;
+            if (!workingDirectory) {
+                workingDirectory = plan.workingDirectory;
+            }
             if (!genericWorkspace) {
                 genericWorkspace = plan.workspace;
             }
@@ -44857,6 +44862,9 @@ async function run() {
             enableCrossOsArchive = inputs.enableCrossOsArchive;
             force = inputs.force;
             verbose = inputs.verbose;
+        }
+        if (workingDirectory) {
+            process.chdir(workingDirectory);
         }
         if (!(0, action_core_1.hasSaveToken)()) {
             if (resolvedMode && resolvedMode !== 'archive') {
@@ -44909,6 +44917,9 @@ async function run() {
     }
     catch (error) {
         core.setFailed(`boringcache/one save failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    finally {
+        process.chdir(originalCwd);
     }
 }
 if (require.main === require.cache[eval('__filename')]) {
