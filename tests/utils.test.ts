@@ -222,6 +222,26 @@ describe('one utils', () => {
     }
   });
 
+  it('resolves actions/cache compatibility paths relative to working-directory', async () => {
+    const project = await makeTempProject({});
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        workingDirectory: project,
+        entries: '',
+        path: 'node_modules\n.npm-cache',
+        key: 'deps',
+        noPlatform: true,
+      }));
+
+      expect(plan.archiveEntries).toBe(
+        `deps:${path.join(project, 'node_modules')},deps:${path.join(project, '.npm-cache')}`,
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('resolves exact verification tags with CI branch suffixes', async () => {
     const project = await makeTempProject({ 'package.json': '{"name":"demo"}\n' });
     const previousCi = process.env.CI;

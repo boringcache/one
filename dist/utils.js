@@ -1069,6 +1069,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             key: inputs.key,
             noPlatform: inputs.noPlatform,
             enableCrossOsArchive: inputs.enableCrossOsArchive,
+            workingDirectory: inputs.workingDirectory,
         }, 'restore');
         usesCacheFormat = true;
     }

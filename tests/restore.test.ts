@@ -57,6 +57,28 @@ describe('restore action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
   });
 
+  it('resolves actions/cache compatibility paths relative to working-directory', async () => {
+    const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
+    mockGetInput({
+      path: 'node_modules\n.npm-cache',
+      key: 'deps',
+      'working-directory': '/tmp/project',
+    });
+    mockGetBooleanInput({ 'no-platform': true });
+
+    await restoreRun();
+
+    expect(actionCoreMocks.execBoringCache).toHaveBeenCalledWith(
+      ['restore', 'default/default', 'deps:/tmp/project/node_modules,deps:/tmp/project/.npm-cache', '--no-platform'],
+      expect.objectContaining({ ignoreReturnCode: true }),
+    );
+    expect(core.saveState).toHaveBeenCalledWith(
+      'generic-cache-entries',
+      'deps:/tmp/project/node_modules,deps:/tmp/project/.npm-cache',
+    );
+    chdirSpy.mockRestore();
+  });
+
   it('passes cli-platform through to shared CLI setup', async () => {
     mockGetInput({
       workspace: 'my-org/my-project',
