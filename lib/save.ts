@@ -6,6 +6,8 @@ import {
   ensureBoringCache,
   execBoringCache,
   getInputs,
+  resolveVerificationTags,
+  type TagVerificationSpec,
   type VerifyMode,
   parseEntries,
   verifyResolvedTags,
@@ -23,18 +25,40 @@ function toSaveEntries(entriesString: string): string {
     .join(',');
 }
 
-function filterVerifiableGenericTags(entriesString: string, verifyTags: string[]): string[] {
+function resolveGenericEntryVerificationTags(
+  entriesString: string,
+  workingDirectory: string,
+  noPlatform: boolean,
+  onlyExistingPaths: boolean,
+): string[] {
+  const specs: TagVerificationSpec[] = parseEntries(entriesString, 'restore', { resolvePaths: false })
+    .filter((entry) => !onlyExistingPaths || fs.existsSync(entry.savePath))
+    .map((entry) => ({
+      tag: entry.tag,
+      noPlatform,
+      noGit: false,
+      pathHint: entry.savePath,
+      saveExpected: true,
+    }));
+
+  return resolveVerificationTags(specs, workingDirectory);
+}
+
+function filterVerifiableGenericTags(
+  entriesString: string,
+  verifyTags: string[],
+  workingDirectory: string,
+  noPlatform: boolean,
+): string[] {
   if (!entriesString.trim() || verifyTags.length === 0) {
     return verifyTags;
   }
 
   const existingGenericTags = new Set(
-    parseEntries(entriesString, 'restore', { resolvePaths: false })
-      .filter((entry) => fs.existsSync(entry.savePath))
-      .map((entry) => entry.tag),
+    resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, true),
   );
   const declaredGenericTags = new Set(
-    parseEntries(entriesString, 'restore', { resolvePaths: false }).map((entry) => entry.tag),
+    resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, false),
   );
 
   return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
@@ -141,7 +165,12 @@ export async function run(): Promise<void> {
 
     await execBoringCache(args);
 
-    const verifiableSaveTags = filterVerifiableGenericTags(genericEntries, verifySaveTags);
+    const verifiableSaveTags = filterVerifiableGenericTags(
+      genericEntries,
+      verifySaveTags,
+      workingDirectory || process.cwd(),
+      enableCrossOsArchive || noPlatform,
+    );
 
     if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
       await verifyResolvedTags(genericWorkspace, verifiableSaveTags, {

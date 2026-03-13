@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { run as saveRun } from '../lib/save';
+import { resolveVerificationTags, type TagVerificationSpec } from '../lib/utils';
 import { actionCoreMocks, mockGetBooleanInput, mockGetInput, mockGetState } from './setup';
 
 describe('save action', () => {
@@ -88,10 +89,26 @@ describe('save action', () => {
     );
   });
 
-  it('does not verify generic tags for entries skipped as missing paths', async () => {
+  it('does not verify exact generic tags for entries skipped as missing paths', async () => {
     const originalCwd = process.cwd();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-save-test-'));
     fs.mkdirSync(path.join(tempDir, 'node_modules'));
+    const verifyTags = resolveVerificationTags([
+      {
+        tag: 'deps',
+        noPlatform: false,
+        noGit: false,
+        pathHint: 'node_modules',
+        saveExpected: true,
+      },
+      {
+        tag: 'cache',
+        noPlatform: false,
+        noGit: false,
+        pathHint: '.yarn-cache',
+        saveExpected: true,
+      },
+    ] satisfies TagVerificationSpec[], tempDir);
 
     try {
       mockGetInput({});
@@ -104,17 +121,18 @@ describe('save action', () => {
         'verify-mode': 'check',
         'verify-timeout-seconds': '60',
         'verify-require-server-signature': 'false',
-        'verify-save-tags': 'deps,cache',
+        'verify-save-tags': verifyTags.join(','),
       });
 
       process.chdir(tempDir);
 
       await saveRun();
 
+      expect(verifyTags).toHaveLength(2);
       expect(exec.exec).toHaveBeenNthCalledWith(
         2,
         'boringcache',
-        ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
+        ['check', 'my-org/my-project', verifyTags[0], '--no-platform', '--no-git', '--fail-on-miss'],
         expect.objectContaining({ ignoreReturnCode: true }),
       );
     } finally {

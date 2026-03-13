@@ -47,14 +47,24 @@ function toSaveEntries(entriesString) {
         .map((entry) => `${entry.tag}:${entry.savePath}`)
         .join(',');
 }
-function filterVerifiableGenericTags(entriesString, verifyTags) {
+function resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, onlyExistingPaths) {
+    const specs = (0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false })
+        .filter((entry) => !onlyExistingPaths || fs.existsSync(entry.savePath))
+        .map((entry) => ({
+        tag: entry.tag,
+        noPlatform,
+        noGit: false,
+        pathHint: entry.savePath,
+        saveExpected: true,
+    }));
+    return (0, utils_1.resolveVerificationTags)(specs, workingDirectory);
+}
+function filterVerifiableGenericTags(entriesString, verifyTags, workingDirectory, noPlatform) {
     if (!entriesString.trim() || verifyTags.length === 0) {
         return verifyTags;
     }
-    const existingGenericTags = new Set((0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false })
-        .filter((entry) => fs.existsSync(entry.savePath))
-        .map((entry) => entry.tag));
-    const declaredGenericTags = new Set((0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false }).map((entry) => entry.tag));
+    const existingGenericTags = new Set(resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, true));
+    const declaredGenericTags = new Set(resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, false));
     return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
 }
 async function run() {
@@ -145,7 +155,7 @@ async function run() {
             args.push('--fail-on-cache-error');
         }
         await (0, utils_1.execBoringCache)(args);
-        const verifiableSaveTags = filterVerifiableGenericTags(genericEntries, verifySaveTags);
+        const verifiableSaveTags = filterVerifiableGenericTags(genericEntries, verifySaveTags, workingDirectory || process.cwd(), enableCrossOsArchive || noPlatform);
         if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
             await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifiableSaveTags, {
                 mode: verifyMode,
