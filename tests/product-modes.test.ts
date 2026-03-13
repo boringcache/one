@@ -184,6 +184,31 @@ describe('product modes', () => {
     }
   });
 
+  it('respects an existing package-manager cache dir in turbo proxy mode', async () => {
+    const project = await makeTempProject({
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      process.env.PNPM_STORE_DIR = path.join(project, '.bench-pnpm-store');
+
+      mockGetInput({
+        mode: 'turbo-proxy',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.exportVariable).toHaveBeenCalledWith('PNPM_STORE_DIR', process.env.PNPM_STORE_DIR);
+      expect(core.setOutput).toHaveBeenCalledWith('package-manager-cache-dir', process.env.PNPM_STORE_DIR);
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('supports rust mode with mise-managed tooling and proxy sccache', async () => {
     const project = await makeTempProject({
       'Cargo.lock': '',

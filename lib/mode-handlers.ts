@@ -900,26 +900,50 @@ function configureTurboRemoteEnv(apiUrl: string, token: string, team?: string): 
   core.exportVariable('TURBO_TEAM', team || 'team_boringcache');
 }
 
-function configureNodePackageManagerEnv(packageManager: Awaited<ReturnType<typeof detectNodePackageManager>>): void {
+function resolveNodePackageManagerCacheDir(
+  packageManager: Awaited<ReturnType<typeof detectNodePackageManager>>,
+): string | null {
   if (!packageManager) {
-    return;
+    return null;
   }
 
-  ensureDir(packageManager.cacheDir);
   switch (packageManager.name) {
     case 'pnpm':
-      core.exportVariable('PNPM_STORE_DIR', packageManager.cacheDir);
-      core.exportVariable('NPM_CONFIG_STORE_DIR', packageManager.cacheDir);
+      return process.env.PNPM_STORE_DIR || process.env.NPM_CONFIG_STORE_DIR || packageManager.cacheDir;
+    case 'yarn':
+      return process.env.YARN_CACHE_FOLDER || packageManager.cacheDir;
+    case 'npm':
+      return process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || packageManager.cacheDir;
+  }
+}
+
+function configureNodePackageManagerEnv(packageManager: Awaited<ReturnType<typeof detectNodePackageManager>>): string | null {
+  if (!packageManager) {
+    return null;
+  }
+
+  const cacheDir = resolveNodePackageManagerCacheDir(packageManager);
+  if (!cacheDir) {
+    return null;
+  }
+
+  ensureDir(cacheDir);
+  switch (packageManager.name) {
+    case 'pnpm':
+      core.exportVariable('PNPM_STORE_DIR', cacheDir);
+      core.exportVariable('NPM_CONFIG_STORE_DIR', cacheDir);
       break;
     case 'yarn':
-      core.exportVariable('YARN_CACHE_FOLDER', packageManager.cacheDir);
+      core.exportVariable('YARN_CACHE_FOLDER', cacheDir);
       core.exportVariable('YARN_ENABLE_GLOBAL_CACHE', 'false');
       break;
     case 'npm':
-      core.exportVariable('npm_config_cache', packageManager.cacheDir);
-      core.exportVariable('NPM_CONFIG_CACHE', packageManager.cacheDir);
+      core.exportVariable('npm_config_cache', cacheDir);
+      core.exportVariable('NPM_CONFIG_CACHE', cacheDir);
       break;
   }
+
+  return cacheDir;
 }
 
 async function ensureCorepackPackageManager(
@@ -1383,11 +1407,11 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
   const preferredPort = parseInt(core.getInput('turbo-port') || inputs.proxyPort || '4227', 10);
   const packageManager = await detectNodePackageManager(plan.workingDirectory);
 
-  configureNodePackageManagerEnv(packageManager);
+  const packageManagerCacheDir = configureNodePackageManagerEnv(packageManager);
   await ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools);
   if (packageManager) {
     core.setOutput('package-manager', packageManager.name);
-    core.setOutput('package-manager-cache-dir', packageManager.cacheDir);
+    core.setOutput('package-manager-cache-dir', packageManagerCacheDir || packageManager.cacheDir);
   }
 
   if (turboApiUrl) {
