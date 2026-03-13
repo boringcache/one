@@ -1,6 +1,6 @@
 {
   "name": "boringcache-one",
-  "version": "1.12.9",
+  "version": "1.12.10",
   "description": "Primary mise-powered GitHub Action for the BoringCache suite.",
   "main": "dist/restore/index.js",
   "scripts": {
@@ -23,7 +23,7 @@
   "dependencies": {
     "@actions/core": "^1.11.1",
     "@actions/exec": "^1.1.1",
-    "@boringcache/action-core": "^1.12.8"
+    "@boringcache/action-core": "^1.12.9"
   },
   "devDependencies": {
     "@actions/cache": "^4.1.0",
