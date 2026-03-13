@@ -250,12 +250,14 @@ describe('one utils', () => {
     }
   });
 
-  it('installs tools when the runtime cache misses', async () => {
+  it('installs tools when they are not available on PATH or in mise', async () => {
     await applyMiseSetup([
       { name: 'node', version: '22.4.1', label: 'Node.js', source: 'preset' },
     ], false);
 
     expect(actionCoreMocks.installMise).toHaveBeenCalledTimes(1);
+    expect(actionCoreMocks.hasToolVersionOnPath).toHaveBeenCalledWith('node', '22.4.1');
+    expect(actionCoreMocks.hasMiseToolVersion).toHaveBeenCalledWith('node', '22.4.1');
     expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith(
       'node',
       '22.4.1',
@@ -265,10 +267,12 @@ describe('one utils', () => {
     expect(actionCoreMocks.reshimMise).toHaveBeenCalledTimes(1);
   });
 
-  it('activates tools when the runtime cache hits', async () => {
+  it('activates tools when the requested version is already installed in mise', async () => {
+    actionCoreMocks.hasMiseToolVersion.mockResolvedValueOnce(true);
+
     await applyMiseSetup([
       { name: 'ruby', version: '3.3.6', label: 'Ruby', source: 'preset' },
-    ], true);
+    ], false);
 
     expect(actionCoreMocks.installMise).toHaveBeenCalledTimes(1);
     expect(actionCoreMocks.activateMiseTool).toHaveBeenCalledWith(
@@ -278,6 +282,20 @@ describe('one utils', () => {
     );
     expect(actionCoreMocks.installMiseTool).not.toHaveBeenCalled();
     expect(actionCoreMocks.reshimMise).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips mise entirely when matching tools are already on PATH', async () => {
+    actionCoreMocks.hasToolVersionOnPath.mockResolvedValueOnce(true);
+
+    await applyMiseSetup([
+      { name: 'java', version: '21', label: 'Java', source: 'mode' },
+    ], false);
+
+    expect(actionCoreMocks.installMise).not.toHaveBeenCalled();
+    expect(actionCoreMocks.hasMiseToolVersion).not.toHaveBeenCalled();
+    expect(actionCoreMocks.installMiseTool).not.toHaveBeenCalled();
+    expect(actionCoreMocks.activateMiseTool).not.toHaveBeenCalled();
+    expect(actionCoreMocks.reshimMise).not.toHaveBeenCalled();
   });
 
   it('uses readable runtime tool versions in the cache tag', () => {

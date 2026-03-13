@@ -7,6 +7,7 @@ import {
   execBoringCache as execBoringCacheCore,
   findAvailablePort,
   getCacheTagPrefix as getDefaultCacheTagPrefix,
+  hasToolVersionOnPath,
   hasRestoreToken,
   hasSaveToken,
   missingRestoreTokenMessage,
@@ -801,21 +802,9 @@ async function startSccacheServer(): Promise<void> {
 async function installSccache(versionInput = '0.13.0'): Promise<void> {
   addLocalBinPaths();
 
-  try {
-    let output = '';
-    const result = await exec.exec('sccache', ['--version'], {
-      ignoreReturnCode: true,
-      silent: true,
-      listeners: {
-        stdout: (data: Buffer) => {
-          output += data.toString();
-        },
-      },
-    });
-    if (result === 0 && output.includes('sccache')) {
-      return;
-    }
-  } catch {
+  if (await hasToolVersionOnPath('sccache', versionInput)) {
+    core.info(`Using existing sccache ${versionInput} from PATH`);
+    return;
   }
 
   const normalizedVersion = versionInput.startsWith('v') ? versionInput : `v${versionInput}`;

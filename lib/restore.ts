@@ -94,8 +94,9 @@ export async function run(): Promise<void> {
       false,
     );
 
+    let usedMiseRuntime = false;
     if (plan.setup === 'mise') {
-      await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit);
+      usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit);
     }
 
     const archiveRestore = await restoreEntries(
@@ -106,7 +107,7 @@ export async function run(): Promise<void> {
     );
 
     const modeRestore = await runModeRestore(plan, inputs);
-    const genericSaveEntries = [runtimeRestore.saveEntries, archiveRestore.saveEntries]
+    const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
       .filter(Boolean)
       .join(',');
 
@@ -126,6 +127,7 @@ export async function run(): Promise<void> {
     core.saveState('cli-platform', cliPlatform || '');
     core.saveState('generic-cache-entries', genericSaveEntries);
     core.saveState('generic-cache-workspace', plan.workspace);
+    core.saveState('runtime-mise-used', String(usedMiseRuntime));
     core.saveState('generic-cache-exclude', inputs.exclude);
     core.saveState('no-platform', String(inputs.noPlatform));
     core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));

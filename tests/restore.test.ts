@@ -88,4 +88,19 @@ describe('restore action', () => {
     );
     expect(core.notice).toHaveBeenCalledWith('No cache entries resolved; boringcache/one will install the CLI only.');
   });
+
+  it('does not persist a mise runtime cache entry when matching tools come from PATH', async () => {
+    actionCoreMocks.hasToolVersionOnPath.mockResolvedValueOnce(true);
+
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      tools: 'ruby@3.3.6',
+    });
+    mockGetBooleanInput({ 'cache-runtime': true });
+
+    await restoreRun();
+
+    expect(actionCoreMocks.installMise).not.toHaveBeenCalled();
+    expect(core.saveState).toHaveBeenCalledWith('generic-cache-entries', '');
+  });
 });

@@ -11,6 +11,8 @@ import {
   execBoringCache,
   getInputsWorkspace,
   getMiseInstallsDir,
+  hasMiseToolVersion,
+  hasToolVersionOnPath,
   installMise,
   installMiseTool,
   parseEntries,
@@ -35,6 +37,8 @@ export {
   ensureBoringCache,
   execBoringCache,
   getMiseInstallsDir,
+  hasMiseToolVersion,
+  hasToolVersionOnPath,
   installMise,
   installMiseTool,
   parseEntries,
@@ -990,20 +994,43 @@ export function buildFlagArgs(inputs: OneInputs): string[] {
   return flagArgs;
 }
 
-export async function applyMiseSetup(runtimeTools: ToolSpec[], runtimeCacheHit: boolean): Promise<void> {
+export async function applyMiseSetup(runtimeTools: ToolSpec[], _runtimeCacheHit: boolean): Promise<boolean> {
+  void _runtimeCacheHit;
+
   if (runtimeTools.length === 0) {
-    return;
+    return false;
+  }
+
+  const pathAvailable = new Map<string, boolean>();
+
+  for (const tool of runtimeTools) {
+    const available = await hasToolVersionOnPath(tool.name, tool.version);
+    pathAvailable.set(`${tool.name}@${tool.version}`, available);
+    if (available) {
+      core.info(`Using existing ${tool.label} ${tool.version} from PATH`);
+    }
+  }
+
+  const unresolvedTools = runtimeTools.filter(
+    (tool) => !pathAvailable.get(`${tool.name}@${tool.version}`),
+  );
+
+  if (unresolvedTools.length === 0) {
+    return false;
   }
 
   await installMise();
-  for (const tool of runtimeTools) {
-    if (runtimeCacheHit) {
+
+  for (const tool of unresolvedTools) {
+    if (await hasMiseToolVersion(tool.name, tool.version)) {
       await activateMiseTool(tool.name, tool.version, { label: tool.label });
     } else {
       await installMiseTool(tool.name, tool.version, { label: tool.label });
     }
   }
+
   await reshimMise();
+  return true;
 }
 
 export function serializeTools(runtimeTools: ToolSpec[]): string {

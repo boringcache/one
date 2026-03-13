@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseEntries = exports.installMiseTool = exports.installMise = exports.getMiseInstallsDir = exports.execBoringCache = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
+exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
 exports.normalizeSetup = normalizeSetup;
 exports.normalizePreset = normalizePreset;
@@ -63,6 +63,8 @@ Object.defineProperty(exports, "convertCacheFormatToEntries", { enumerable: true
 Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return action_core_1.ensureBoringCache; } });
 Object.defineProperty(exports, "execBoringCache", { enumerable: true, get: function () { return action_core_1.execBoringCache; } });
 Object.defineProperty(exports, "getMiseInstallsDir", { enumerable: true, get: function () { return action_core_1.getMiseInstallsDir; } });
+Object.defineProperty(exports, "hasMiseToolVersion", { enumerable: true, get: function () { return action_core_1.hasMiseToolVersion; } });
+Object.defineProperty(exports, "hasToolVersionOnPath", { enumerable: true, get: function () { return action_core_1.hasToolVersionOnPath; } });
 Object.defineProperty(exports, "installMise", { enumerable: true, get: function () { return action_core_1.installMise; } });
 Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: function () { return action_core_1.installMiseTool; } });
 Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return action_core_1.parseEntries; } });
@@ -798,13 +800,26 @@ function buildFlagArgs(inputs) {
     }
     return flagArgs;
 }
-async function applyMiseSetup(runtimeTools, runtimeCacheHit) {
+async function applyMiseSetup(runtimeTools, _runtimeCacheHit) {
+    void _runtimeCacheHit;
     if (runtimeTools.length === 0) {
-        return;
+        return false;
+    }
+    const pathAvailable = new Map();
+    for (const tool of runtimeTools) {
+        const available = await (0, action_core_1.hasToolVersionOnPath)(tool.name, tool.version);
+        pathAvailable.set(`${tool.name}@${tool.version}`, available);
+        if (available) {
+            core.info(`Using existing ${tool.label} ${tool.version} from PATH`);
+        }
+    }
+    const unresolvedTools = runtimeTools.filter((tool) => !pathAvailable.get(`${tool.name}@${tool.version}`));
+    if (unresolvedTools.length === 0) {
+        return false;
     }
     await (0, action_core_1.installMise)();
-    for (const tool of runtimeTools) {
-        if (runtimeCacheHit) {
+    for (const tool of unresolvedTools) {
+        if (await (0, action_core_1.hasMiseToolVersion)(tool.name, tool.version)) {
             await (0, action_core_1.activateMiseTool)(tool.name, tool.version, { label: tool.label });
         }
         else {
@@ -812,6 +827,7 @@ async function applyMiseSetup(runtimeTools, runtimeCacheHit) {
         }
     }
     await (0, action_core_1.reshimMise)();
+    return true;
 }
 function serializeTools(runtimeTools) {
     return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');

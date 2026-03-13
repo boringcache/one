@@ -666,22 +666,9 @@ async function startSccacheServer() {
 }
 async function installSccache(versionInput = '0.13.0') {
     addLocalBinPaths();
-    try {
-        let output = '';
-        const result = await exec.exec('sccache', ['--version'], {
-            ignoreReturnCode: true,
-            silent: true,
-            listeners: {
-                stdout: (data) => {
-                    output += data.toString();
-                },
-            },
-        });
-        if (result === 0 && output.includes('sccache')) {
-            return;
-        }
-    }
-    catch {
+    if (await (0, action_core_1.hasToolVersionOnPath)('sccache', versionInput)) {
+        core.info(`Using existing sccache ${versionInput} from PATH`);
+        return;
     }
     const normalizedVersion = versionInput.startsWith('v') ? versionInput : `v${versionInput}`;
     let assetName = null;

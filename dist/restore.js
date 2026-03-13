@@ -86,12 +86,13 @@ async function run() {
         }
         process.chdir(plan.workingDirectory);
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', inputs.verbose ? ['--verbose'] : [], false);
+        let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
-            await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit);
+            usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit);
         }
         const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, (0, utils_1.buildFlagArgs)(inputs), plan.usesCacheFormat);
         const modeRestore = await (0, mode_handlers_1.runModeRestore)(plan, inputs);
-        const genericSaveEntries = [runtimeRestore.saveEntries, archiveRestore.saveEntries]
+        const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)
             .join(',');
         const overallHit = (_a = modeRestore.cacheHit) !== null && _a !== void 0 ? _a : (runtimeRestore.hit || archiveRestore.hit);
@@ -108,6 +109,7 @@ async function run() {
         core.saveState('cli-platform', cliPlatform || '');
         core.saveState('generic-cache-entries', genericSaveEntries);
         core.saveState('generic-cache-workspace', plan.workspace);
+        core.saveState('runtime-mise-used', String(usedMiseRuntime));
         core.saveState('generic-cache-exclude', inputs.exclude);
         core.saveState('no-platform', String(inputs.noPlatform));
         core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));

@@ -250,15 +250,8 @@ describe('product modes', () => {
     });
 
     try {
-      (exec.exec as jest.Mock).mockImplementation((command, args, options) => {
-        if (command === 'sccache' && Array.isArray(args) && args[0] === '--version') {
-          if (options?.listeners?.stdout) {
-            options.listeners.stdout(Buffer.from('sccache 0.13.0'));
-          }
-          return Promise.resolve(0);
-        }
-        return Promise.resolve(0);
-      });
+      actionCoreMocks.hasToolVersionOnPath.mockImplementation(async (toolName: string) => toolName === 'sccache');
+      (exec.exec as jest.Mock).mockResolvedValue(0);
 
       mockGetInput({
         mode: 'rust-sccache',
@@ -271,6 +264,7 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('rust', '1.89.0', { label: 'Rust' });
+      expect(actionCoreMocks.hasToolVersionOnPath).toHaveBeenCalledWith('sccache', '0.13.0');
       expect(exec.exec).not.toHaveBeenCalledWith('rustup', expect.anything(), expect.anything());
       expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
       expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');
@@ -287,15 +281,8 @@ describe('product modes', () => {
     });
 
     try {
-      (exec.exec as jest.Mock).mockImplementation((command, args, options) => {
-        if (command === 'sccache' && Array.isArray(args) && args[0] === '--version') {
-          if (options?.listeners?.stdout) {
-            options.listeners.stdout(Buffer.from('sccache 0.13.0'));
-          }
-          return Promise.resolve(0);
-        }
-        return Promise.resolve(0);
-      });
+      actionCoreMocks.hasToolVersionOnPath.mockImplementation(async (toolName: string) => toolName === 'sccache');
+      (exec.exec as jest.Mock).mockResolvedValue(0);
 
       mockGetInput({
         mode: 'rust-sccache',
