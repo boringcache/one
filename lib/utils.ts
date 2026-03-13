@@ -886,6 +886,10 @@ export function validateOneInputs(
 
   const hasArchiveInputs = Boolean(archiveEntries || runtimeEntry);
   if (modeSpec.resolved === 'archive' && !hasArchiveInputs) {
+    if (inputs.cliVersion.trim().toLowerCase() !== 'skip') {
+      core.notice('No cache entries resolved; boringcache/one will install the CLI only.');
+      return;
+    }
     throw new Error('No cache entries resolved. Provide entries, path+key, or enable cache-runtime with setup=mise.');
   }
 }

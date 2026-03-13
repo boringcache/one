@@ -68,4 +68,24 @@ describe('restore action', () => {
       platform: 'alpine-amd64',
     });
   });
+
+  it('allows CLI-only setup when no cache entries resolve', async () => {
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      'cli-platform': 'linux-amd64',
+    });
+
+    await restoreRun();
+
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
+      version: 'v1.12.5',
+      platform: 'linux-amd64',
+    });
+    expect(exec.exec).not.toHaveBeenCalledWith(
+      'boringcache',
+      expect.arrayContaining(['restore']),
+      expect.anything(),
+    );
+    expect(core.notice).toHaveBeenCalledWith('No cache entries resolved; boringcache/one will install the CLI only.');
+  });
 });

@@ -27,6 +27,21 @@ Choose this if you want BoringCache to feel closer to a buildpack:
 
 You usually do not need to set `setup` or `mode` unless you want a specific adapter such as Docker, Bazel, Gradle, Turbo, or Rust+sccache.
 
+## Mental model
+
+Think about `boringcache/one` in three layers:
+
+- CLI bootstrap: `cli-version` installs the BoringCache CLI and is independent from cache behavior.
+- Archive caches: `entries` are optional extra archive paths you want restored and saved.
+- Proxy and adapter modes: `docker`, `buildkit`, `bazel`, `gradle`, `maven`, `turbo-proxy`, and `rust-sccache` own the main cache/proxy behavior for the step.
+
+That means:
+
+- `entries` are additive, not required for every step
+- presets and modes can contribute their own defaults
+- `mise` runtime caching is separate from `entries`
+- a step can be valid as CLI-only, archive-only, proxy-only, or a mix of proxy plus extra archive entries
+
 ## Quick start
 
 Archive caching:
@@ -48,6 +63,18 @@ When `cache-runtime: true`, `one` caches `mise` installs and rebuilds shims afte
 Generated tags are deterministic and readable. With `cache-tag: web`, `tools: ruby@4.0.1`, and the default `tool-version-scope: patch`, the runtime cache tag becomes `web-mise-ruby-4.0.1` and an archive entry such as `bundler:vendor/bundle` resolves to `web-bundler-ruby-4.0.1`.
 
 If you want the exact same runtime tag across GitHub Actions, local CLI use, and Docker-based workflows, set `runtime-cache-tag` explicitly.
+
+CLI-only bootstrap:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    setup: none
+    workspace: my-org/my-project
+    cli-platform: alpine-amd64
+```
+
+This installs the CLI without requiring any archive entries. Use it when a later script or Dockerfile wants to copy `$(which boringcache)` directly.
 
 Mise-powered Rails-style workflow:
 
@@ -99,6 +126,7 @@ Docker setup only for external `docker buildx build` scripts:
 
 Use `steps.<id>.outputs.buildx-name` and `steps.<id>.outputs.proxy-port` in the later `docker buildx build` step when a benchmark or custom script needs to keep full control over the build invocation.
 If you need to copy the CLI into a container build context, install the matching asset first and then copy `$(which boringcache)`.
+You can also use `boringcache/one` as a CLI-only bootstrap step by omitting cache entries and setting `cli-platform` when you need a non-runner asset.
 
 Rust with remote sccache:
 
@@ -170,8 +198,10 @@ For Docker and BuildKit, `one` uses the runner's Docker/Buildx environment rathe
 ## Mode model
 
 - One invocation of `boringcache/one` runs one primary `mode`
-- That invocation can still install multiple tools through `mise`
-- That invocation can also restore generic archive entries alongside the primary mode
+- `archive` is the portable directory-cache mode
+- the other modes are proxy/build adapters
+- that invocation can still install multiple tools through `mise`
+- that invocation can also restore extra archive `entries` alongside the primary mode
 
 In practice:
 
@@ -230,7 +260,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 
 | Input | Description |
 |-------|-------------|
-| `entries` | Comma-separated or newline-separated `tag:path` pairs. |
+| `entries` | Optional extra archive cache entries as comma-separated or newline-separated `tag:path` pairs. These append to any defaults from presets, `mise`, or the selected mode. |
 | `path`, `key`, `restore-keys` | `actions/cache` compatibility inputs. |
 | `no-platform` / `enableCrossOsArchive` | Disable platform suffixing for portable caches only. |
 | `fail-on-cache-miss` | Fail if restore misses. |

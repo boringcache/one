@@ -1,5 +1,5 @@
 name: 'BoringCache One'
-description: 'Primary mise-powered GitHub Action for the BoringCache suite across archive, proxy, and build adapters.'
+description: 'Primary mise-powered GitHub Action for the BoringCache suite across archive caches, proxy-backed modes, and build adapters.'
 author: 'BoringCache'
 inputs:
   cli-version:
@@ -14,7 +14,7 @@ inputs:
     default: 'mise'
     required: false
   mode:
-    description: 'Product mode: auto, archive, docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.'
+    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.'
     default: 'auto'
     required: false
   preset:
@@ -25,7 +25,7 @@ inputs:
     description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses BORINGCACHE_DEFAULT_WORKSPACE or the repository name.'
     required: false
   cache-tag:
-    description: 'Human-readable cache tag or prefix. Archive entries and runtime caches derive deterministic tags from this when you do not set exact overrides.'
+    description: 'Human-readable cache tag or prefix. Generated archive entries, runtime caches, and proxy tags derive deterministic names from this when you do not set exact overrides.'
     required: false
   runtime-cache-tag:
     description: 'Optional exact tag for the mise installs cache. Use this when you want the same runtime cache tag across GitHub Actions, local CLI, and Docker workflows.'
@@ -254,7 +254,7 @@ inputs:
     default: '4227'
     required: false
   entries:
-    description: 'Cache entries in tag:path format (comma-separated for multiple). Unified format for both save and restore.'
+    description: 'Optional extra archive cache entries in tag:path format (comma-separated or newline-separated). These append to any mode, preset, or mise-derived defaults.'
     required: false
   path:
     description: 'A list of files, directories, and wildcard patterns to cache and restore (actions/cache compatible)'
