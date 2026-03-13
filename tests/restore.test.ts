@@ -210,4 +210,47 @@ describe('restore action', () => {
       await fs.rm(project, { recursive: true, force: true });
     }
   });
+
+  it('exports GOMODCACHE and GOCACHE for the go preset', async () => {
+    const project = await fs.mkdtemp(path.join(os.tmpdir(), 'one-restore-go-'));
+    await fs.writeFile(path.join(project, '.go-version'), '1.24.0\n');
+    await fs.writeFile(path.join(project, 'go.mod'), 'module example.com/demo\n');
+
+    try {
+      mockGetInput({
+        workspace: 'my-org/my-project',
+        preset: 'go',
+        'working-directory': project,
+      });
+
+      await restoreRun();
+
+      expect(core.exportVariable).toHaveBeenCalledWith('GOMODCACHE', path.join(project, '.go/pkg/mod'));
+      expect(core.exportVariable).toHaveBeenCalledWith('GOCACHE', path.join(project, '.go/build-cache'));
+    } finally {
+      await fs.rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('exports Composer cache env for the php-composer preset', async () => {
+    const project = await fs.mkdtemp(path.join(os.tmpdir(), 'one-restore-php-'));
+    await fs.writeFile(path.join(project, '.php-version'), '8.4.4\n');
+    await fs.writeFile(path.join(project, 'composer.json'), '{"name":"demo/app"}\n');
+    await fs.writeFile(path.join(project, 'composer.lock'), '{}\n');
+
+    try {
+      mockGetInput({
+        workspace: 'my-org/my-project',
+        preset: 'php-composer',
+        'working-directory': project,
+      });
+
+      await restoreRun();
+
+      expect(core.exportVariable).toHaveBeenCalledWith('COMPOSER_CACHE_DIR', path.join(project, '.composer-cache'));
+      expect(core.exportVariable).toHaveBeenCalledWith('COMPOSER_VENDOR_DIR', path.join(project, 'vendor'));
+    } finally {
+      await fs.rm(project, { recursive: true, force: true });
+    }
+  });
 });

@@ -135,6 +135,34 @@ Python with uv:
 
 The `python-uv` preset installs `uv` through `mise`, defaults a project-local `UV_CACHE_DIR`, and archives `.uv-cache`. Add extra entries such as `.venv` only if your workflow wants them.
 
+Go workflow:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    preset: go
+    workspace: my-org/my-project
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+The `go` preset exports project-local `GOMODCACHE` and `GOCACHE`, then archives those directories by default.
+
+PHP with Composer:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    preset: php-composer
+    workspace: my-org/my-project
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+The `php-composer` preset installs `php` plus `composer`, exports `COMPOSER_CACHE_DIR` and `COMPOSER_VENDOR_DIR`, and archives both the Composer cache and `vendor` by default.
+
 Docker build with cache:
 
 ```yaml
@@ -227,7 +255,7 @@ In `mode: maven`, `one` starts the cache-registry proxy, ensures `.mvn/extension
 - `mode: turbo-proxy` for Turbo remote cache proxy wiring
 - `mode: rust-sccache` for Rust toolchain, cargo caches, and remote `sccache`
 - `setup: mise` for installing toolchains such as Node, pnpm, Yarn, Ruby, Python, Go, Java, Maven, Gradle, Rust, Elixir, Erlang, and Bazel
-- `preset: rails`, `ruby`, `node`, `node-turbo`, or `python-uv` for opinionated workflow defaults on top of `mise`
+- `preset: rails`, `ruby`, `node`, `node-turbo`, `python-uv`, `go`, or `php-composer` for opinionated workflow defaults on top of `mise`
 
 ## Setup model
 
@@ -292,13 +320,14 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 |-------|-------------|
 | `setup` | `mise`, `external`, or `none`. Defaults to `mise`. |
 | `mode` | `auto`, `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `maven`, `turbo-proxy`, or `rust-sccache`. Defaults to `auto`. |
-| `preset` | `none`, `rails`, `ruby`, `node`, `node-turbo`, or `python-uv`. |
+| `preset` | `none`, `rails`, `ruby`, `node`, `node-turbo`, `python-uv`, `go`, or `php-composer`. |
 | `workspace` | Workspace in `org/repo` form. Defaults to `BORINGCACHE_DEFAULT_WORKSPACE`, then the repository name. |
 | `working-directory` | Project root used for detection and relative paths. |
 | `cache-tag` | Human-readable cache tag or prefix for generated tags. |
 | `runtime-cache-tag` | Optional exact tag override for the `mise` installs cache. |
 | `tools` | Explicit `mise` tools in `tool@version` form. |
 | `uv-version` | Default `uv` version for `preset: python-uv` when the project does not already pin `uv`. |
+| `composer-version` | Default Composer version for `preset: php-composer` when the project does not already pin it. |
 | `tool-version-scope` | `patch`, `minor`, or `major` for generated tool-scoped tags. |
 | `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
 | `verify` / `verify-timeout-seconds` / `verify-require-server-signature` | Optional exact-tag verification controls. |

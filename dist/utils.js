@@ -80,6 +80,7 @@ const modes_1 = require("./modes");
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
+    composer: 'Composer',
     elixir: 'Elixir',
     erlang: 'Erlang',
     go: 'Go',
@@ -90,6 +91,7 @@ const TOOL_LABELS = {
     nodejs: 'Node.js',
     npm: 'npm',
     pnpm: 'pnpm',
+    php: 'PHP',
     python: 'Python',
     ruby: 'Ruby',
     rust: 'Rust',
@@ -113,6 +115,7 @@ function getInputs() {
         cacheRuntime: core.getBooleanInput('cache-runtime'),
         mavenVersion: core.getInput('maven-version') || '3.9.9',
         uvVersion: core.getInput('uv-version') || '0.9.21',
+        composerVersion: core.getInput('composer-version') || '2.9.5',
         mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
         readOnly: core.getBooleanInput('read-only'),
         verify: normalizeVerifyMode(core.getInput('verify')),
@@ -172,9 +175,11 @@ function normalizePreset(value) {
         case 'node':
         case 'node-turbo':
         case 'python-uv':
+        case 'go':
+        case 'php-composer':
             return (value || 'none').trim().toLowerCase();
         default:
-            throw new Error(`Unsupported preset "${value}". Expected none, rails, ruby, node, node-turbo, or python-uv.`);
+            throw new Error(`Unsupported preset "${value}". Expected none, rails, ruby, node, node-turbo, python-uv, go, or php-composer.`);
     }
 }
 function normalizeToolVersionScope(value) {
@@ -574,13 +579,13 @@ function parseToolSpecs(input) {
         };
     });
 }
-async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory, uvVersion) {
+async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory, uvVersion, composerVersion) {
     if (setup !== 'mise') {
         return [];
     }
     const explicitTools = parseToolSpecs(toolsInput);
     const projectTools = await detectProjectTools(workingDirectory);
-    const presetTools = await detectPresetTools(preset, workingDirectory, uvVersion);
+    const presetTools = await detectPresetTools(preset, workingDirectory, uvVersion, composerVersion);
     const modeTools = await detectModeTools(mode, workingDirectory);
     return mergeTools(explicitTools, projectTools, presetTools, modeTools);
 }
@@ -616,7 +621,7 @@ async function detectProjectTools(workingDirectory) {
     }
     return Array.from(tools.values());
 }
-async function detectPresetTools(preset, workingDirectory, uvVersion) {
+async function detectPresetTools(preset, workingDirectory, uvVersion, composerVersion) {
     switch (preset) {
         case 'rails':
             return detectRailsTools(workingDirectory);
@@ -628,6 +633,10 @@ async function detectPresetTools(preset, workingDirectory, uvVersion) {
             return detectNodeTurboTools(workingDirectory);
         case 'python-uv':
             return detectPythonUvTools(workingDirectory, uvVersion);
+        case 'go':
+            return detectGoTools(workingDirectory);
+        case 'php-composer':
+            return detectPhpComposerTools(workingDirectory, composerVersion);
         default:
             return [];
     }
@@ -694,6 +703,27 @@ async function detectPythonUvTools(workingDirectory, defaultUvVersion) {
         name: 'uv',
         version: (await detectUvVersion(workingDirectory)) || defaultUvVersion,
         label: 'uv',
+        source: 'preset',
+    });
+    return tools;
+}
+async function detectGoTools(workingDirectory) {
+    const goVersion = await detectGoVersion(workingDirectory);
+    if (!goVersion) {
+        return [];
+    }
+    return [{ name: 'go', version: goVersion, label: 'Go', source: 'preset' }];
+}
+async function detectPhpComposerTools(workingDirectory, defaultComposerVersion) {
+    const tools = [];
+    const phpVersion = await detectPhpVersion(workingDirectory);
+    if (phpVersion) {
+        tools.push({ name: 'php', version: phpVersion, label: 'PHP', source: 'preset' });
+    }
+    tools.push({
+        name: 'composer',
+        version: (await detectComposerVersion(workingDirectory)) || defaultComposerVersion,
+        label: 'Composer',
         source: 'preset',
     });
     return tools;
@@ -800,6 +830,24 @@ async function detectUvVersion(workingDirectory) {
         return toolVersion;
     }
     return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'uv');
+}
+async function detectPhpVersion(workingDirectory) {
+    const phpVersion = await readFirstLine(path.join(workingDirectory, '.php-version'));
+    if (phpVersion) {
+        return phpVersion;
+    }
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'php');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'php');
+}
+async function detectComposerVersion(workingDirectory) {
+    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'composer');
+    if (toolVersion) {
+        return toolVersion;
+    }
+    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'composer');
 }
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
@@ -1086,6 +1134,12 @@ async function detectDefaultArchiveEntries(inputs) {
     if (inputs.preset === 'python-uv') {
         return `uv-cache:${defaultUvCacheDir(inputs.workingDirectory)}`;
     }
+    if (inputs.preset === 'go') {
+        return joinDefaultEntries(`go-mod-cache:${defaultGoModCacheDir(inputs.workingDirectory)}`, `go-build-cache:${defaultGoBuildCacheDir(inputs.workingDirectory)}`);
+    }
+    if (inputs.preset === 'php-composer') {
+        return joinDefaultEntries(`composer-cache:${await defaultComposerCacheDir(inputs.workingDirectory)}`, `vendor:${await defaultComposerVendorDir(inputs.workingDirectory)}`);
+    }
     return '';
 }
 function joinDefaultEntries(...groups) {
@@ -1110,6 +1164,63 @@ function defaultUvCacheDir(workingDirectory) {
     const configured = (_a = process.env.UV_CACHE_DIR) === null || _a === void 0 ? void 0 : _a.trim();
     if (!configured) {
         return '.uv-cache';
+    }
+    return path.isAbsolute(configured)
+        ? configured
+        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
+}
+function defaultGoModCacheDir(workingDirectory) {
+    var _a;
+    const configured = (_a = process.env.GOMODCACHE) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!configured) {
+        return '.go/pkg/mod';
+    }
+    return path.isAbsolute(configured)
+        ? configured
+        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
+}
+function defaultGoBuildCacheDir(workingDirectory) {
+    var _a;
+    const configured = (_a = process.env.GOCACHE) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!configured) {
+        return '.go/build-cache';
+    }
+    return path.isAbsolute(configured)
+        ? configured
+        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
+}
+async function readComposerConfig(workingDirectory) {
+    const composerJson = await readFile(path.join(workingDirectory, 'composer.json'));
+    if (!composerJson) {
+        return {};
+    }
+    try {
+        const parsed = JSON.parse(composerJson);
+        const config = parsed.config || {};
+        return {
+            cacheDir: typeof config['cache-dir'] === 'string' ? config['cache-dir'] : undefined,
+            vendorDir: typeof config['vendor-dir'] === 'string' ? config['vendor-dir'] : undefined,
+        };
+    }
+    catch {
+        return {};
+    }
+}
+async function defaultComposerCacheDir(workingDirectory) {
+    var _a;
+    const configured = ((_a = process.env.COMPOSER_CACHE_DIR) === null || _a === void 0 ? void 0 : _a.trim()) || (await readComposerConfig(workingDirectory)).cacheDir;
+    if (!configured) {
+        return '.composer-cache';
+    }
+    return path.isAbsolute(configured)
+        ? configured
+        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
+}
+async function defaultComposerVendorDir(workingDirectory) {
+    var _a;
+    const configured = ((_a = process.env.COMPOSER_VENDOR_DIR) === null || _a === void 0 ? void 0 : _a.trim()) || (await readComposerConfig(workingDirectory)).vendorDir;
+    if (!configured) {
+        return 'vendor';
     }
     return path.isAbsolute(configured)
         ? configured
@@ -1194,7 +1305,7 @@ async function buildPlan(inputs) {
     const modeSpec = (0, modes_1.resolveModeSpec)(inputs.mode);
     (0, modes_1.assertImplementedMode)(modeSpec);
     const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
-    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory, inputs.uvVersion);
+    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory, inputs.uvVersion, inputs.composerVersion);
     if (inputs.setup === 'mise'
         && modeSpec.resolved === 'maven'
         && resolvedMavenVersion
@@ -1341,6 +1452,22 @@ async function configurePythonUvPresetEnv(workingDirectory) {
     await fs.promises.mkdir(uvCacheDir, { recursive: true });
     core.exportVariable('UV_CACHE_DIR', uvCacheDir);
 }
+async function configureGoPresetEnv(workingDirectory) {
+    const goModCache = resolveCacheEnvPath(workingDirectory, defaultGoModCacheDir(workingDirectory));
+    const goBuildCache = resolveCacheEnvPath(workingDirectory, defaultGoBuildCacheDir(workingDirectory));
+    await fs.promises.mkdir(goModCache, { recursive: true });
+    await fs.promises.mkdir(goBuildCache, { recursive: true });
+    core.exportVariable('GOMODCACHE', goModCache);
+    core.exportVariable('GOCACHE', goBuildCache);
+}
+async function configurePhpComposerPresetEnv(workingDirectory) {
+    const composerCacheDir = resolveCacheEnvPath(workingDirectory, await defaultComposerCacheDir(workingDirectory));
+    const composerVendorDir = resolveCacheEnvPath(workingDirectory, await defaultComposerVendorDir(workingDirectory));
+    await fs.promises.mkdir(composerCacheDir, { recursive: true });
+    await fs.promises.mkdir(composerVendorDir, { recursive: true });
+    core.exportVariable('COMPOSER_CACHE_DIR', composerCacheDir);
+    core.exportVariable('COMPOSER_VENDOR_DIR', composerVendorDir);
+}
 async function applyPresetCacheEnv(plan) {
     switch (plan.preset) {
         case 'rails':
@@ -1356,6 +1483,12 @@ async function applyPresetCacheEnv(plan) {
             break;
         case 'python-uv':
             await configurePythonUvPresetEnv(plan.workingDirectory);
+            break;
+        case 'go':
+            await configureGoPresetEnv(plan.workingDirectory);
+            break;
+        case 'php-composer':
+            await configurePhpComposerPresetEnv(plan.workingDirectory);
             break;
         default:
             break;

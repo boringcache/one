@@ -18,7 +18,7 @@ inputs:
     default: 'auto'
     required: false
   preset:
-    description: 'Workflow preset: none, rails, ruby, node, node-turbo, or python-uv.'
+    description: 'Workflow preset: none, rails, ruby, node, node-turbo, python-uv, go, or php-composer.'
     default: 'none'
     required: false
   workspace:
@@ -176,6 +176,10 @@ inputs:
   uv-version:
     description: 'uv version to install for preset=python-uv when the project does not already pin it through mise.'
     default: '0.9.21'
+    required: false
+  composer-version:
+    description: 'Composer version to install for preset=php-composer when the project does not already pin it through mise.'
+    default: '2.9.5'
     required: false
   maven-local-repo:
     description: 'Local Maven repository path. Used for archive defaults in Maven mode.'

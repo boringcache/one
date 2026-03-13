@@ -45,6 +45,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     cacheRuntime: false,
     mavenVersion: '',
     uvVersion: '0.9.21',
+    composerVersion: '2.9.5',
     mavenLocalRepo: '~/.m2/repository',
     readOnly: false,
     verify: 'none',
@@ -319,6 +320,58 @@ describe('one utils', () => {
         { name: 'uv', version: '0.9.21', label: 'uv', source: 'preset' },
       ]);
       expect(plan.archiveEntries).toBe('api-uv-cache-python-3.12.7-uv-0.9.21:.uv-cache');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('adds go cache defaults for the go preset', async () => {
+    const project = await makeTempProject({
+      '.go-version': '1.24.0\n',
+      'go.mod': 'module example.com/demo\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        preset: 'go',
+        workingDirectory: project,
+        cacheTag: 'svc',
+        entries: '',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'go', version: '1.24.0', label: 'Go', source: 'project' },
+      ]);
+      expect(plan.archiveEntries).toBe(
+        'svc-go-mod-cache-go-1.24.0:.go/pkg/mod,svc-go-build-cache-go-1.24.0:.go/build-cache',
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('adds php and composer tools plus composer cache defaults for the php-composer preset', async () => {
+    const project = await makeTempProject({
+      '.php-version': '8.4.4\n',
+      'composer.json': '{"name":"demo/app"}\n',
+      'composer.lock': '{}\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        preset: 'php-composer',
+        workingDirectory: project,
+        cacheTag: 'site',
+        entries: '',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'php', version: '8.4.4', label: 'PHP', source: 'preset' },
+        { name: 'composer', version: '2.9.5', label: 'Composer', source: 'preset' },
+      ]);
+      expect(plan.archiveEntries).toBe(
+        'site-composer-cache-composer-2.9.5-php-8.4.4:.composer-cache,site-vendor-composer-2.9.5-php-8.4.4:vendor',
+      );
     } finally {
       await removeTempProject(project);
     }
