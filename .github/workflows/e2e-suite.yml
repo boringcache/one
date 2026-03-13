@@ -206,8 +206,8 @@ jobs:
           tools: ${{ matrix.tools }}
           entries: ${{ matrix.entries }}
           path: ${{ matrix.path }}
-          key: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
-          restore-keys: ${{ format('lang-{0}-', matrix.id) }}
+          key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
           verbose: true
 
       - name: Seed fixture
@@ -375,8 +375,8 @@ jobs:
           tools: ${{ matrix.tools }}
           entries: ${{ matrix.entries }}
           path: ${{ matrix.path }}
-          key: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
-          restore-keys: ${{ format('lang-{0}-', matrix.id) }}
+          key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
           verbose: true
 
       - name: Assert cache restore
