@@ -117,6 +117,9 @@ export async function run(): Promise<void> {
     if (exclude) {
       args.push('--exclude', exclude);
     }
+    if (verifyMode !== 'none') {
+      args.push('--fail-on-cache-error');
+    }
 
     await execBoringCache(args);
 

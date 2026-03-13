@@ -130,6 +130,9 @@ async function run() {
         if (exclude) {
             args.push('--exclude', exclude);
         }
+        if (verifyMode !== 'none') {
+            args.push('--fail-on-cache-error');
+        }
         await (0, utils_1.execBoringCache)(args);
         if (verifyMode !== 'none' && verifySaveTags.length > 0) {
             await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifySaveTags, {
