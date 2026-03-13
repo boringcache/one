@@ -242,7 +242,7 @@ inputs:
     required: false
   sccache-version:
     description: 'sccache version to install when the binary is not already available.'
-    default: '0.13.0'
+    default: '0.14.0'
     required: false
   sccache-cache-size:
     description: 'Maximum local sccache cache size.'

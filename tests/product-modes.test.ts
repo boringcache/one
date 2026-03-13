@@ -264,7 +264,7 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('rust', '1.89.0', { label: 'Rust' });
-      expect(actionCoreMocks.hasToolVersionOnPath).toHaveBeenCalledWith('sccache', '0.13.0');
+      expect(actionCoreMocks.hasToolVersionOnPath).toHaveBeenCalledWith('sccache', '0.14.0');
       expect(exec.exec).not.toHaveBeenCalledWith('rustup', expect.anything(), expect.anything());
       expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
       expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');

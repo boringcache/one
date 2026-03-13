@@ -806,7 +806,7 @@ async function startSccacheServer(): Promise<void> {
   await exec.exec('sccache', ['--start-server'], { ignoreReturnCode: true });
 }
 
-async function installSccache(versionInput = '0.13.0'): Promise<void> {
+async function installSccache(versionInput = '0.14.0'): Promise<void> {
   addLocalBinPaths();
 
   if (await hasToolVersionOnPath('sccache', versionInput)) {
@@ -1500,7 +1500,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
   const cacheCargoBin = core.getInput('cache-cargo-bin') === 'true';
   const cacheTarget = core.getInput('cache-target') !== 'false';
   const useSccache = core.getInput('sccache') === 'true';
-  const sccacheVersion = core.getInput('sccache-version') || '0.13.0';
+  const sccacheVersion = core.getInput('sccache-version') || '0.14.0';
   const sccacheMode = core.getInput('sccache-mode') || 'local';
   const sccacheCacheSize = core.getInput('sccache-cache-size') || '5G';
   const targets = core.getInput('targets');

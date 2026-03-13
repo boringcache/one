@@ -290,8 +290,12 @@ prepare_bazel() {
   cat >"$workdir/.bazelversion" <<'EOF'
 8.1.1
 EOF
-  cat >"$workdir/MODULE.bazel" <<'EOF'
-module(name = "boringcache_one_bazel", version = "0.1.0")
+  cat >"$workdir/.bazelrc" <<'EOF'
+common --enable_bzlmod=false
+common --enable_workspace=true
+EOF
+  cat >"$workdir/WORKSPACE" <<'EOF'
+workspace(name = "boringcache_one_bazel")
 EOF
   cat >"$workdir/BUILD.bazel" <<'EOF'
 sh_binary(
