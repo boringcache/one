@@ -59,6 +59,13 @@ async function run() {
         let enableCrossOsArchive = core.getState('enableCrossOsArchive') === 'true';
         let force = core.getState('force') === 'true';
         let verbose = core.getState('verbose') === 'true';
+        const verifyMode = (core.getState('verify-mode') || inputs.verify);
+        const verifyTimeoutSeconds = Number.parseInt(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds), 10);
+        const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
+        const verifySaveTags = core.getState('verify-save-tags')
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean);
         if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
             const plan = await (0, utils_1.buildPlan)(inputs);
             resolvedMode = plan.mode;
@@ -92,6 +99,14 @@ async function run() {
             await (0, mode_handlers_1.runModeSave)(resolvedMode);
         }
         if (!genericEntries || !genericWorkspace) {
+            if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
+                await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifySaveTags, {
+                    mode: verifyMode,
+                    timeoutSeconds: verifyTimeoutSeconds,
+                    requireServerSignature: verifyRequireServerSignature,
+                    verbose,
+                });
+            }
             return;
         }
         const args = ['save', genericWorkspace, genericEntries];
@@ -108,6 +123,14 @@ async function run() {
             args.push('--exclude', exclude);
         }
         await (0, utils_1.execBoringCache)(args);
+        if (verifyMode !== 'none' && verifySaveTags.length > 0) {
+            await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifySaveTags, {
+                mode: verifyMode,
+                timeoutSeconds: verifyTimeoutSeconds,
+                requireServerSignature: verifyRequireServerSignature,
+                verbose,
+            });
+        }
     }
     catch (error) {
         core.setFailed(`boringcache/one save failed: ${error instanceof Error ? error.message : String(error)}`);

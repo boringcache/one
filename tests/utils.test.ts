@@ -8,6 +8,7 @@ import {
   buildRuntimeCacheTag,
   buildRuntimeCacheEntry,
   parseToolSpecs,
+  resolveVerificationTags,
   type OneInputs,
 } from '../lib/utils';
 import { actionCoreMocks } from './setup';
@@ -45,6 +46,9 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     mavenVersion: '',
     mavenLocalRepo: '~/.m2/repository',
     readOnly: false,
+    verify: 'none',
+    verifyTimeoutSeconds: 60,
+    verifyRequireServerSignature: false,
     proxyPort: '',
     proxyNoGit: false,
     proxyNoPlatform: false,
@@ -214,6 +218,46 @@ describe('one utils', () => {
         'web-pnpm-store-node-22.4.1-pnpm-9.15.1:.pnpm-store,web-node-modules-node-22.4.1-pnpm-9.15.1:node_modules',
       );
     } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('resolves exact verification tags with CI branch suffixes', async () => {
+    const project = await makeTempProject({ 'package.json': '{"name":"demo"}\n' });
+    const previousCi = process.env.CI;
+    const previousHeadRef = process.env.GITHUB_HEAD_REF;
+    const previousDefaultBranch = process.env.BORINGCACHE_DEFAULT_BRANCH;
+
+    try {
+      process.env.CI = '1';
+      process.env.GITHUB_HEAD_REF = 'Feature/ABC-123';
+      process.env.BORINGCACHE_DEFAULT_BRANCH = 'main';
+
+      expect(resolveVerificationTags([{
+        tag: 'deps',
+        noPlatform: true,
+        noGit: false,
+        pathHint: project,
+      }], project)).toEqual(['deps-branch-feature-abc-123']);
+    } finally {
+      if (previousCi === undefined) {
+        delete process.env.CI;
+      } else {
+        process.env.CI = previousCi;
+      }
+
+      if (previousHeadRef === undefined) {
+        delete process.env.GITHUB_HEAD_REF;
+      } else {
+        process.env.GITHUB_HEAD_REF = previousHeadRef;
+      }
+
+      if (previousDefaultBranch === undefined) {
+        delete process.env.BORINGCACHE_DEFAULT_BRANCH;
+      } else {
+        process.env.BORINGCACHE_DEFAULT_BRANCH = previousDefaultBranch;
+      }
+
       await removeTempProject(project);
     }
   });

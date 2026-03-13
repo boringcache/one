@@ -216,7 +216,8 @@ In practice:
 - for archive `entries`, `cache-tag` prefixes each entry tag unless you already included that prefix yourself
 - `runtime-cache-tag` lets you set the exact runtime cache tag when you need local and CI reuse to line up exactly
 - `tool-version-scope` controls how generated tags encode versions: `patch`, `minor`, or `major`
-- `resolved-entries` and `runtime-cache-tag` outputs show the exact tags `one` used, so you can reuse them with the CLI
+- `resolved-tags` outputs the exact cache tags `one` resolved for checks and verification
+- `resolved-entries` and `runtime-cache-tag` still show the deterministic archive and runtime tag plan
 
 Example:
 
@@ -238,6 +239,8 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 - Save is skipped cleanly when no save-capable token is present
 - Use `BORINGCACHE_SAVE_TOKEN` only on trusted branch, tag, or manual jobs
 - `BORINGCACHE_API_TOKEN` still works, but new workflows should prefer split tokens
+- `verify: check` runs one exact-tag presence check, while `verify: wait` polls until saved tags are visible
+- Save-capable tags verify in the post step after `boringcache/one` finishes saving them
 
 ## Core inputs
 
@@ -253,6 +256,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `tools` | Explicit `mise` tools in `tool@version` form. |
 | `tool-version-scope` | `patch`, `minor`, or `major` for generated tool-scoped tags. |
 | `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
+| `verify` / `verify-timeout-seconds` / `verify-require-server-signature` | Optional exact-tag verification controls. |
 | `cli-version` | BoringCache CLI version to install. Set to `skip` to disable automatic CLI setup. |
 | `cli-platform` | Optional CLI asset override such as `alpine-amd64` or `debian-bookworm-amd64` when the runner binary is not the one you need to copy downstream. |
 
@@ -288,7 +292,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `runtime-cache-hit` | Whether the `mise` runtime cache was restored. |
 | `resolved-mode` | Effective mode used by the action. |
 | `resolved-tools` | Resolved `mise` tools as newline-separated `tool@version` values. |
-| `workspace`, `cache-tag`, `runtime-cache-tag`, `resolved-entries`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
+| `workspace`, `cache-tag`, `runtime-cache-tag`, `resolved-entries`, `resolved-tags`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
 | `package-manager`, `package-manager-cache-dir` | Turbo mode outputs. |
 | `image-id`, `digest`, `buildx-name`, `buildx-platforms` | Docker and BuildKit outputs. |
 | `maven-extensions-path`, `maven-build-cache-config-path`, `maven-local-repo` | Maven mode outputs. |

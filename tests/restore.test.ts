@@ -24,8 +24,10 @@ describe('restore action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'deps');
     expect(core.setOutput).toHaveBeenCalledWith('runtime-cache-tag', '');
     expect(core.setOutput).toHaveBeenCalledWith('resolved-entries', 'deps:node_modules,build:dist');
+    expect(core.setOutput).toHaveBeenCalledWith('resolved-tags', 'deps,build');
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-entries', 'deps:node_modules,build:dist');
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-workspace', 'my-org/my-project');
+    expect(core.saveState).toHaveBeenCalledWith('resolved-tags', 'deps,build');
   });
 
   it('falls back through restore keys in actions/cache compatibility mode', async () => {
@@ -115,5 +117,26 @@ describe('restore action', () => {
 
     expect(actionCoreMocks.installMise).toHaveBeenCalled();
     expect(actionCoreMocks.exportMiseEnv).toHaveBeenCalledWith(process.cwd());
+  });
+
+  it('verifies exact tags immediately when no save-capable token is present', async () => {
+    delete process.env.BORINGCACHE_SAVE_TOKEN;
+    delete process.env.BORINGCACHE_API_TOKEN;
+    process.env.BORINGCACHE_RESTORE_TOKEN = 'test-restore-token';
+
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+      verify: 'check',
+    });
+    mockGetBooleanInput({ 'no-platform': true });
+
+    await restoreRun();
+
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
+      expect.objectContaining({ ignoreReturnCode: true }),
+    );
   });
 });

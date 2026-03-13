@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.run = run;
 const core = __importStar(require("@actions/core"));
+const action_core_1 = require("@boringcache/action-core");
 const utils_1 = require("./utils");
 const mode_handlers_1 = require("./mode-handlers");
 async function restoreEntries(workspace, entriesString, flagArgs, allowRestoreKeys = false) {
@@ -95,6 +96,17 @@ async function run() {
         const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)
             .join(',');
+        const verificationSpecs = [
+            ...(0, utils_1.buildGenericVerificationSpecs)(plan, inputs, usedMiseRuntime),
+            ...(modeRestore.verificationSpecs || []),
+        ];
+        const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
+        const deferredVerifyTags = (0, action_core_1.hasSaveToken)()
+            ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => spec.saveExpected), plan.workingDirectory)
+            : [];
+        const immediateVerifyTags = (0, action_core_1.hasSaveToken)()
+            ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => !spec.saveExpected), plan.workingDirectory)
+            : resolvedTags;
         const overallHit = (_a = modeRestore.cacheHit) !== null && _a !== void 0 ? _a : (runtimeRestore.hit || archiveRestore.hit);
         core.setOutput('cache-hit', String(overallHit));
         core.setOutput('runtime-cache-hit', String(runtimeRestore.hit));
@@ -104,6 +116,7 @@ async function run() {
         core.setOutput('cache-tag', plan.cacheTagPrefix);
         core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
         core.setOutput('resolved-entries', plan.archiveEntries);
+        core.setOutput('resolved-tags', resolvedTags.join(','));
         core.saveState('resolved-mode', plan.mode);
         core.saveState('cli-version', inputs.cliVersion);
         core.saveState('cli-platform', cliPlatform || '');
@@ -115,6 +128,19 @@ async function run() {
         core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));
         core.saveState('force', String(inputs.force));
         core.saveState('verbose', String(inputs.verbose));
+        core.saveState('resolved-tags', resolvedTags.join(','));
+        core.saveState('verify-save-tags', deferredVerifyTags.join(','));
+        core.saveState('verify-mode', inputs.verify);
+        core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
+        core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
+        if (inputs.verify !== 'none' && immediateVerifyTags.length > 0) {
+            await (0, utils_1.verifyResolvedTags)(plan.workspace, immediateVerifyTags, {
+                mode: inputs.verify,
+                timeoutSeconds: inputs.verifyTimeoutSeconds,
+                requireServerSignature: inputs.verifyRequireServerSignature,
+                verbose: inputs.verbose,
+            });
+        }
     }
     catch (error) {
         core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);

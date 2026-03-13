@@ -1,6 +1,14 @@
 import * as core from '@actions/core';
 import { hasSaveToken, missingSaveTokenMessage } from '@boringcache/action-core';
-import { buildPlan, ensureBoringCache, execBoringCache, getInputs, parseEntries } from './utils';
+import {
+  buildPlan,
+  ensureBoringCache,
+  execBoringCache,
+  getInputs,
+  type VerifyMode,
+  parseEntries,
+  verifyResolvedTags,
+} from './utils';
 import { runModeSave } from './mode-handlers';
 import type { ResolvedMode } from './modes';
 
@@ -28,6 +36,17 @@ export async function run(): Promise<void> {
     let enableCrossOsArchive = core.getState('enableCrossOsArchive') === 'true';
     let force = core.getState('force') === 'true';
     let verbose = core.getState('verbose') === 'true';
+    const verifyMode = (core.getState('verify-mode') || inputs.verify) as VerifyMode;
+    const verifyTimeoutSeconds = Number.parseInt(
+      core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds),
+      10,
+    );
+    const verifyRequireServerSignature =
+      core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
+    const verifySaveTags = core.getState('verify-save-tags')
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
 
     if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
       const plan = await buildPlan(inputs);
@@ -65,6 +84,14 @@ export async function run(): Promise<void> {
     }
 
     if (!genericEntries || !genericWorkspace) {
+      if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
+        await verifyResolvedTags(genericWorkspace, verifySaveTags, {
+          mode: verifyMode,
+          timeoutSeconds: verifyTimeoutSeconds,
+          requireServerSignature: verifyRequireServerSignature,
+          verbose,
+        });
+      }
       return;
     }
 
@@ -83,6 +110,15 @@ export async function run(): Promise<void> {
     }
 
     await execBoringCache(args);
+
+    if (verifyMode !== 'none' && verifySaveTags.length > 0) {
+      await verifyResolvedTags(genericWorkspace, verifySaveTags, {
+        mode: verifyMode,
+        timeoutSeconds: verifyTimeoutSeconds,
+        requireServerSignature: verifyRequireServerSignature,
+        verbose,
+      });
+    }
   } catch (error) {
     core.setFailed(`boringcache/one save failed: ${error instanceof Error ? error.message : String(error)}`);
   }

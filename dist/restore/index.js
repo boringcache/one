@@ -44071,7 +44071,15 @@ async function runDockerRestore(plan, inputs) {
     }
     core.setOutput('workspace', plan.workspace);
     core.setOutput('cache-tag', cacheTag);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+                noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
+                noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+                pathHint: plan.workingDirectory,
+                saveExpected: shouldBuild && !inputs.readOnly,
+            }],
+    };
 }
 async function runDockerSave() {
     const proxyPid = getModeState('proxy-pid');
@@ -44223,7 +44231,15 @@ async function runBuildkitRestore(plan, inputs) {
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', plan.workspace);
     core.setOutput('cache-tag', cacheTag);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+                noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
+                noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runBuildkitSave() {
     const proxyPid = getModeState('proxy-pid');
@@ -44272,7 +44288,15 @@ async function runBazelRestore(plan, inputs) {
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: inputs.proxyNoPlatform,
+                noGit: inputs.proxyNoGit,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runGradleRestore(plan, inputs) {
     var _a;
@@ -44301,7 +44325,15 @@ async function runGradleRestore(plan, inputs) {
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: inputs.proxyNoPlatform,
+                noGit: inputs.proxyNoGit,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runMavenRestore(plan, inputs) {
     var _a;
@@ -44336,7 +44368,15 @@ async function runMavenRestore(plan, inputs) {
     core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
     core.setOutput('maven-local-repo', localRepo);
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: inputs.proxyNoPlatform,
+                noGit: inputs.proxyNoGit,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runTurboProxyRestore(plan, inputs) {
     const cacheTag = inputs.cacheTag || getModeCacheTag('', 'turbo');
@@ -44355,7 +44395,7 @@ async function runTurboProxyRestore(plan, inputs) {
         configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
         core.setOutput('workspace', plan.workspace);
         core.setOutput('cache-tag', cacheTag);
-        return {};
+        return { verificationSpecs: [] };
     }
     let proxy;
     try {
@@ -44370,7 +44410,15 @@ async function runTurboProxyRestore(plan, inputs) {
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: true,
+                noGit: true,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runRustRestore(plan, inputs) {
     var _a;
@@ -44469,7 +44517,54 @@ async function runRustRestore(plan, inputs) {
     const cacheHit = registryRestored || cargoBinRestored || targetRestored || sccacheRestored;
     core.setOutput('cache-hit', String(cacheHit));
     core.setOutput('sccache-hit', String(sccacheRestored));
-    return { cacheHit };
+    const verificationSpecs = [];
+    if (cacheCargo) {
+        verificationSpecs.push({
+            tag: cargoRegistryTag,
+            noPlatform: false,
+            noGit: false,
+            pathHint: path.join(cargoHome, 'registry'),
+            saveExpected: true,
+        });
+        const lockPath = path.join(workingDir, 'Cargo.lock');
+        if (await hasGitDependencies(lockPath)) {
+            verificationSpecs.push({
+                tag: cargoGitTag,
+                noPlatform: false,
+                noGit: false,
+                pathHint: path.join(cargoHome, 'git'),
+                saveExpected: true,
+            });
+        }
+    }
+    if (cacheCargoBin) {
+        verificationSpecs.push({
+            tag: cargoBinTag,
+            noPlatform: false,
+            noGit: false,
+            pathHint: path.join(cargoHome, 'bin'),
+            saveExpected: true,
+        });
+    }
+    if (cacheTarget) {
+        verificationSpecs.push({
+            tag: targetTag,
+            noPlatform: false,
+            noGit: false,
+            pathHint: path.join(workingDir, 'target'),
+            saveExpected: true,
+        });
+    }
+    if (useSccache) {
+        verificationSpecs.push({
+            tag: sccacheTag,
+            noPlatform: sccacheMode === 'proxy',
+            noGit: sccacheMode === 'proxy',
+            pathHint: sccacheMode === 'proxy' ? workingDir : getSccacheDir(),
+            saveExpected: sccacheMode !== 'proxy' || !inputs.readOnly,
+        });
+    }
+    return { cacheHit, verificationSpecs };
 }
 async function runRustSave() {
     const workspace = getModeState('workspace');
@@ -44715,6 +44810,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(37484));
+const action_core_1 = __nccwpck_require__(68701);
 const utils_1 = __nccwpck_require__(2219);
 const mode_handlers_1 = __nccwpck_require__(80861);
 async function restoreEntries(workspace, entriesString, flagArgs, allowRestoreKeys = false) {
@@ -44775,6 +44871,17 @@ async function run() {
         const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)
             .join(',');
+        const verificationSpecs = [
+            ...(0, utils_1.buildGenericVerificationSpecs)(plan, inputs, usedMiseRuntime),
+            ...(modeRestore.verificationSpecs || []),
+        ];
+        const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
+        const deferredVerifyTags = (0, action_core_1.hasSaveToken)()
+            ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => spec.saveExpected), plan.workingDirectory)
+            : [];
+        const immediateVerifyTags = (0, action_core_1.hasSaveToken)()
+            ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => !spec.saveExpected), plan.workingDirectory)
+            : resolvedTags;
         const overallHit = (_a = modeRestore.cacheHit) !== null && _a !== void 0 ? _a : (runtimeRestore.hit || archiveRestore.hit);
         core.setOutput('cache-hit', String(overallHit));
         core.setOutput('runtime-cache-hit', String(runtimeRestore.hit));
@@ -44784,6 +44891,7 @@ async function run() {
         core.setOutput('cache-tag', plan.cacheTagPrefix);
         core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
         core.setOutput('resolved-entries', plan.archiveEntries);
+        core.setOutput('resolved-tags', resolvedTags.join(','));
         core.saveState('resolved-mode', plan.mode);
         core.saveState('cli-version', inputs.cliVersion);
         core.saveState('cli-platform', cliPlatform || '');
@@ -44795,6 +44903,19 @@ async function run() {
         core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));
         core.saveState('force', String(inputs.force));
         core.saveState('verbose', String(inputs.verbose));
+        core.saveState('resolved-tags', resolvedTags.join(','));
+        core.saveState('verify-save-tags', deferredVerifyTags.join(','));
+        core.saveState('verify-mode', inputs.verify);
+        core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
+        core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
+        if (inputs.verify !== 'none' && immediateVerifyTags.length > 0) {
+            await (0, utils_1.verifyResolvedTags)(plan.workspace, immediateVerifyTags, {
+                mode: inputs.verify,
+                timeoutSeconds: inputs.verifyTimeoutSeconds,
+                requireServerSignature: inputs.verifyRequireServerSignature,
+                verbose: inputs.verbose,
+            });
+        }
     }
     catch (error) {
         core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -44851,10 +44972,15 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
+exports.normalizeVerifyMode = normalizeVerifyMode;
+exports.normalizeVerifyTimeoutSeconds = normalizeVerifyTimeoutSeconds;
 exports.normalizeSetup = normalizeSetup;
 exports.normalizePreset = normalizePreset;
 exports.normalizeToolVersionScope = normalizeToolVersionScope;
 exports.resolveWorkspace = resolveWorkspace;
+exports.resolveVerificationTags = resolveVerificationTags;
+exports.buildGenericVerificationSpecs = buildGenericVerificationSpecs;
+exports.verifyResolvedTags = verifyResolvedTags;
 exports.parseToolSpecs = parseToolSpecs;
 exports.resolveRuntimeTools = resolveRuntimeTools;
 exports.detectNodePackageManager = detectNodePackageManager;
@@ -44870,6 +44996,7 @@ exports.serializeTools = serializeTools;
 exports.getRestoreKeyCandidates = getRestoreKeyCandidates;
 exports.getPlatformSuffix = getPlatformSuffix;
 const core = __importStar(__nccwpck_require__(37484));
+const exec = __importStar(__nccwpck_require__(95236));
 const fs = __importStar(__nccwpck_require__(79896));
 const os = __importStar(__nccwpck_require__(70857));
 const path = __importStar(__nccwpck_require__(16928));
@@ -44922,6 +45049,9 @@ function getInputs() {
         mavenVersion: core.getInput('maven-version') || '3.9.9',
         mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
         readOnly: core.getBooleanInput('read-only'),
+        verify: normalizeVerifyMode(core.getInput('verify')),
+        verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
+        verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
@@ -44937,6 +45067,26 @@ function getInputs() {
         verbose: core.getBooleanInput('verbose'),
         exclude: core.getInput('exclude'),
     };
+}
+function normalizeVerifyMode(value) {
+    switch ((value || 'none').trim().toLowerCase()) {
+        case 'none':
+        case 'check':
+        case 'wait':
+            return (value || 'none').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported verify mode "${value}". Expected none, check, or wait.`);
+    }
+}
+function normalizeVerifyTimeoutSeconds(value) {
+    if (!value || !value.trim()) {
+        return 60;
+    }
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        throw new Error(`Unsupported verify-timeout-seconds "${value}". Expected a positive integer.`);
+    }
+    return parsed;
 }
 function normalizeSetup(value) {
     switch ((value || 'mise').trim().toLowerCase()) {
@@ -44976,6 +45126,364 @@ function resolveWorkspace(workspace) {
         return `default/${resolved}`;
     }
     return resolved;
+}
+function expandUserPath(value) {
+    if (value.startsWith('~/')) {
+        return path.join(os.homedir(), value.slice(2));
+    }
+    return value;
+}
+function normalizeRef(value) {
+    let normalized = '';
+    let lastWasDash = false;
+    for (const rawChar of value.trim()) {
+        const char = /[A-Za-z0-9]/.test(rawChar)
+            ? rawChar.toLowerCase()
+            : rawChar === '-' || rawChar === '_' || rawChar === '.'
+                ? rawChar
+                : '-';
+        if (char === '-') {
+            if (lastWasDash) {
+                continue;
+            }
+            lastWasDash = true;
+        }
+        else {
+            lastWasDash = false;
+        }
+        normalized += char;
+        if (normalized.length >= 64) {
+            break;
+        }
+    }
+    const trimmed = normalized.replace(/^[-.]+|[-.]+$/g, '');
+    return trimmed || 'unknown';
+}
+function isGitDisabledByEnv() {
+    var _a;
+    const value = (_a = process.env.BORINGCACHE_NO_GIT) === null || _a === void 0 ? void 0 : _a.trim().toLowerCase();
+    return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+function shortenSha(sha) {
+    return sha.trim().slice(0, 12);
+}
+function isCiEnv() {
+    return Boolean(process.env.CI
+        || process.env.GITHUB_ACTIONS
+        || process.env.GITLAB_CI
+        || process.env.CIRCLECI
+        || process.env.BITBUCKET_BUILD_NUMBER);
+}
+function detectCiBranch() {
+    var _a;
+    for (const key of [
+        'BORINGCACHE_GIT_BRANCH',
+        'GITHUB_HEAD_REF',
+        'GITHUB_REF_NAME',
+        'CI_COMMIT_REF_NAME',
+        'CI_COMMIT_BRANCH',
+        'CIRCLE_BRANCH',
+        'BITBUCKET_BRANCH',
+    ]) {
+        const value = (_a = process.env[key]) === null || _a === void 0 ? void 0 : _a.trim();
+        if (value) {
+            return normalizeRef(value);
+        }
+    }
+    return undefined;
+}
+function detectCiSha() {
+    var _a;
+    for (const key of [
+        'BORINGCACHE_GIT_SHA',
+        'GITHUB_SHA',
+        'CI_COMMIT_SHA',
+        'CIRCLE_SHA1',
+        'BITBUCKET_COMMIT',
+    ]) {
+        const value = (_a = process.env[key]) === null || _a === void 0 ? void 0 : _a.trim();
+        if (value) {
+            return value;
+        }
+    }
+    return undefined;
+}
+function envDefaultBranch() {
+    var _a;
+    const value = (_a = process.env.BORINGCACHE_DEFAULT_BRANCH) === null || _a === void 0 ? void 0 : _a.trim();
+    return value ? normalizeRef(value) : undefined;
+}
+function resolveGitStartPath(pathHint, workingDirectory) {
+    const candidate = pathHint ? expandUserPath(pathHint) : workingDirectory;
+    if (fs.existsSync(candidate)) {
+        return fs.statSync(candidate).isDirectory() ? candidate : path.dirname(candidate);
+    }
+    const parent = path.dirname(candidate);
+    if (parent && parent !== candidate) {
+        return parent;
+    }
+    return workingDirectory;
+}
+function findGitDir(startPath) {
+    let current = path.resolve(startPath);
+    while (true) {
+        const candidate = path.join(current, '.git');
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+            return candidate;
+        }
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            const contents = fs.readFileSync(candidate, 'utf-8');
+            const rest = contents.startsWith('gitdir:') ? contents.slice('gitdir:'.length).trim() : '';
+            if (rest) {
+                return path.isAbsolute(rest) ? rest : path.join(current, rest);
+            }
+        }
+        const parent = path.dirname(current);
+        if (parent === current) {
+            return null;
+        }
+        current = parent;
+    }
+}
+function detectBranchFromHead(gitDir) {
+    const headPath = path.join(gitDir, 'HEAD');
+    if (!fs.existsSync(headPath)) {
+        return undefined;
+    }
+    const contents = fs.readFileSync(headPath, 'utf-8').trim();
+    if (!contents.startsWith('ref:')) {
+        return undefined;
+    }
+    const reference = contents.slice('ref:'.length).trim();
+    const branchRef = reference.startsWith('refs/heads/') ? reference.slice('refs/heads/'.length) : reference;
+    return normalizeRef(branchRef);
+}
+function detectDefaultBranch(gitDir) {
+    const originHead = path.join(gitDir, 'refs', 'remotes', 'origin', 'HEAD');
+    if (!fs.existsSync(originHead)) {
+        return undefined;
+    }
+    const contents = fs.readFileSync(originHead, 'utf-8').trim();
+    if (!contents.startsWith('ref:')) {
+        return undefined;
+    }
+    const reference = contents.slice('ref:'.length).trim();
+    const branchName = reference.split('/').at(-1);
+    return branchName ? normalizeRef(branchName) : undefined;
+}
+function detectGitContext(pathHint, workingDirectory) {
+    if (isGitDisabledByEnv()) {
+        return {};
+    }
+    const startPath = resolveGitStartPath(pathHint, workingDirectory);
+    const gitDir = findGitDir(startPath);
+    const context = {};
+    if (gitDir) {
+        context.branch = detectBranchFromHead(gitDir);
+        context.defaultBranch = detectDefaultBranch(gitDir);
+    }
+    if (!context.branch) {
+        context.branch = detectCiBranch();
+    }
+    const overriddenDefault = envDefaultBranch();
+    if (overriddenDefault) {
+        context.defaultBranch = overriddenDefault;
+    }
+    if (!context.commitSha && isCiEnv()) {
+        context.commitSha = detectCiSha();
+    }
+    return context;
+}
+function tagHasExplicitChannel(tag) {
+    return tag.includes('-branch-')
+        || tag.includes('-sha-')
+        || tag.endsWith('-main')
+        || tag.endsWith('-master');
+}
+function isDefaultBranch(branch, defaultBranch) {
+    return defaultBranch ? branch === defaultBranch : branch === 'main' || branch === 'master';
+}
+function hasPlatformSuffix(tag) {
+    const lastPart = tag.split('-').at(-1);
+    if (lastPart && ['x86_64', 'arm64', 'arm32', 'x86'].includes(lastPart)) {
+        return true;
+    }
+    return [
+        '-ubuntu-',
+        '-debian-',
+        '-alpine-',
+        '-arch-',
+        '-macos-',
+        '-windows-',
+        '-linux-',
+    ].some((pattern) => tag.includes(pattern));
+}
+function detectPlatformSuffix() {
+    const arch = process.arch === 'x64'
+        ? 'x86_64'
+        : process.arch === 'arm64'
+            ? 'arm64'
+            : process.arch === 'arm'
+                ? 'arm32'
+                : process.arch === 'ia32'
+                    ? 'x86'
+                    : process.arch;
+    if (process.platform === 'linux') {
+        for (const releasePath of ['/etc/os-release', '/usr/lib/os-release']) {
+            if (!fs.existsSync(releasePath)) {
+                continue;
+            }
+            const contents = fs.readFileSync(releasePath, 'utf-8');
+            let distro = '';
+            let version = '';
+            for (const line of contents.split('\n')) {
+                const [rawKey, rawValue] = line.split('=');
+                if (!rawKey || rawValue === undefined) {
+                    continue;
+                }
+                const value = rawValue.trim().replace(/^["']|["']$/g, '');
+                if (rawKey === 'ID') {
+                    distro = value.toLowerCase();
+                }
+                else if (rawKey === 'VERSION_ID') {
+                    version = value;
+                }
+            }
+            if (distro) {
+                const major = version.split('.').at(0) || '';
+                switch (distro) {
+                    case 'ubuntu':
+                        return `ubuntu-${major || '22'}-${arch}`;
+                    case 'debian':
+                        return `debian-${major || '11'}-${arch}`;
+                    case 'alpine':
+                        return `alpine-${major || '3'}-${arch}`;
+                    case 'arch':
+                        return `arch-rolling-${arch}`;
+                    default:
+                        return `${distro}-${major || '0'}-${arch}`;
+                }
+            }
+        }
+        return `linux-unknown-${arch}`;
+    }
+    if (process.platform === 'darwin') {
+        return `macos-unknown-${arch}`;
+    }
+    if (process.platform === 'win32') {
+        return `windows-11-${arch}`;
+    }
+    return `${process.platform}-unknown-${arch}`;
+}
+function resolveExactTag(spec, workingDirectory) {
+    let resolved = spec.tag;
+    if (!spec.noGit && !isGitDisabledByEnv() && !tagHasExplicitChannel(spec.tag)) {
+        const gitContext = detectGitContext(spec.pathHint, workingDirectory);
+        const branch = gitContext.branch ? normalizeRef(gitContext.branch) : undefined;
+        const defaultBranch = gitContext.defaultBranch ? normalizeRef(gitContext.defaultBranch) : undefined;
+        if (branch && !isDefaultBranch(branch, defaultBranch)) {
+            resolved = `${resolved}-branch-${branch}`;
+        }
+        else if (!branch && gitContext.commitSha) {
+            resolved = `${resolved}-sha-${shortenSha(gitContext.commitSha)}`;
+        }
+    }
+    if (!spec.noPlatform && !hasPlatformSuffix(resolved)) {
+        resolved = `${resolved}-${detectPlatformSuffix()}`;
+    }
+    return resolved;
+}
+function resolveVerificationTags(specs, workingDirectory) {
+    const resolved = [];
+    const seen = new Set();
+    for (const spec of specs) {
+        const exactTag = resolveExactTag(spec, workingDirectory);
+        if (!seen.has(exactTag)) {
+            seen.add(exactTag);
+            resolved.push(exactTag);
+        }
+    }
+    return resolved;
+}
+function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
+    if (!entries.trim()) {
+        return;
+    }
+    for (const entry of (0, action_core_1.parseEntries)(entries, 'restore')) {
+        specs.push({
+            tag: entry.tag,
+            noPlatform,
+            noGit,
+            pathHint: entry.savePath,
+            saveExpected: true,
+        });
+    }
+}
+function buildGenericVerificationSpecs(plan, inputs, includeRuntime) {
+    const specs = [];
+    const noPlatform = inputs.noPlatform || inputs.enableCrossOsArchive;
+    if (includeRuntime && plan.runtimeEntry) {
+        appendVerificationSpecsFromEntries(specs, plan.runtimeEntry, noPlatform, false);
+    }
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, noPlatform, false);
+    return specs;
+}
+async function runExactTagCheck(workspace, exactTags, options) {
+    const args = [];
+    if (options.verbose) {
+        args.push('--verbose');
+    }
+    if (options.requireServerSignature) {
+        args.push('--require-server-signature');
+    }
+    args.push('check', workspace, exactTags.join(','), '--no-platform', '--no-git', '--fail-on-miss');
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await exec.exec('boringcache', args, {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+}
+function formatCheckFailure(result) {
+    const details = [result.stderr, result.stdout].filter(Boolean).join('\n');
+    return details || `boringcache check exited with code ${result.exitCode}`;
+}
+async function verifyResolvedTags(workspace, exactTags, options) {
+    if (options.mode === 'none' || exactTags.length === 0) {
+        return;
+    }
+    if (options.mode === 'check') {
+        const result = await runExactTagCheck(workspace, exactTags, options);
+        if (result.exitCode !== 0) {
+            throw new Error(`Verification failed for tags ${exactTags.join(', ')}: ${formatCheckFailure(result)}`);
+        }
+        core.info(`Verified ${exactTags.length} tag${exactTags.length === 1 ? '' : 's'} in ${workspace}`);
+        return;
+    }
+    const deadline = Date.now() + options.timeoutSeconds * 1000;
+    let attempt = 0;
+    let lastFailure = '';
+    while (Date.now() < deadline) {
+        attempt += 1;
+        const result = await runExactTagCheck(workspace, exactTags, options);
+        if (result.exitCode === 0) {
+            core.info(`Verified ${exactTags.length} tag${exactTags.length === 1 ? '' : 's'} in ${workspace} after ${attempt} attempt${attempt === 1 ? '' : 's'}`);
+            return;
+        }
+        lastFailure = formatCheckFailure(result);
+        core.info(`Waiting for tags to become visible (${attempt}): ${exactTags.join(', ')}`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error(`Timed out waiting ${options.timeoutSeconds}s for tags ${exactTags.join(', ')} in ${workspace}: ${lastFailure}`);
 }
 function parseToolSpecs(input) {
     return input

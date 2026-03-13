@@ -49,6 +49,18 @@ inputs:
     description: 'Proxy-backed modes: run without writes when supported.'
     default: 'false'
     required: false
+  verify:
+    description: 'Optional internal verification for resolved tags: none, check, or wait. Save-capable tags verify in the post step after save completes.'
+    default: 'none'
+    required: false
+  verify-timeout-seconds:
+    description: 'Timeout in seconds for verify=wait.'
+    default: '60'
+    required: false
+  verify-require-server-signature:
+    description: 'Require signed cache hits during verification.'
+    default: 'false'
+    required: false
   proxy-port:
     description: 'Proxy-backed modes: explicit proxy port.'
     required: false
@@ -315,6 +327,8 @@ outputs:
     description: 'Resolved mise runtime cache tag'
   resolved-entries:
     description: 'Resolved archive cache entries after deterministic tool scoping'
+  resolved-tags:
+    description: 'Resolved exact cache tags used by boringcache/one for verification and follow-up checks'
   proxy-port:
     description: 'Resolved proxy port for proxy-backed modes'
   proxy-log-path:

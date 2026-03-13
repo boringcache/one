@@ -17,7 +17,13 @@ import {
   stopRegistryProxy,
   waitForProxy,
 } from '@boringcache/action-core';
-import { detectNodePackageManager, type OneInputs, type ResolvedPlan, type ToolSpec } from './utils';
+import {
+  detectNodePackageManager,
+  type OneInputs,
+  type ResolvedPlan,
+  type TagVerificationSpec,
+  type ToolSpec,
+} from './utils';
 
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
@@ -28,6 +34,7 @@ const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-
 
 interface ModeRestoreResult {
   cacheHit?: boolean;
+  verificationSpecs?: TagVerificationSpec[];
 }
 
 interface CacheFlags {
@@ -1103,7 +1110,15 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   }
   core.setOutput('workspace', plan.workspace);
   core.setOutput('cache-tag', cacheTag);
-  return {};
+  return {
+    verificationSpecs: [{
+      tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+      noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
+      noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+      pathHint: plan.workingDirectory,
+      saveExpected: shouldBuild && !inputs.readOnly,
+    }],
+  };
 }
 
 async function runDockerSave(): Promise<void> {
@@ -1269,7 +1284,15 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
   core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
   core.setOutput('workspace', plan.workspace);
   core.setOutput('cache-tag', cacheTag);
-  return {};
+  return {
+    verificationSpecs: [{
+      tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+      noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
+      noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+      pathHint: plan.workingDirectory,
+      saveExpected: !inputs.readOnly,
+    }],
+  };
 }
 
 async function runBuildkitSave(): Promise<void> {
@@ -1324,7 +1347,15 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   core.setOutput('proxy-port', String(proxy.port));
   core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
   core.setOutput('workspace', plan.workspace);
-  return {};
+  return {
+    verificationSpecs: [{
+      tag: cacheTag,
+      noPlatform: inputs.proxyNoPlatform,
+      noGit: inputs.proxyNoGit,
+      pathHint: plan.workingDirectory,
+      saveExpected: !inputs.readOnly,
+    }],
+  };
 }
 
 async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
@@ -1356,7 +1387,15 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   core.setOutput('proxy-port', String(proxy.port));
   core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
   core.setOutput('workspace', plan.workspace);
-  return {};
+  return {
+    verificationSpecs: [{
+      tag: cacheTag,
+      noPlatform: inputs.proxyNoPlatform,
+      noGit: inputs.proxyNoGit,
+      pathHint: plan.workingDirectory,
+      saveExpected: !inputs.readOnly,
+    }],
+  };
 }
 
 async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
@@ -1396,7 +1435,15 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
   core.setOutput('maven-local-repo', localRepo);
   core.setOutput('workspace', plan.workspace);
-  return {};
+  return {
+    verificationSpecs: [{
+      tag: cacheTag,
+      noPlatform: inputs.proxyNoPlatform,
+      noGit: inputs.proxyNoGit,
+      pathHint: plan.workingDirectory,
+      saveExpected: !inputs.readOnly,
+    }],
+  };
 }
 
 async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
@@ -1418,7 +1465,7 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
     configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
     core.setOutput('workspace', plan.workspace);
     core.setOutput('cache-tag', cacheTag);
-    return {};
+    return { verificationSpecs: [] };
   }
 
   let proxy;
@@ -1434,7 +1481,15 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
   core.setOutput('proxy-port', String(proxy.port));
   core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
   core.setOutput('workspace', plan.workspace);
-  return {};
+  return {
+    verificationSpecs: [{
+      tag: cacheTag,
+      noPlatform: true,
+      noGit: true,
+      pathHint: plan.workingDirectory,
+      saveExpected: !inputs.readOnly,
+    }],
+  };
 }
 
 async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
@@ -1547,7 +1602,60 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
   const cacheHit = registryRestored || cargoBinRestored || targetRestored || sccacheRestored;
   core.setOutput('cache-hit', String(cacheHit));
   core.setOutput('sccache-hit', String(sccacheRestored));
-  return { cacheHit };
+  const verificationSpecs: TagVerificationSpec[] = [];
+
+  if (cacheCargo) {
+    verificationSpecs.push({
+      tag: cargoRegistryTag,
+      noPlatform: false,
+      noGit: false,
+      pathHint: path.join(cargoHome, 'registry'),
+      saveExpected: true,
+    });
+
+    const lockPath = path.join(workingDir, 'Cargo.lock');
+    if (await hasGitDependencies(lockPath)) {
+      verificationSpecs.push({
+        tag: cargoGitTag,
+        noPlatform: false,
+        noGit: false,
+        pathHint: path.join(cargoHome, 'git'),
+        saveExpected: true,
+      });
+    }
+  }
+
+  if (cacheCargoBin) {
+    verificationSpecs.push({
+      tag: cargoBinTag,
+      noPlatform: false,
+      noGit: false,
+      pathHint: path.join(cargoHome, 'bin'),
+      saveExpected: true,
+    });
+  }
+
+  if (cacheTarget) {
+    verificationSpecs.push({
+      tag: targetTag,
+      noPlatform: false,
+      noGit: false,
+      pathHint: path.join(workingDir, 'target'),
+      saveExpected: true,
+    });
+  }
+
+  if (useSccache) {
+    verificationSpecs.push({
+      tag: sccacheTag,
+      noPlatform: sccacheMode === 'proxy',
+      noGit: sccacheMode === 'proxy',
+      pathHint: sccacheMode === 'proxy' ? workingDir : getSccacheDir(),
+      saveExpected: sccacheMode !== 'proxy' || !inputs.readOnly,
+    });
+  }
+
+  return { cacheHit, verificationSpecs };
 }
 
 async function runRustSave(): Promise<void> {

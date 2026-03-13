@@ -933,7 +933,15 @@ async function runDockerRestore(plan, inputs) {
     }
     core.setOutput('workspace', plan.workspace);
     core.setOutput('cache-tag', cacheTag);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+                noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
+                noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+                pathHint: plan.workingDirectory,
+                saveExpected: shouldBuild && !inputs.readOnly,
+            }],
+    };
 }
 async function runDockerSave() {
     const proxyPid = getModeState('proxy-pid');
@@ -1085,7 +1093,15 @@ async function runBuildkitRestore(plan, inputs) {
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', plan.workspace);
     core.setOutput('cache-tag', cacheTag);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+                noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
+                noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runBuildkitSave() {
     const proxyPid = getModeState('proxy-pid');
@@ -1134,7 +1150,15 @@ async function runBazelRestore(plan, inputs) {
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: inputs.proxyNoPlatform,
+                noGit: inputs.proxyNoGit,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runGradleRestore(plan, inputs) {
     var _a;
@@ -1163,7 +1187,15 @@ async function runGradleRestore(plan, inputs) {
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: inputs.proxyNoPlatform,
+                noGit: inputs.proxyNoGit,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runMavenRestore(plan, inputs) {
     var _a;
@@ -1198,7 +1230,15 @@ async function runMavenRestore(plan, inputs) {
     core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
     core.setOutput('maven-local-repo', localRepo);
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: inputs.proxyNoPlatform,
+                noGit: inputs.proxyNoGit,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runTurboProxyRestore(plan, inputs) {
     const cacheTag = inputs.cacheTag || getModeCacheTag('', 'turbo');
@@ -1217,7 +1257,7 @@ async function runTurboProxyRestore(plan, inputs) {
         configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
         core.setOutput('workspace', plan.workspace);
         core.setOutput('cache-tag', cacheTag);
-        return {};
+        return { verificationSpecs: [] };
     }
     let proxy;
     try {
@@ -1232,7 +1272,15 @@ async function runTurboProxyRestore(plan, inputs) {
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
-    return {};
+    return {
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: true,
+                noGit: true,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
 }
 async function runRustRestore(plan, inputs) {
     var _a;
@@ -1331,7 +1379,54 @@ async function runRustRestore(plan, inputs) {
     const cacheHit = registryRestored || cargoBinRestored || targetRestored || sccacheRestored;
     core.setOutput('cache-hit', String(cacheHit));
     core.setOutput('sccache-hit', String(sccacheRestored));
-    return { cacheHit };
+    const verificationSpecs = [];
+    if (cacheCargo) {
+        verificationSpecs.push({
+            tag: cargoRegistryTag,
+            noPlatform: false,
+            noGit: false,
+            pathHint: path.join(cargoHome, 'registry'),
+            saveExpected: true,
+        });
+        const lockPath = path.join(workingDir, 'Cargo.lock');
+        if (await hasGitDependencies(lockPath)) {
+            verificationSpecs.push({
+                tag: cargoGitTag,
+                noPlatform: false,
+                noGit: false,
+                pathHint: path.join(cargoHome, 'git'),
+                saveExpected: true,
+            });
+        }
+    }
+    if (cacheCargoBin) {
+        verificationSpecs.push({
+            tag: cargoBinTag,
+            noPlatform: false,
+            noGit: false,
+            pathHint: path.join(cargoHome, 'bin'),
+            saveExpected: true,
+        });
+    }
+    if (cacheTarget) {
+        verificationSpecs.push({
+            tag: targetTag,
+            noPlatform: false,
+            noGit: false,
+            pathHint: path.join(workingDir, 'target'),
+            saveExpected: true,
+        });
+    }
+    if (useSccache) {
+        verificationSpecs.push({
+            tag: sccacheTag,
+            noPlatform: sccacheMode === 'proxy',
+            noGit: sccacheMode === 'proxy',
+            pathHint: sccacheMode === 'proxy' ? workingDir : getSccacheDir(),
+            saveExpected: sccacheMode !== 'proxy' || !inputs.readOnly,
+        });
+    }
+    return { cacheHit, verificationSpecs };
 }
 async function runRustSave() {
     const workspace = getModeState('workspace');

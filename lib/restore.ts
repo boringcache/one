@@ -1,6 +1,8 @@
 import * as core from '@actions/core';
+import { hasSaveToken } from '@boringcache/action-core';
 import {
   applyMiseSetup,
+  buildGenericVerificationSpecs,
   buildFlagArgs,
   buildPlan,
   ensureBoringCache,
@@ -9,7 +11,9 @@ import {
   getPlatformSuffix,
   getRestoreKeyCandidates,
   parseEntries,
+  resolveVerificationTags,
   serializeTools,
+  verifyResolvedTags,
 } from './utils';
 import { runModeRestore } from './mode-handlers';
 
@@ -110,6 +114,17 @@ export async function run(): Promise<void> {
     const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
       .filter(Boolean)
       .join(',');
+    const verificationSpecs = [
+      ...buildGenericVerificationSpecs(plan, inputs, usedMiseRuntime),
+      ...(modeRestore.verificationSpecs || []),
+    ];
+    const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
+    const deferredVerifyTags = hasSaveToken()
+      ? resolveVerificationTags(verificationSpecs.filter((spec) => spec.saveExpected), plan.workingDirectory)
+      : [];
+    const immediateVerifyTags = hasSaveToken()
+      ? resolveVerificationTags(verificationSpecs.filter((spec) => !spec.saveExpected), plan.workingDirectory)
+      : resolvedTags;
 
     const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
 
@@ -121,6 +136,7 @@ export async function run(): Promise<void> {
     core.setOutput('cache-tag', plan.cacheTagPrefix);
     core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
     core.setOutput('resolved-entries', plan.archiveEntries);
+    core.setOutput('resolved-tags', resolvedTags.join(','));
 
     core.saveState('resolved-mode', plan.mode);
     core.saveState('cli-version', inputs.cliVersion);
@@ -133,6 +149,20 @@ export async function run(): Promise<void> {
     core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));
     core.saveState('force', String(inputs.force));
     core.saveState('verbose', String(inputs.verbose));
+    core.saveState('resolved-tags', resolvedTags.join(','));
+    core.saveState('verify-save-tags', deferredVerifyTags.join(','));
+    core.saveState('verify-mode', inputs.verify);
+    core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
+    core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
+
+    if (inputs.verify !== 'none' && immediateVerifyTags.length > 0) {
+      await verifyResolvedTags(plan.workspace, immediateVerifyTags, {
+        mode: inputs.verify,
+        timeoutSeconds: inputs.verifyTimeoutSeconds,
+        requireServerSignature: inputs.verifyRequireServerSignature,
+        verbose: inputs.verbose,
+      });
+    }
   } catch (error) {
     core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {

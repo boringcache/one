@@ -50,6 +50,36 @@ describe('save action', () => {
     );
   });
 
+  it('verifies deferred save tags after saving', async () => {
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'archive',
+      'generic-cache-entries': 'deps:node_modules',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+      'verify-mode': 'check',
+      'verify-timeout-seconds': '60',
+      'verify-require-server-signature': 'false',
+      'verify-save-tags': 'deps',
+    });
+
+    await saveRun();
+
+    expect(exec.exec).toHaveBeenNthCalledWith(
+      1,
+      'boringcache',
+      ['save', 'my-org/my-project', 'deps:node_modules'],
+      undefined,
+    );
+    expect(exec.exec).toHaveBeenNthCalledWith(
+      2,
+      'boringcache',
+      ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
+      expect.objectContaining({ ignoreReturnCode: true }),
+    );
+  });
+
   it('rebuilds the plan when state is absent', async () => {
     mockGetInput({
       workspace: 'my-org/my-project',
