@@ -85,6 +85,7 @@ jobs:
 
       - name: Save trusted cache
         if: steps.tokens.outputs.enabled == 'true'
+        id: cache
         uses: ./
         with:
           setup: none
@@ -95,6 +96,25 @@ jobs:
           entries: |
             marker:marker.txt
           verbose: true
+
+      - name: Wait for trusted cache to become visible
+        if: steps.tokens.outputs.enabled == 'true'
+        env:
+          BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '1'
+          RESOLVED_ENTRY: ${{ steps.cache.outputs.resolved-entries }}
+        run: |
+          set -euo pipefail
+          tag="${RESOLVED_ENTRY%%:*}"
+          for attempt in 1 2 3 4 5; do
+            if boringcache check "${{ steps.cache.outputs.workspace }}" "$tag" --fail-on-miss --verbose; then
+              exit 0
+            fi
+            echo "Trusted archive not visible yet; retrying check (${attempt}/5)..."
+            sleep $((attempt * 2))
+          done
+
+          echo "Trusted archive did not become visible after retries" >&2
+          exit 1
 
   archive-poison-attempt:
     name: Archive Poison Attempt
