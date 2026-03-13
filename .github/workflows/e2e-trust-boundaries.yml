@@ -165,7 +165,7 @@ jobs:
         run: |
           printf 'poisoned\n' > "$E2E_WORKDIR/marker.txt"
           set +e
-          boringcache save boringcache/one-trust "marker:$E2E_WORKDIR/marker.txt" --force >"$RUNNER_TEMP/archive-poison.log" 2>&1
+          boringcache save boringcache/actions "marker:$E2E_WORKDIR/marker.txt" --force --fail-on-cache-error >"$RUNNER_TEMP/archive-poison.log" 2>&1
           status=$?
           set -e
           cat "$RUNNER_TEMP/archive-poison.log"
@@ -173,6 +173,7 @@ jobs:
             echo "Expected manual save to fail without BORINGCACHE_SAVE_TOKEN" >&2
             exit 1
           fi
+          grep -q "save-capable token" "$RUNNER_TEMP/archive-poison.log"
 
   archive-poison-verify:
     name: Archive Poison Verify
