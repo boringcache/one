@@ -31,6 +31,7 @@ async function removeTempProject(directory: string): Promise<void> {
 function buildInputs(overrides: Partial<OneInputs>): OneInputs {
   return {
     cliVersion: 'skip',
+    cliPlatform: '',
     setup: 'mise',
     mode: 'archive',
     preset: 'none',

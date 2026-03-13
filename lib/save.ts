@@ -18,6 +18,7 @@ export async function run(): Promise<void> {
   try {
     const inputs = getInputs();
     const cliVersion = core.getState('cli-version') || inputs.cliVersion;
+    const cliPlatform = core.getState('cli-platform') || inputs.cliPlatform || undefined;
     let resolvedMode = core.getState('resolved-mode') as ResolvedMode | '';
 
     let genericEntries = core.getState('generic-cache-entries');
@@ -56,7 +57,7 @@ export async function run(): Promise<void> {
     }
 
     if (cliVersion.toLowerCase() !== 'skip') {
-      await ensureBoringCache({ version: cliVersion });
+      await ensureBoringCache({ version: cliVersion, platform: cliPlatform });
     }
 
     if (resolvedMode && resolvedMode !== 'archive') {

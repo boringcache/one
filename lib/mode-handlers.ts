@@ -995,7 +995,12 @@ function toolEnabled(plan: ResolvedPlan, toolName: string): boolean {
 async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
   const context = path.resolve(plan.workingDirectory, core.getInput('context') || '.');
   const dockerfile = core.getInput('dockerfile') || 'Dockerfile';
-  const image = core.getInput('image', { required: true });
+  const dockerCommand = core.getInput('docker-command') || 'build';
+  const shouldBuild = dockerCommand !== 'setup';
+  const imageInput = core.getInput('image') || '';
+  const image = shouldBuild
+    ? core.getInput('image', { required: true })
+    : (imageInput || 'boringcache/docker-setup');
   const tags = parseList(core.getInput('tags') || 'latest');
   const buildArgs = parseMultiline(core.getInput('build-args') || '');
   const secrets = parseMultiline(core.getInput('secrets') || '');
@@ -1054,53 +1059,59 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
 
-    const ref = getRegistryRef(proxy.port, cacheTag, refHost);
-    const registryCache = getRegistryCacheFlags(ref, cacheMode);
-    await buildDockerImage({
-      dockerfile,
-      context,
-      image,
-      tags,
-      buildArgs,
-      secrets,
-      target,
-      platforms,
-      push,
-      load,
-      noCache,
-      builder: builderName,
-      cacheMode,
-      cacheFrom: registryCache.from,
-      cacheTo: registryCache.to,
-    });
+    if (shouldBuild) {
+      const ref = getRegistryRef(proxy.port, cacheTag, refHost);
+      const registryCache = getRegistryCacheFlags(ref, cacheMode);
+      await buildDockerImage({
+        dockerfile,
+        context,
+        image,
+        tags,
+        buildArgs,
+        secrets,
+        target,
+        platforms,
+        push,
+        load,
+        noCache,
+        builder: builderName,
+        cacheMode,
+        cacheFrom: registryCache.from,
+        cacheTo: registryCache.to,
+      });
+    }
   } else {
     ensureDir(DOCKER_CACHE_DIR_FROM);
-    ensureDir(DOCKER_CACHE_DIR_TO);
-    saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
     await restoreSimpleCache(plan.workspace, cacheTag, DOCKER_CACHE_DIR_FROM, cacheFlags);
 
-    await buildDockerImage({
-      dockerfile,
-      context,
-      image,
-      tags,
-      buildArgs,
-      secrets,
-      target,
-      platforms,
-      push,
-      load,
-      noCache,
-      builder: builderName,
-      cacheMode,
-      cacheDirFrom: DOCKER_CACHE_DIR_FROM,
-      cacheDirTo: DOCKER_CACHE_DIR_TO,
-    });
+    if (shouldBuild) {
+      ensureDir(DOCKER_CACHE_DIR_TO);
+      saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
+      await buildDockerImage({
+        dockerfile,
+        context,
+        image,
+        tags,
+        buildArgs,
+        secrets,
+        target,
+        platforms,
+        push,
+        load,
+        noCache,
+        builder: builderName,
+        cacheMode,
+        cacheDirFrom: DOCKER_CACHE_DIR_FROM,
+        cacheDirTo: DOCKER_CACHE_DIR_TO,
+      });
+    }
   }
 
-  const { imageId, digest } = readDockerMetadata();
-  core.setOutput('image-id', imageId);
-  core.setOutput('digest', digest);
+  if (shouldBuild) {
+    const { imageId, digest } = readDockerMetadata();
+    core.setOutput('image-id', imageId);
+    core.setOutput('digest', digest);
+  }
   core.setOutput('workspace', plan.workspace);
   core.setOutput('cache-tag', cacheTag);
   return {};
@@ -1470,12 +1481,12 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
 
   configureCargoEnv();
   const cargoHome = getCargoHome();
-  const cargoRegistryTag = `${cacheTagPrefix}-cargo-registry`;
-  const cargoGitTag = `${cacheTagPrefix}-cargo-git`;
-  const cargoBinTag = `${cacheTagPrefix}-cargo-bin`;
+  const cargoRegistryTag = core.getInput('cargo-tag') || `${cacheTagPrefix}-cargo-registry`;
+  const cargoGitTag = core.getInput('cargo-git-tag') || `${cacheTagPrefix}-cargo-git`;
+  const cargoBinTag = core.getInput('cargo-bin-tag') || `${cacheTagPrefix}-cargo-bin`;
   const rustMajorMinor = rustVersion.match(/^(\d+\.\d+)/)?.[1] || rustVersion;
-  const targetTag = `${cacheTagPrefix}-target-rust${rustMajorMinor}`;
-  const sccacheTag = `${cacheTagPrefix}-sccache-rust${rustMajorMinor}`;
+  const targetTag = core.getInput('target-tag') || `${cacheTagPrefix}-target-rust${rustMajorMinor}`;
+  const sccacheTag = core.getInput('sccache-tag') || `${cacheTagPrefix}-sccache-rust${rustMajorMinor}`;
 
   core.setOutput('cargo-tag', cargoRegistryTag);
   core.setOutput('cargo-bin-tag', cargoBinTag);
@@ -1522,11 +1533,12 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
     await installSccache(sccacheVersion);
 
     if (sccacheMode === 'proxy') {
-      const proxy = await startPortableCacheProxy(plan.workspace, await findAvailablePort(), cacheTagPrefix, inputs.readOnly);
+      const proxy = await startPortableCacheProxy(plan.workspace, await findAvailablePort(), sccacheTag, inputs.readOnly);
       configureSccacheProxyEnv(proxy.port);
       await startSccacheServer();
       saveModeState('proxy-pid', String(proxy.pid));
       saveModeState('proxy-port', String(proxy.port));
+      saveModeState('sccache-tag', sccacheTag);
       core.setOutput('proxy-port', String(proxy.port));
       core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     } else {

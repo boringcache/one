@@ -53,6 +53,40 @@ describe('product modes', () => {
     }
   });
 
+  it('supports docker setup-only mode for external build scripts', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        'working-directory': project,
+        workspace: 'boringcache/test-workspace',
+        'docker-command': 'setup',
+        'cache-tag': 'bench-scope',
+        'registry-tag': 'bench-registry',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'docker-registry',
+        workspace: 'boringcache/test-workspace',
+        tag: 'bench-registry',
+      }));
+      expect(exec.exec).not.toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['buildx', 'build']),
+        expect.any(Object),
+      );
+      expect(core.setOutput).toHaveBeenCalledWith('buildx-name', expect.any(String));
+      expect(core.setOutput).toHaveBeenCalledWith('proxy-port', '5000');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('runs buildkit mode through buildctl', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 
@@ -241,6 +275,49 @@ describe('product modes', () => {
       expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
       expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'rust-sccache');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('supports custom rust subcache tags', async () => {
+    const project = await makeTempProject({
+      'Cargo.lock': '',
+      'rust-toolchain.toml': '[toolchain]\nchannel = "1.89.0"\n',
+    });
+
+    try {
+      (exec.exec as jest.Mock).mockImplementation((command, args, options) => {
+        if (command === 'sccache' && Array.isArray(args) && args[0] === '--version') {
+          if (options?.listeners?.stdout) {
+            options.listeners.stdout(Buffer.from('sccache 0.13.0'));
+          }
+          return Promise.resolve(0);
+        }
+        return Promise.resolve(0);
+      });
+
+      mockGetInput({
+        mode: 'rust-sccache',
+        'working-directory': project,
+        sccache: 'true',
+        'sccache-mode': 'proxy',
+        'cargo-tag': 'zed-cargo-registry',
+        'cargo-git-tag': 'zed-cargo-git',
+        'target-tag': 'zed-target-rust1.89',
+        'sccache-tag': 'zed-sccache-rust1.89-r123-a1',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'cache-registry',
+        tag: 'zed-sccache-rust1.89-r123-a1',
+      }));
+      expect(core.setOutput).toHaveBeenCalledWith('cargo-tag', 'zed-cargo-registry');
+      expect(core.setOutput).toHaveBeenCalledWith('target-tag', 'zed-target-rust1.89');
+      expect(core.setOutput).toHaveBeenCalledWith('sccache-tag', 'zed-sccache-rust1.89-r123-a1');
     } finally {
       await removeTempProject(project);
     }

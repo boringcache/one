@@ -80,8 +80,9 @@ async function run() {
     try {
         const inputs = (0, utils_1.getInputs)();
         const plan = await (0, utils_1.buildPlan)(inputs);
+        const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
-            await (0, utils_1.ensureBoringCache)({ version: inputs.cliVersion });
+            await (0, utils_1.ensureBoringCache)({ version: inputs.cliVersion, platform: cliPlatform });
         }
         process.chdir(plan.workingDirectory);
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', inputs.verbose ? ['--verbose'] : [], false);
@@ -104,6 +105,7 @@ async function run() {
         core.setOutput('resolved-entries', plan.archiveEntries);
         core.saveState('resolved-mode', plan.mode);
         core.saveState('cli-version', inputs.cliVersion);
+        core.saveState('cli-platform', cliPlatform || '');
         core.saveState('generic-cache-entries', genericSaveEntries);
         core.saveState('generic-cache-workspace', plan.workspace);
         core.saveState('generic-cache-exclude', inputs.exclude);

@@ -53,4 +53,19 @@ describe('restore action', () => {
     expect(restoreCalls[1][1][2]).toMatch(/deps-fallback:.*\.npm/);
     expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
   });
+
+  it('passes cli-platform through to shared CLI setup', async () => {
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+      'cli-platform': 'alpine-amd64',
+    });
+
+    await restoreRun();
+
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
+      version: 'v1.12.5',
+      platform: 'alpine-amd64',
+    });
+  });
 });

@@ -60,6 +60,7 @@ export interface NodePackageManagerInfo {
 
 export interface OneInputs {
   cliVersion: string;
+  cliPlatform: string;
   setup: SetupMode;
   mode: OneMode;
   preset: Preset;
@@ -127,6 +128,7 @@ const TOOL_LABELS: Record<string, string> = {
 export function getInputs(): OneInputs {
   return {
     cliVersion: core.getInput('cli-version') || 'v1.12.5',
+    cliPlatform: core.getInput('cli-platform'),
     setup: normalizeSetup(core.getInput('setup')),
     mode: normalizeMode(core.getInput('mode')),
     preset: normalizePreset(core.getInput('preset')),

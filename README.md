@@ -79,6 +79,27 @@ Docker build with cache:
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
+Docker setup only for external `docker buildx build` scripts:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    cli-platform: debian-bookworm-amd64
+    mode: docker
+    docker-command: setup
+    workspace: my-org/my-project
+    cache-tag: my-run-scope
+    registry-tag: my-stable-docker-cache
+    driver-opts: |
+      network=host
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+Use `steps.<id>.outputs.buildx-name` and `steps.<id>.outputs.proxy-port` in the later `docker buildx build` step when a benchmark or custom script needs to keep full control over the build invocation.
+If you need to copy the CLI into a container build context, install the matching asset first and then copy `$(which boringcache)`.
+
 Rust with remote sccache:
 
 ```yaml
@@ -203,6 +224,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `tool-version-scope` | `patch`, `minor`, or `major` for generated tool-scoped tags. |
 | `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
 | `cli-version` | BoringCache CLI version to install. Set to `skip` to disable automatic CLI setup. |
+| `cli-platform` | Optional CLI asset override such as `alpine-amd64` or `debian-bookworm-amd64` when the runner binary is not the one you need to copy downstream. |
 
 ## Archive inputs
 
@@ -224,7 +246,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `bazel-version` | Bazel version for Bazelisk. |
 | `gradle-home`, `enable-build-cache` | Gradle mode inputs. |
 | `maven-local-repo`, `maven-extensions-path`, `maven-build-cache-config-path`, `maven-build-cache-extension-version`, `maven-build-cache-id` | Maven mode inputs. |
-| `rust-version`, `toolchain`, `targets`, `components`, `sccache`, `sccache-version`, `sccache-mode` | Rust mode inputs. |
+| `rust-version`, `toolchain`, `targets`, `components`, `cargo-tag`, `cargo-git-tag`, `cargo-bin-tag`, `target-tag`, `sccache-tag`, `sccache`, `sccache-version`, `sccache-mode` | Rust mode inputs. |
 | `turbo-api-url`, `turbo-token`, `turbo-team`, `turbo-port` | Turbo proxy mode inputs. |
 | `read-only`, `proxy-port`, `proxy-no-git`, `proxy-no-platform` | Shared proxy-mode controls. |
 

@@ -6,6 +6,9 @@ inputs:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
     default: 'v1.12.5'
     required: false
+  cli-platform:
+    description: 'Optional CLI asset/platform override for cases like Docker benchmark binary copy (for example alpine-amd64 or debian-bookworm-amd64).'
+    required: false
   setup:
     description: 'Runtime setup owner: mise, external, or none. mise auto-detects project tools from mise.toml, .tool-versions, and common version files.'
     default: 'mise'
@@ -99,6 +102,10 @@ inputs:
   driver:
     description: 'Buildx driver for Docker mode.'
     default: 'docker-container'
+    required: false
+  docker-command:
+    description: 'Docker mode behavior: build (default) runs docker buildx build, setup only prepares Buildx and registry/local cache wiring.'
+    default: 'build'
     required: false
   driver-opts:
     description: 'Additional buildx driver options, newline-separated.'
@@ -201,6 +208,21 @@ inputs:
   cache-target:
     description: 'Cache the Rust target directory.'
     default: 'true'
+    required: false
+  cargo-tag:
+    description: 'Exact tag override for the Rust cargo registry cache.'
+    required: false
+  cargo-git-tag:
+    description: 'Exact tag override for the Rust cargo git cache.'
+    required: false
+  cargo-bin-tag:
+    description: 'Exact tag override for the Rust cargo bin cache.'
+    required: false
+  target-tag:
+    description: 'Exact tag override for the Rust target directory cache.'
+    required: false
+  sccache-tag:
+    description: 'Exact tag override for the Rust sccache cache or proxy tag.'
     required: false
   sccache:
     description: 'Enable sccache for Rust builds.'

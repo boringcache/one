@@ -50,6 +50,7 @@ async function run() {
     try {
         const inputs = (0, utils_1.getInputs)();
         const cliVersion = core.getState('cli-version') || inputs.cliVersion;
+        const cliPlatform = core.getState('cli-platform') || inputs.cliPlatform || undefined;
         let resolvedMode = core.getState('resolved-mode');
         let genericEntries = core.getState('generic-cache-entries');
         let genericWorkspace = core.getState('generic-cache-workspace');
@@ -85,7 +86,7 @@ async function run() {
             return;
         }
         if (cliVersion.toLowerCase() !== 'skip') {
-            await (0, utils_1.ensureBoringCache)({ version: cliVersion });
+            await (0, utils_1.ensureBoringCache)({ version: cliVersion, platform: cliPlatform });
         }
         if (resolvedMode && resolvedMode !== 'archive') {
             await (0, mode_handlers_1.runModeSave)(resolvedMode);

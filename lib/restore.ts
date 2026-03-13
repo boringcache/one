@@ -79,9 +79,10 @@ export async function run(): Promise<void> {
   try {
     const inputs = getInputs();
     const plan = await buildPlan(inputs);
+    const cliPlatform = inputs.cliPlatform || undefined;
 
     if (inputs.cliVersion.toLowerCase() !== 'skip') {
-      await ensureBoringCache({ version: inputs.cliVersion });
+      await ensureBoringCache({ version: inputs.cliVersion, platform: cliPlatform });
     }
 
     process.chdir(plan.workingDirectory);
@@ -122,6 +123,7 @@ export async function run(): Promise<void> {
 
     core.saveState('resolved-mode', plan.mode);
     core.saveState('cli-version', inputs.cliVersion);
+    core.saveState('cli-platform', cliPlatform || '');
     core.saveState('generic-cache-entries', genericSaveEntries);
     core.saveState('generic-cache-workspace', plan.workspace);
     core.saveState('generic-cache-exclude', inputs.exclude);
