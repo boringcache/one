@@ -121,6 +121,7 @@ run_buildkit() {
 run_bazel() {
   pushd "$workdir" >/dev/null
   local bazel_log="$workdir/bazel-${phase}.log"
+  local expect_remote_hit="${E2E_EXPECT_REMOTE_HIT:-true}"
   local -a bazel_args=(build //:hello)
   if [[ "$phase" == "verify" ]]; then
     # Bazel mode enables remote_download_minimal; override it here so the
@@ -131,7 +132,7 @@ run_bazel() {
   local bazel_bin
   bazel_bin="$(bazel info bazel-bin)"
   grep "bazel-mode-ok" "$bazel_bin/hello.txt"
-  if [[ "$phase" == "verify" ]]; then
+  if [[ "$phase" == "verify" && "$expect_remote_hit" != "false" ]]; then
     grep "remote cache hit" "$bazel_log"
   fi
   grep -- "--remote_cache=http://127.0.0.1:" "$HOME/.bazelrc"
