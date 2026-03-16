@@ -124,6 +124,10 @@ go 1.23
 
 require github.com/google/uuid v1.6.0
 EOF
+  cat >"$workdir/go.sum" <<'EOF'
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+EOF
   cat >"$workdir/main.go" <<'EOF'
 package main
 
@@ -240,6 +244,11 @@ defmodule OneE2e.MixProject do
   end
 end
 EOF
+  cat >"$workdir/mix.lock" <<'EOF'
+%{
+  "jason": {:hex, :jason, "1.4.4", "b9226785a9aa77b6857ca22832cffa5d5011a667207eb2a0ad56adb5db443b8a", [:mix], [{:decimal, "~> 1.0 or ~> 2.0", [hex: :decimal, repo: "hexpm", optional: true]}], "hexpm", "c5eb0cab91f094599f94d55bc63409236a8ec69a21a67814529e8d5f6cc90b3b"},
+}
+EOF
   cat >"$workdir/lib/one_e2e.ex" <<'EOF'
 defmodule OneE2e do
   def message do
@@ -298,16 +307,16 @@ EOF
 workspace(name = "boringcache_one_bazel")
 EOF
   cat >"$workdir/BUILD.bazel" <<'EOF'
-sh_binary(
+genrule(
     name = "hello",
-    srcs = ["hello.sh"],
+    srcs = ["message.txt"],
+    outs = ["hello.txt"],
+    cmd = "cat $(SRCS) > $@",
 )
 EOF
-  cat >"$workdir/hello.sh" <<'EOF'
-#!/usr/bin/env bash
-echo bazel-mode-ok
+  cat >"$workdir/message.txt" <<'EOF'
+bazel-mode-ok
 EOF
-  chmod +x "$workdir/hello.sh"
 }
 
 prepare_gradle_mode() {

@@ -6,6 +6,7 @@ import {
   buildGenericVerificationSpecs,
   buildFlagArgs,
   buildPlan,
+  convertCacheFormatToEntries,
   ensureBoringCache,
   execBoringCache,
   getInputs,
@@ -49,26 +50,40 @@ async function restoreEntries(
   if (lastExitCode !== 0 && allowRestoreKeys) {
     const inputs = getInputs();
     const restoreKeys = getRestoreKeyCandidates(inputs);
-    const suffix = getPlatformSuffix(inputs.noPlatform, inputs.enableCrossOsArchive);
-
-    for (const restoreKey of restoreKeys) {
-      const candidateKey = suffix && !restoreKey.endsWith(suffix)
-        ? `${restoreKey}${suffix}`
-        : restoreKey;
-      const fallbackEntries = parsedEntries.map((entry) => {
-        if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
-          return `${candidateKey}:${entry.restorePath}`;
+    if (inputs.path && inputs.key) {
+      for (const restoreKey of restoreKeys) {
+        const fallbackEntries = convertCacheFormatToEntries(inputs, 'restore', restoreKey);
+        lastExitCode = await execBoringCache(
+          ['restore', workspace, fallbackEntries, ...flagArgs],
+          { ignoreReturnCode: true },
+        );
+        if (lastExitCode === 0) {
+          core.info(`Cache hit with restore key ${restoreKey}`);
+          break;
         }
-        return `${entry.tag}:${entry.restorePath}`;
-      }).join(',');
+      }
+    } else {
+      const suffix = getPlatformSuffix(inputs.noPlatform, inputs.enableCrossOsArchive);
 
-      lastExitCode = await execBoringCache(
-        ['restore', workspace, fallbackEntries, ...flagArgs],
-        { ignoreReturnCode: true },
-      );
-      if (lastExitCode === 0) {
-        core.info(`Cache hit with restore key ${candidateKey}`);
-        break;
+      for (const restoreKey of restoreKeys) {
+        const candidateKey = suffix && !restoreKey.endsWith(suffix)
+          ? `${restoreKey}${suffix}`
+          : restoreKey;
+        const fallbackEntries = parsedEntries.map((entry) => {
+          if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
+            return `${candidateKey}:${entry.restorePath}`;
+          }
+          return `${entry.tag}:${entry.restorePath}`;
+        }).join(',');
+
+        lastExitCode = await execBoringCache(
+          ['restore', workspace, fallbackEntries, ...flagArgs],
+          { ignoreReturnCode: true },
+        );
+        if (lastExitCode === 0) {
+          core.info(`Cache hit with restore key ${candidateKey}`);
+          break;
+        }
       }
     }
   }

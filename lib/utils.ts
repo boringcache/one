@@ -7,7 +7,6 @@ import {
   activateMiseTool,
   buildMiseRuntimeTag,
   buildMiseToolTag,
-  convertCacheFormatToEntries,
   ensureBoringCache,
   exportMiseEnv,
   execBoringCache,
@@ -18,6 +17,7 @@ import {
   installMise,
   installMiseTool,
   parseEntries,
+  resolvePath,
   readProjectMiseTools,
   readMiseTomlVersion,
   readToolVersionsValue,
@@ -35,7 +35,6 @@ import {
 
 export {
   activateMiseTool,
-  convertCacheFormatToEntries,
   ensureBoringCache,
   exportMiseEnv,
   execBoringCache,
@@ -1377,6 +1376,69 @@ function normalizeEntriesInput(entries: string): string {
     .split(/\r?\n/)
     .map((entry) => entry.trim())
     .filter(Boolean)
+    .join(',');
+}
+
+function normalizeCacheFormatPathSegment(segment: string): string {
+  if (segment === '~') {
+    return '';
+  }
+
+  const normalized = segment
+    .replace(/^\.+/, '')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+
+  return normalized || 'path';
+}
+
+function buildCacheFormatPathTag(pathInput: string): string {
+  const segments = pathInput
+    .trim()
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== '.')
+    .map(normalizeCacheFormatPathSegment);
+  const filteredSegments = segments.filter(Boolean);
+
+  if (filteredSegments.length === 0) {
+    return 'path';
+  }
+
+  return filteredSegments.slice(-3).join('-');
+}
+
+export function convertCacheFormatToEntries(
+  inputs: Pick<OneInputs, 'path' | 'key' | 'noPlatform' | 'enableCrossOsArchive' | 'workingDirectory'>,
+  _action: 'save' | 'restore',
+  keyOverride?: string,
+): string {
+  const pathInput = inputs.path?.trim() || '';
+  const keyInput = (keyOverride || inputs.key || '').trim();
+
+  if (!pathInput || !keyInput) {
+    throw new Error('actions/cache compatibility mode requires both path and key');
+  }
+
+  const suffix = getPlatformSuffix(inputs.noPlatform, inputs.enableCrossOsArchive);
+  const fullKey = suffix && !keyInput.endsWith(suffix)
+    ? `${keyInput}${suffix}`
+    : keyInput;
+  const seenTags = new Map<string, number>();
+
+  return pathInput
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const tagBase = `${fullKey}-${buildCacheFormatPathTag(entry)}`;
+      const seenCount = seenTags.get(tagBase) || 0;
+      seenTags.set(tagBase, seenCount + 1);
+      const tag = seenCount === 0 ? tagBase : `${tagBase}-${seenCount + 1}`;
+      return `${tag}:${resolvePath(entry, inputs.workingDirectory)}`;
+    })
     .join(',');
 }
 

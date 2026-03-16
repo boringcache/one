@@ -66,7 +66,7 @@ run_rails_preset() {
 run_python() {
   pushd "$workdir" >/dev/null
   if [[ "$phase" == "seed" ]]; then
-    python -m venv .venv
+    python -m venv --copies .venv
     source .venv/bin/activate
     python -m pip install --upgrade pip
     python -m pip install -r requirements.txt
@@ -124,7 +124,7 @@ run_buildkit() {
 run_bazel() {
   pushd "$workdir" >/dev/null
   bazel build //:hello
-  ./bazel-bin/hello | grep "bazel-mode-ok"
+  grep "bazel-mode-ok" bazel-bin/hello.txt
   grep -- "--remote_cache=http://127.0.0.1:" "$HOME/.bazelrc"
   popd >/dev/null
 }

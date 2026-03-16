@@ -55,8 +55,8 @@ describe('restore action', () => {
 
     expect(restoreCalls).toHaveLength(2);
     expect(restoreCalls[0][1][1]).toBe('owner/repo');
-    expect(restoreCalls[0][1][2]).toMatch(/deps-primary:.*\.npm/);
-    expect(restoreCalls[1][1][2]).toMatch(/deps-fallback:.*\.npm/);
+    expect(restoreCalls[0][1][2]).toMatch(/deps-primary-npm:.*\.npm/);
+    expect(restoreCalls[1][1][2]).toMatch(/deps-fallback-npm:.*\.npm/);
     expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
   });
 
@@ -72,12 +72,12 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.execBoringCache).toHaveBeenCalledWith(
-      ['restore', 'default/default', 'deps:/tmp/project/node_modules,deps:/tmp/project/.npm-cache', '--no-platform'],
+      ['restore', 'default/default', 'deps-node-modules:/tmp/project/node_modules,deps-npm-cache:/tmp/project/.npm-cache', '--no-platform'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
     expect(core.saveState).toHaveBeenCalledWith(
       'generic-cache-entries',
-      'deps:/tmp/project/node_modules,deps:/tmp/project/.npm-cache',
+      'deps-node-modules:/tmp/project/node_modules,deps-npm-cache:/tmp/project/.npm-cache',
     );
     chdirSpy.mockRestore();
   });

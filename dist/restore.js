@@ -52,21 +52,33 @@ async function restoreEntries(workspace, entriesString, flagArgs, allowRestoreKe
     if (lastExitCode !== 0 && allowRestoreKeys) {
         const inputs = (0, utils_1.getInputs)();
         const restoreKeys = (0, utils_1.getRestoreKeyCandidates)(inputs);
-        const suffix = (0, utils_1.getPlatformSuffix)(inputs.noPlatform, inputs.enableCrossOsArchive);
-        for (const restoreKey of restoreKeys) {
-            const candidateKey = suffix && !restoreKey.endsWith(suffix)
-                ? `${restoreKey}${suffix}`
-                : restoreKey;
-            const fallbackEntries = parsedEntries.map((entry) => {
-                if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
-                    return `${candidateKey}:${entry.restorePath}`;
+        if (inputs.path && inputs.key) {
+            for (const restoreKey of restoreKeys) {
+                const fallbackEntries = (0, utils_1.convertCacheFormatToEntries)(inputs, 'restore', restoreKey);
+                lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
+                if (lastExitCode === 0) {
+                    core.info(`Cache hit with restore key ${restoreKey}`);
+                    break;
                 }
-                return `${entry.tag}:${entry.restorePath}`;
-            }).join(',');
-            lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
-            if (lastExitCode === 0) {
-                core.info(`Cache hit with restore key ${candidateKey}`);
-                break;
+            }
+        }
+        else {
+            const suffix = (0, utils_1.getPlatformSuffix)(inputs.noPlatform, inputs.enableCrossOsArchive);
+            for (const restoreKey of restoreKeys) {
+                const candidateKey = suffix && !restoreKey.endsWith(suffix)
+                    ? `${restoreKey}${suffix}`
+                    : restoreKey;
+                const fallbackEntries = parsedEntries.map((entry) => {
+                    if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
+                        return `${candidateKey}:${entry.restorePath}`;
+                    }
+                    return `${entry.tag}:${entry.restorePath}`;
+                }).join(',');
+                lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
+                if (lastExitCode === 0) {
+                    core.info(`Cache hit with restore key ${candidateKey}`);
+                    break;
+                }
             }
         }
     }

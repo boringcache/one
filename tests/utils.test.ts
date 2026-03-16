@@ -390,7 +390,7 @@ describe('one utils', () => {
       }));
 
       expect(plan.archiveEntries).toBe(
-        `deps:${path.join(project, 'node_modules')},deps:${path.join(project, '.npm-cache')}`,
+        `deps-node-modules:${path.join(project, 'node_modules')},deps-npm-cache:${path.join(project, '.npm-cache')}`,
       );
     } finally {
       await removeTempProject(project);

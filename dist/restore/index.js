@@ -44854,21 +44854,33 @@ async function restoreEntries(workspace, entriesString, flagArgs, allowRestoreKe
     if (lastExitCode !== 0 && allowRestoreKeys) {
         const inputs = (0, utils_1.getInputs)();
         const restoreKeys = (0, utils_1.getRestoreKeyCandidates)(inputs);
-        const suffix = (0, utils_1.getPlatformSuffix)(inputs.noPlatform, inputs.enableCrossOsArchive);
-        for (const restoreKey of restoreKeys) {
-            const candidateKey = suffix && !restoreKey.endsWith(suffix)
-                ? `${restoreKey}${suffix}`
-                : restoreKey;
-            const fallbackEntries = parsedEntries.map((entry) => {
-                if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
-                    return `${candidateKey}:${entry.restorePath}`;
+        if (inputs.path && inputs.key) {
+            for (const restoreKey of restoreKeys) {
+                const fallbackEntries = (0, utils_1.convertCacheFormatToEntries)(inputs, 'restore', restoreKey);
+                lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
+                if (lastExitCode === 0) {
+                    core.info(`Cache hit with restore key ${restoreKey}`);
+                    break;
                 }
-                return `${entry.tag}:${entry.restorePath}`;
-            }).join(',');
-            lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
-            if (lastExitCode === 0) {
-                core.info(`Cache hit with restore key ${candidateKey}`);
-                break;
+            }
+        }
+        else {
+            const suffix = (0, utils_1.getPlatformSuffix)(inputs.noPlatform, inputs.enableCrossOsArchive);
+            for (const restoreKey of restoreKeys) {
+                const candidateKey = suffix && !restoreKey.endsWith(suffix)
+                    ? `${restoreKey}${suffix}`
+                    : restoreKey;
+                const fallbackEntries = parsedEntries.map((entry) => {
+                    if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
+                        return `${candidateKey}:${entry.restorePath}`;
+                    }
+                    return `${entry.tag}:${entry.restorePath}`;
+                }).join(',');
+                lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
+                if (lastExitCode === 0) {
+                    core.info(`Cache hit with restore key ${candidateKey}`);
+                    break;
+                }
             }
         }
     }
@@ -44999,7 +45011,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.convertCacheFormatToEntries = exports.activateMiseTool = void 0;
+exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
 exports.normalizeVerifyMode = normalizeVerifyMode;
 exports.normalizeVerifyTimeoutSeconds = normalizeVerifyTimeoutSeconds;
@@ -45015,6 +45027,7 @@ exports.resolveRuntimeTools = resolveRuntimeTools;
 exports.detectNodePackageManager = detectNodePackageManager;
 exports.buildRuntimeCacheTag = buildRuntimeCacheTag;
 exports.buildRuntimeCacheEntry = buildRuntimeCacheEntry;
+exports.convertCacheFormatToEntries = convertCacheFormatToEntries;
 exports.buildArchiveEntries = buildArchiveEntries;
 exports.validateOneInputs = validateOneInputs;
 exports.buildPlan = buildPlan;
@@ -45032,7 +45045,6 @@ const os = __importStar(__nccwpck_require__(70857));
 const path = __importStar(__nccwpck_require__(16928));
 const action_core_1 = __nccwpck_require__(68701);
 Object.defineProperty(exports, "activateMiseTool", ({ enumerable: true, get: function () { return action_core_1.activateMiseTool; } }));
-Object.defineProperty(exports, "convertCacheFormatToEntries", ({ enumerable: true, get: function () { return action_core_1.convertCacheFormatToEntries; } }));
 Object.defineProperty(exports, "ensureBoringCache", ({ enumerable: true, get: function () { return action_core_1.ensureBoringCache; } }));
 Object.defineProperty(exports, "exportMiseEnv", ({ enumerable: true, get: function () { return action_core_1.exportMiseEnv; } }));
 Object.defineProperty(exports, "execBoringCache", ({ enumerable: true, get: function () { return action_core_1.execBoringCache; } }));
@@ -46060,6 +46072,56 @@ function normalizeEntriesInput(entries) {
         .filter(Boolean)
         .join(',');
 }
+function normalizeCacheFormatPathSegment(segment) {
+    if (segment === '~') {
+        return '';
+    }
+    const normalized = segment
+        .replace(/^\.+/, '')
+        .replace(/[^A-Za-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
+    return normalized || 'path';
+}
+function buildCacheFormatPathTag(pathInput) {
+    const segments = pathInput
+        .trim()
+        .replace(/\\/g, '/')
+        .split('/')
+        .map((segment) => segment.trim())
+        .filter((segment) => segment && segment !== '.')
+        .map(normalizeCacheFormatPathSegment);
+    const filteredSegments = segments.filter(Boolean);
+    if (filteredSegments.length === 0) {
+        return 'path';
+    }
+    return filteredSegments.slice(-3).join('-');
+}
+function convertCacheFormatToEntries(inputs, _action, keyOverride) {
+    var _a;
+    const pathInput = ((_a = inputs.path) === null || _a === void 0 ? void 0 : _a.trim()) || '';
+    const keyInput = (keyOverride || inputs.key || '').trim();
+    if (!pathInput || !keyInput) {
+        throw new Error('actions/cache compatibility mode requires both path and key');
+    }
+    const suffix = getPlatformSuffix(inputs.noPlatform, inputs.enableCrossOsArchive);
+    const fullKey = suffix && !keyInput.endsWith(suffix)
+        ? `${keyInput}${suffix}`
+        : keyInput;
+    const seenTags = new Map();
+    return pathInput
+        .split(/\r?\n/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => {
+        const tagBase = `${fullKey}-${buildCacheFormatPathTag(entry)}`;
+        const seenCount = seenTags.get(tagBase) || 0;
+        seenTags.set(tagBase, seenCount + 1);
+        const tag = seenCount === 0 ? tagBase : `${tagBase}-${seenCount + 1}`;
+        return `${tag}:${(0, action_core_1.resolvePath)(entry, inputs.workingDirectory)}`;
+    })
+        .join(',');
+}
 function scopeArchiveEntries(entries, cacheTag, tools, versionScope) {
     const normalizedEntries = normalizeEntriesInput(entries);
     if (!entries.trim() || tools.length === 0) {
@@ -46219,7 +46281,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
         if (!inputs.path || !inputs.key) {
             throw new Error('actions/cache compatibility mode requires both path and key');
         }
-        archiveEntries = (0, action_core_1.convertCacheFormatToEntries)({
+        archiveEntries = convertCacheFormatToEntries({
             path: inputs.path,
             key: inputs.key,
             noPlatform: inputs.noPlatform,
