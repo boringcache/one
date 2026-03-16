@@ -65,13 +65,10 @@ run_rails_preset() {
 
 run_python() {
   pushd "$workdir" >/dev/null
+  export PYTHONPATH="$workdir/.python-packages${PYTHONPATH:+:$PYTHONPATH}"
   if [[ "$phase" == "seed" ]]; then
-    python -m venv --copies .venv
-    source .venv/bin/activate
     python -m pip install --upgrade pip
-    python -m pip install -r requirements.txt
-  else
-    source .venv/bin/activate
+    python -m pip install --target "$workdir/.python-packages" -r requirements.txt
   fi
   python app.py | grep "python-e2e-ok"
   popd >/dev/null

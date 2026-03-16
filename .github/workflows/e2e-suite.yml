@@ -121,7 +121,7 @@ jobs:
             tools: |
               python@3.12.9
             entries: |
-              venv:.venv
+              python-packages:.python-packages
             path: ''
             key_style: entries
           - id: go
@@ -291,7 +291,7 @@ jobs:
             tools: |
               python@3.12.9
             entries: |
-              venv:.venv
+              python-packages:.python-packages
             path: ''
             key_style: entries
           - id: go
