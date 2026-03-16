@@ -39,7 +39,7 @@ jobs:
         run: corepack enable
 
       - name: Cache node_modules (actions/cache)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: examples/nextjs_app/node_modules
           key: node-mods-actions-${{ runner.os }}-${{ hashFiles('examples/nextjs_app/yarn.lock') }}
@@ -58,7 +58,7 @@ jobs:
           echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/actions-cache-run${{ matrix.run }}.txt"
 
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: actions-cache-results-${{ matrix.run }}
           path: benchmark-results/
@@ -103,7 +103,7 @@ jobs:
           echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/boringcache-run${{ matrix.run }}.txt"
 
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boringcache-results-${{ matrix.run }}
           path: benchmark-results/
@@ -120,10 +120,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
       - name: Cache Docker layers (actions/cache)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ env.BUILDX_CACHE_DIR }}
@@ -154,7 +154,7 @@ jobs:
           echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/docker-actions-run${{ matrix.run }}.txt"
 
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docker-actions-results-${{ matrix.run }}
           path: benchmark-results/
@@ -171,7 +171,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
       - name: Restore Docker layer cache with boringcache/one
         uses: ./
@@ -204,7 +204,7 @@ jobs:
           echo "${DURATION}" > "$GITHUB_WORKSPACE/benchmark-results/docker-boring-run${{ matrix.run }}.txt"
 
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docker-boringcache-results-${{ matrix.run }}
           path: benchmark-results/
@@ -219,7 +219,7 @@ jobs:
     if: always()
     steps:
       - name: Download all results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: "*-results-*"
           merge-multiple: true

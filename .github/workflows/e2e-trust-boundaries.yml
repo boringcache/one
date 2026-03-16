@@ -42,7 +42,7 @@ jobs:
         run: npm run build
 
       - name: Upload action bundle
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: built-dist
           path: dist
@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: built-dist
           path: .
@@ -118,7 +118,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: built-dist
           path: .
@@ -191,7 +191,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: built-dist
           path: .
@@ -264,7 +264,7 @@ jobs:
           persist-credentials: false
 
       - name: Download action bundle
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: built-dist
           path: .
