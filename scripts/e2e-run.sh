@@ -121,7 +121,9 @@ run_buildkit() {
 run_bazel() {
   pushd "$workdir" >/dev/null
   bazel build //:hello
-  grep "bazel-mode-ok" bazel-bin/hello.txt
+  local bazel_bin
+  bazel_bin="$(bazel info bazel-bin)"
+  grep "bazel-mode-ok" "$bazel_bin/hello.txt"
   grep -- "--remote_cache=http://127.0.0.1:" "$HOME/.bazelrc"
   popd >/dev/null
 }
