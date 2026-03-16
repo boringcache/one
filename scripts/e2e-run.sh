@@ -120,10 +120,20 @@ run_buildkit() {
 
 run_bazel() {
   pushd "$workdir" >/dev/null
-  bazel build //:hello
+  local bazel_log="$workdir/bazel-${phase}.log"
+  local -a bazel_args=(build //:hello)
+  if [[ "$phase" == "verify" ]]; then
+    # Bazel mode enables remote_download_minimal; override it here so the
+    # harness can inspect the restored output while still verifying a cache hit.
+    bazel_args=(build --remote_download_outputs=all //:hello)
+  fi
+  bazel "${bazel_args[@]}" 2>&1 | tee "$bazel_log"
   local bazel_bin
   bazel_bin="$(bazel info bazel-bin)"
   grep "bazel-mode-ok" "$bazel_bin/hello.txt"
+  if [[ "$phase" == "verify" ]]; then
+    grep "remote cache hit" "$bazel_log"
+  fi
   grep -- "--remote_cache=http://127.0.0.1:" "$HOME/.bazelrc"
   popd >/dev/null
 }
