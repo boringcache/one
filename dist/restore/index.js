@@ -44714,49 +44714,41 @@ const MODE_SPECS = {
     archive: {
         resolved: 'archive',
         implemented: true,
-        compatibilityWrappers: ['boringcache/action'],
         description: 'Portable archive caching and actions/cache compatibility.',
     },
     docker: {
         resolved: 'docker',
         implemented: true,
-        compatibilityWrappers: ['boringcache/docker-action'],
         description: 'Docker layer and registry-backed cache integration.',
     },
     buildkit: {
         resolved: 'buildkit',
         implemented: true,
-        compatibilityWrappers: ['boringcache/buildkit-action'],
         description: 'BuildKit remote cache integration.',
     },
     bazel: {
         resolved: 'bazel',
         implemented: true,
-        compatibilityWrappers: ['boringcache/bazel-action'],
         description: 'Bazel remote cache proxy and archive integration.',
     },
     gradle: {
         resolved: 'gradle',
         implemented: true,
-        compatibilityWrappers: ['boringcache/gradle-action'],
         description: 'Gradle build cache proxy integration.',
     },
     maven: {
         resolved: 'maven',
         implemented: true,
-        compatibilityWrappers: [],
         description: 'Maven build cache proxy and archive integration.',
     },
     'rust-sccache': {
         resolved: 'rust-sccache',
         implemented: true,
-        compatibilityWrappers: ['boringcache/rust-action'],
         description: 'Rust sccache proxy integration.',
     },
     'turbo-proxy': {
         resolved: 'turbo-proxy',
         implemented: true,
-        compatibilityWrappers: ['boringcache/nodejs-action'],
         description: 'Turbo remote cache proxy integration.',
     },
 };
@@ -44790,7 +44782,7 @@ function assertImplementedMode(modeSpec) {
         return;
     }
     throw new Error(`mode=${modeSpec.resolved} is planned for boringcache/one but not implemented yet. ` +
-        `Use ${modeSpec.compatibilityWrappers.join(' or ')} until this adapter lands.`);
+        `Use the BoringCache CLI directly until this adapter lands.`);
 }
 
 
