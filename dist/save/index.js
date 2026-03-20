@@ -43276,6 +43276,12 @@ function parseMultiline(input) {
 function slugify(value) {
     return value.replace(/[^a-zA-Z0-9]/g, '-');
 }
+function sanitizeBuilderToken(value) {
+    return slugify(value)
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .toLowerCase();
+}
 function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
 }
@@ -43389,8 +43395,14 @@ async function setupQemuIfNeeded(platforms) {
         throw new Error(`Failed to set up QEMU for multi-platform builds (exit ${result})`);
     }
 }
+function buildxBuilderName() {
+    const runId = String(process.env.GITHUB_RUN_ID || Date.now());
+    const actionId = sanitizeBuilderToken(process.env.GITHUB_ACTION || 'one') || 'one';
+    const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    return `boringcache-${runId}-${actionId}-${uniqueSuffix}`;
+}
 async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryMode) {
-    const builderName = `boringcache-${process.env.GITHUB_RUN_ID || Date.now()}`;
+    const builderName = buildxBuilderName();
     let driverToUse = driver || 'docker-container';
     if (driverToUse === 'docker') {
         core.warning('Buildx driver "docker" does not support cache export; falling back to "docker-container".');
@@ -43418,6 +43430,17 @@ async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, reg
         throw new Error(`Failed to create buildx builder (exit ${createResult})`);
     }
     return builderName;
+}
+async function cleanupBuildxBuilder(builderName) {
+    if (!builderName) {
+        return;
+    }
+    const removeResult = await exec.exec('docker', ['buildx', 'rm', '--force', builderName], {
+        ignoreReturnCode: true,
+    });
+    if (removeResult !== 0) {
+        core.warning(`Failed to remove buildx builder ${builderName} (exit ${removeResult})`);
+    }
 }
 async function getBuilderPlatforms(builderName) {
     let output = '';
@@ -44014,6 +44037,7 @@ async function runDockerRestore(plan, inputs) {
     saveModeState('verbose', String(inputs.verbose));
     saveModeState('exclude', inputs.exclude);
     const builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, useRegistryProxy);
+    saveModeState('builder-name', builderName);
     core.setOutput('buildx-name', builderName);
     core.setOutput('buildx-platforms', await getBuilderPlatforms(builderName));
     await setupQemuIfNeeded(platforms);
@@ -44109,22 +44133,28 @@ async function runDockerRestore(plan, inputs) {
     };
 }
 async function runDockerSave() {
-    const proxyPid = getModeState('proxy-pid');
-    if (proxyPid) {
-        await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
-        return;
+    const builderName = getModeState('builder-name');
+    try {
+        const proxyPid = getModeState('proxy-pid');
+        if (proxyPid) {
+            await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+            return;
+        }
+        const workspace = getModeState('workspace');
+        const cacheDir = getModeState('cache-dir');
+        const cacheTag = getModeState('cache-tag');
+        if (!workspace || !cacheDir || !cacheTag) {
+            return;
+        }
+        addLocalBinPaths();
+        await saveSimpleCache(workspace, cacheTag, cacheDir, {
+            verbose: getModeState('verbose') === 'true',
+            exclude: getModeState('exclude'),
+        });
     }
-    const workspace = getModeState('workspace');
-    const cacheDir = getModeState('cache-dir');
-    const cacheTag = getModeState('cache-tag');
-    if (!workspace || !cacheDir || !cacheTag) {
-        return;
+    finally {
+        await cleanupBuildxBuilder(builderName);
     }
-    addLocalBinPaths();
-    await saveSimpleCache(workspace, cacheTag, cacheDir, {
-        verbose: getModeState('verbose') === 'true',
-        exclude: getModeState('exclude'),
-    });
 }
 async function runBuildkitRestore(plan, inputs) {
     const workspaceRoot = process.env.GITHUB_WORKSPACE || plan.workingDirectory;

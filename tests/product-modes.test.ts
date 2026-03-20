@@ -87,6 +87,44 @@ describe('product modes', () => {
     }
   });
 
+  it('uses a distinct buildx builder name for each docker invocation in the same job', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      process.env.GITHUB_RUN_ID = '12345';
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        'working-directory': project,
+        workspace: 'boringcache/test-workspace',
+        'docker-command': 'setup',
+        'cache-tag': 'bench-scope',
+      });
+      mockGetBooleanInput({});
+
+      process.env.GITHUB_ACTION = 'docker-cache';
+      await restoreRun();
+
+      process.env.GITHUB_ACTION = 'docker-cache-2';
+      await restoreRun();
+
+      const buildxCreateCalls = (exec.exec as jest.Mock).mock.calls.filter(
+        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'create',
+      );
+
+      expect(buildxCreateCalls).toHaveLength(2);
+      const firstBuilder = buildxCreateCalls[0]?.[1]?.[3];
+      const secondBuilder = buildxCreateCalls[1]?.[1]?.[3];
+      expect(firstBuilder).toEqual(expect.stringContaining('boringcache-12345-docker-cache-'));
+      expect(secondBuilder).toEqual(expect.stringContaining('boringcache-12345-docker-cache-2-'));
+      expect(firstBuilder).not.toBe(secondBuilder);
+      expect(core.saveState).toHaveBeenCalledWith('mode-builder-name', firstBuilder);
+      expect(core.saveState).toHaveBeenCalledWith('mode-builder-name', secondBuilder);
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('runs buildkit mode through buildctl', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 

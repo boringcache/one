@@ -158,6 +158,13 @@ function slugify(value: string): string {
   return value.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+function sanitizeBuilderToken(value: string): string {
+  return slugify(value)
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+}
+
 function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -304,8 +311,15 @@ async function setupQemuIfNeeded(platforms: string): Promise<void> {
   }
 }
 
+function buildxBuilderName(): string {
+  const runId = String(process.env.GITHUB_RUN_ID || Date.now());
+  const actionId = sanitizeBuilderToken(process.env.GITHUB_ACTION || 'one') || 'one';
+  const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `boringcache-${runId}-${actionId}-${uniqueSuffix}`;
+}
+
 async function setupBuildxBuilder(driver: string, driverOpts: string[], buildkitdConfigInline: string, registryMode: boolean): Promise<string> {
-  const builderName = `boringcache-${process.env.GITHUB_RUN_ID || Date.now()}`;
+  const builderName = buildxBuilderName();
 
   let driverToUse = driver || 'docker-container';
   if (driverToUse === 'docker') {
@@ -339,6 +353,19 @@ async function setupBuildxBuilder(driver: string, driverOpts: string[], buildkit
   }
 
   return builderName;
+}
+
+async function cleanupBuildxBuilder(builderName: string): Promise<void> {
+  if (!builderName) {
+    return;
+  }
+
+  const removeResult = await exec.exec('docker', ['buildx', 'rm', '--force', builderName], {
+    ignoreReturnCode: true,
+  });
+  if (removeResult !== 0) {
+    core.warning(`Failed to remove buildx builder ${builderName} (exit ${removeResult})`);
+  }
 }
 
 async function getBuilderPlatforms(builderName: string): Promise<string> {
@@ -1021,6 +1048,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   saveModeState('exclude', inputs.exclude);
 
   const builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, useRegistryProxy);
+  saveModeState('builder-name', builderName);
   core.setOutput('buildx-name', builderName);
   core.setOutput('buildx-platforms', await getBuilderPlatforms(builderName));
   await setupQemuIfNeeded(platforms);
@@ -1122,24 +1150,30 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
 }
 
 async function runDockerSave(): Promise<void> {
-  const proxyPid = getModeState('proxy-pid');
-  if (proxyPid) {
-    await stopRegistryProxy(parseInt(proxyPid, 10));
-    return;
-  }
+  const builderName = getModeState('builder-name');
 
-  const workspace = getModeState('workspace');
-  const cacheDir = getModeState('cache-dir');
-  const cacheTag = getModeState('cache-tag');
-  if (!workspace || !cacheDir || !cacheTag) {
-    return;
-  }
+  try {
+    const proxyPid = getModeState('proxy-pid');
+    if (proxyPid) {
+      await stopRegistryProxy(parseInt(proxyPid, 10));
+      return;
+    }
 
-  addLocalBinPaths();
-  await saveSimpleCache(workspace, cacheTag, cacheDir, {
-    verbose: getModeState('verbose') === 'true',
-    exclude: getModeState('exclude'),
-  });
+    const workspace = getModeState('workspace');
+    const cacheDir = getModeState('cache-dir');
+    const cacheTag = getModeState('cache-tag');
+    if (!workspace || !cacheDir || !cacheTag) {
+      return;
+    }
+
+    addLocalBinPaths();
+    await saveSimpleCache(workspace, cacheTag, cacheDir, {
+      verbose: getModeState('verbose') === 'true',
+      exclude: getModeState('exclude'),
+    });
+  } finally {
+    await cleanupBuildxBuilder(builderName);
+  }
 }
 
 async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {

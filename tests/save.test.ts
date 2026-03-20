@@ -159,4 +159,25 @@ describe('save action', () => {
       undefined,
     );
   });
+
+  it('removes the docker buildx builder during the post step', async () => {
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'docker',
+      'cli-version': 'skip',
+      'generic-cache-workspace': 'my-org/my-project',
+      'mode-builder-name': 'boringcache-12345-docker-cache-abc123',
+      'mode-proxy-pid': '4321',
+    });
+
+    await saveRun();
+
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
+    expect(exec.exec).toHaveBeenCalledWith(
+      'docker',
+      ['buildx', 'rm', '--force', 'boringcache-12345-docker-cache-abc123'],
+      expect.objectContaining({ ignoreReturnCode: true }),
+    );
+  });
 });
