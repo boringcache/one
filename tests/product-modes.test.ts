@@ -42,11 +42,16 @@ describe('product modes', () => {
         command: 'docker-registry',
         workspace: 'boringcache/test-workspace',
       }));
-      expect(exec.exec).toHaveBeenCalledWith(
-        'docker',
-        expect.arrayContaining(['buildx', 'build']),
-        expect.any(Object),
+      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
       );
+      expect(dockerBuildCall).toBeTruthy();
+      expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
+        '--cache-from',
+        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,registry.insecure=true'),
+        '--cache-to',
+        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,mode=max,registry.insecure=true'),
+      ]));
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'docker');
     } finally {
       await removeTempProject(project);
@@ -82,6 +87,46 @@ describe('product modes', () => {
       );
       expect(core.setOutput).toHaveBeenCalledWith('buildx-name', expect.any(String));
       expect(core.setOutput).toHaveBeenCalledWith('proxy-port', '5000');
+      expect(core.setOutput).toHaveBeenCalledWith('registry-ref', expect.stringContaining('/bench-registry:buildcache'));
+      expect(core.setOutput).toHaveBeenCalledWith(
+        'cache-from',
+        expect.stringContaining('/bench-registry:buildcache,registry.insecure=true'),
+      );
+      expect(core.setOutput).toHaveBeenCalledWith(
+        'cache-to',
+        expect.stringContaining('/bench-registry:buildcache,mode=max,registry.insecure=true'),
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('uses registry-tag for direct docker cache refs', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'registry-tag': 'bench-registry',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
+      );
+      expect(dockerBuildCall).toBeTruthy();
+      expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
+        '--cache-from',
+        expect.stringContaining('/bench-registry:buildcache,registry.insecure=true'),
+        '--cache-to',
+        expect.stringContaining('/bench-registry:buildcache,mode=max,registry.insecure=true'),
+      ]));
     } finally {
       await removeTempProject(project);
     }
@@ -147,7 +192,15 @@ describe('product modes', () => {
         ([command, args]) => command === 'buildctl' && Array.isArray(args) && args.includes('build'),
       );
       expect(buildctlCall).toBeTruthy();
-      expect(buildctlCall?.[1]).toEqual(expect.arrayContaining(['--addr', 'tcp://buildkit:1234', 'build']));
+      expect(buildctlCall?.[1]).toEqual(expect.arrayContaining([
+        '--addr',
+        'tcp://buildkit:1234',
+        'build',
+        '--import-cache',
+        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,registry.insecure=true'),
+        '--export-cache',
+        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,mode=max,registry.insecure=true'),
+      ]));
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'buildkit');
     } finally {
       await removeTempProject(project);

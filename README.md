@@ -180,7 +180,8 @@ Docker build with cache:
 Docker setup only for external `docker buildx build` scripts:
 
 ```yaml
-- uses: boringcache/one@v1
+- id: cache
+  uses: boringcache/one@v1
   with:
     cli-platform: debian-bookworm-amd64
     mode: docker
@@ -193,9 +194,18 @@ Docker setup only for external `docker buildx build` scripts:
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+
+- run: |
+    docker buildx build \
+      --builder "${{ steps.cache.outputs.buildx-name }}" \
+      --cache-from "${{ steps.cache.outputs.cache-from }}" \
+      --cache-to "${{ steps.cache.outputs.cache-to }}" \
+      --tag ghcr.io/${{ github.repository }}:${{ github.sha }} \
+      .
 ```
 
-Use `steps.<id>.outputs.buildx-name` and `steps.<id>.outputs.proxy-port` in the later `docker buildx build` step when a benchmark or custom script needs to keep full control over the build invocation.
+Use `steps.<id>.outputs.buildx-name`, `cache-from`, and `cache-to` in the later `docker buildx build` step when a benchmark or custom script needs to keep full control over the build invocation.
+Registry-backed Docker and BuildKit cache refs always use an explicit `<registry-tag-or-cache-tag>:buildcache` suffix so BuildKit does not fall back to an implicit `:latest` import.
 If you need to copy the CLI into a container build context, install the matching asset first and then copy `$(which boringcache)`.
 You can also use `boringcache/one` as a CLI-only bootstrap step by omitting cache entries and setting `cli-platform` when you need a non-runner asset.
 
@@ -349,7 +359,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 
 | Input | Description |
 |-------|-------------|
-| `image`, `tags`, `context`, `dockerfile`, `cache-backend` | Docker and BuildKit build inputs. |
+| `image`, `tags`, `context`, `dockerfile`, `cache-backend`, `registry-tag` | Docker and BuildKit build inputs. |
 | `buildkit-host`, `output`, `ssh` | BuildKit-only inputs. |
 | `bazel-version` | Bazel version for Bazelisk. |
 | `gradle-home`, `enable-build-cache` | Gradle mode inputs. |
@@ -367,8 +377,8 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `resolved-mode` | Effective mode used by the action. |
 | `resolved-tools` | Resolved `mise` tools as newline-separated `tool@version` values. |
 | `workspace`, `cache-tag`, `runtime-cache-tag`, `resolved-entries`, `resolved-tags`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
+| `registry-ref`, `cache-from`, `cache-to`, `cache-dir`, `save-cache-dir`, `image-id`, `digest`, `buildx-name`, `buildx-platforms` | Docker and BuildKit outputs. |
 | `package-manager`, `package-manager-cache-dir` | Turbo mode outputs. |
-| `image-id`, `digest`, `buildx-name`, `buildx-platforms` | Docker and BuildKit outputs. |
 | `maven-extensions-path`, `maven-build-cache-config-path`, `maven-local-repo` | Maven mode outputs. |
 | `rust-version`, `cargo-tag`, `target-tag`, `cargo-bin-tag`, `sccache-tag`, `sccache-hit` | Rust mode outputs. |
 

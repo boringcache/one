@@ -48,6 +48,7 @@ const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-meta
 const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-from');
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
+const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
 let rustLastOutput = '';
 async function runModeRestore(plan, inputs) {
     switch (plan.mode) {
@@ -169,14 +170,37 @@ async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     }
     await execBoringCache(args);
 }
-function getRegistryRef(port, cacheTag, host = '127.0.0.1') {
-    return `${host}:${port}/${cacheTag}`;
+function getEffectiveRegistryTag(cacheTag, registryTag) {
+    return registryTag || cacheTag;
+}
+function getRegistryRef(port, cacheTag, host = '127.0.0.1', refTag = DEFAULT_REGISTRY_CACHE_REF_TAG) {
+    return `${host}:${port}/${cacheTag}:${refTag}`;
 }
 function getRegistryCacheFlags(ref, cacheMode) {
     return {
         from: `type=registry,ref=${ref},registry.insecure=true`,
         to: `type=registry,ref=${ref},mode=${cacheMode},registry.insecure=true`,
     };
+}
+function buildRegistryCacheSpec(port, cacheTag, registryTag, cacheMode, host = '127.0.0.1') {
+    const effectiveTag = getEffectiveRegistryTag(cacheTag, registryTag);
+    const ref = getRegistryRef(port, effectiveTag, host);
+    const { from, to } = getRegistryCacheFlags(ref, cacheMode);
+    return { effectiveTag, ref, from, to };
+}
+function setRegistryCacheOutputs(spec) {
+    core.setOutput('registry-ref', spec.ref);
+    core.setOutput('cache-from', spec.from);
+    core.setOutput('cache-to', spec.to);
+    core.setOutput('cache-dir', '');
+    core.setOutput('save-cache-dir', '');
+}
+function setLocalCacheOutputs(cacheDirFrom, cacheDirTo, cacheMode) {
+    core.setOutput('registry-ref', '');
+    core.setOutput('cache-from', `type=local,src=${cacheDirFrom}`);
+    core.setOutput('cache-to', `type=local,dest=${cacheDirTo},mode=${cacheMode}`);
+    core.setOutput('cache-dir', cacheDirFrom);
+    core.setOutput('save-cache-dir', cacheDirTo);
 }
 async function inspectDockerTemplate(containerName, template) {
     let output = '';
@@ -865,6 +889,7 @@ async function runDockerRestore(plan, inputs) {
     const cacheBackend = core.getInput('cache-backend') || 'registry';
     const registryTag = core.getInput('registry-tag') || '';
     const cacheTag = inputs.cacheTag || slugify(image);
+    const registryCacheTag = getEffectiveRegistryTag(cacheTag, registryTag);
     const cacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
     const useRegistryProxy = cacheBackend !== 'local';
     saveModeState('workspace', plan.workspace);
@@ -891,7 +916,7 @@ async function runDockerRestore(plan, inputs) {
         const proxy = await (0, action_core_1.startRegistryProxy)({
             command: 'docker-registry',
             workspace: plan.workspace,
-            tag: registryTag || cacheTag,
+            tag: registryCacheTag,
             host: proxyBindHost,
             port: requestedPort,
             noGit: inputs.proxyNoGit,
@@ -903,9 +928,9 @@ async function runDockerRestore(plan, inputs) {
         saveModeState('proxy-pid', String(proxy.pid));
         core.setOutput('proxy-port', String(proxy.port));
         core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+        const registryCache = buildRegistryCacheSpec(proxy.port, cacheTag, registryTag, cacheMode, refHost);
+        setRegistryCacheOutputs(registryCache);
         if (shouldBuild) {
-            const ref = getRegistryRef(proxy.port, cacheTag, refHost);
-            const registryCache = getRegistryCacheFlags(ref, cacheMode);
             await buildDockerImage({
                 dockerfile,
                 context,
@@ -927,10 +952,11 @@ async function runDockerRestore(plan, inputs) {
     }
     else {
         ensureDir(DOCKER_CACHE_DIR_FROM);
+        ensureDir(DOCKER_CACHE_DIR_TO);
+        saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
         await restoreSimpleCache(plan.workspace, cacheTag, DOCKER_CACHE_DIR_FROM, cacheFlags);
+        setLocalCacheOutputs(DOCKER_CACHE_DIR_FROM, DOCKER_CACHE_DIR_TO, cacheMode);
         if (shouldBuild) {
-            ensureDir(DOCKER_CACHE_DIR_TO);
-            saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
             await buildDockerImage({
                 dockerfile,
                 context,
@@ -1025,6 +1051,7 @@ async function runBuildkitRestore(plan, inputs) {
     const cacheBackend = core.getInput('cache-backend') || 'registry';
     const registryTag = core.getInput('registry-tag') || '';
     const cacheTag = inputs.cacheTag || slugify(image);
+    const registryCacheTag = getEffectiveRegistryTag(cacheTag, registryTag);
     const cacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
     const useRegistryProxy = cacheBackend !== 'local';
     saveModeState('workspace', plan.workspace);
@@ -1053,7 +1080,7 @@ async function runBuildkitRestore(plan, inputs) {
         const proxy = await (0, action_core_1.startRegistryProxy)({
             command: 'docker-registry',
             workspace: plan.workspace,
-            tag: registryTag || cacheTag,
+            tag: registryCacheTag,
             host: proxyBindHost,
             port: requestedPort,
             noGit: inputs.proxyNoGit,
@@ -1065,8 +1092,8 @@ async function runBuildkitRestore(plan, inputs) {
         saveModeState('proxy-pid', String(proxy.pid));
         core.setOutput('proxy-port', String(proxy.port));
         core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
-        const ref = getRegistryRef(proxy.port, cacheTag, refHost);
-        const registryCache = getRegistryCacheFlags(ref, cacheMode);
+        const registryCache = buildRegistryCacheSpec(proxy.port, cacheTag, registryTag, cacheMode, refHost);
+        setRegistryCacheOutputs(registryCache);
         await buildWithBuildctl({
             addr: buildkitHost,
             tlsCa,
@@ -1096,6 +1123,7 @@ async function runBuildkitRestore(plan, inputs) {
         ensureDir(BUILDKIT_CACHE_DIR_TO);
         saveModeState('cache-dir', BUILDKIT_CACHE_DIR_TO);
         await restoreSimpleCache(plan.workspace, cacheTag, BUILDKIT_CACHE_DIR_FROM, cacheFlags);
+        setLocalCacheOutputs(BUILDKIT_CACHE_DIR_FROM, BUILDKIT_CACHE_DIR_TO, cacheMode);
         await buildWithBuildctl({
             addr: buildkitHost,
             tlsCa,

@@ -31,6 +31,7 @@ const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-meta
 const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-from');
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
+const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
 
 interface ModeRestoreResult {
   cacheHit?: boolean;
@@ -40,6 +41,13 @@ interface ModeRestoreResult {
 interface CacheFlags {
   verbose?: boolean;
   exclude?: string;
+}
+
+interface RegistryCacheSpec {
+  effectiveTag: string;
+  ref: string;
+  from: string;
+  to: string;
 }
 
 interface DockerBuildOptions {
@@ -231,8 +239,17 @@ async function saveSimpleCache(workspace: string, cacheKey: string, cacheDir: st
   await execBoringCache(args);
 }
 
-function getRegistryRef(port: number, cacheTag: string, host = '127.0.0.1'): string {
-  return `${host}:${port}/${cacheTag}`;
+function getEffectiveRegistryTag(cacheTag: string, registryTag: string): string {
+  return registryTag || cacheTag;
+}
+
+function getRegistryRef(
+  port: number,
+  cacheTag: string,
+  host = '127.0.0.1',
+  refTag = DEFAULT_REGISTRY_CACHE_REF_TAG,
+): string {
+  return `${host}:${port}/${cacheTag}:${refTag}`;
 }
 
 function getRegistryCacheFlags(ref: string, cacheMode: string): { from: string; to: string } {
@@ -240,6 +257,35 @@ function getRegistryCacheFlags(ref: string, cacheMode: string): { from: string; 
     from: `type=registry,ref=${ref},registry.insecure=true`,
     to: `type=registry,ref=${ref},mode=${cacheMode},registry.insecure=true`,
   };
+}
+
+function buildRegistryCacheSpec(
+  port: number,
+  cacheTag: string,
+  registryTag: string,
+  cacheMode: string,
+  host = '127.0.0.1',
+): RegistryCacheSpec {
+  const effectiveTag = getEffectiveRegistryTag(cacheTag, registryTag);
+  const ref = getRegistryRef(port, effectiveTag, host);
+  const { from, to } = getRegistryCacheFlags(ref, cacheMode);
+  return { effectiveTag, ref, from, to };
+}
+
+function setRegistryCacheOutputs(spec: RegistryCacheSpec): void {
+  core.setOutput('registry-ref', spec.ref);
+  core.setOutput('cache-from', spec.from);
+  core.setOutput('cache-to', spec.to);
+  core.setOutput('cache-dir', '');
+  core.setOutput('save-cache-dir', '');
+}
+
+function setLocalCacheOutputs(cacheDirFrom: string, cacheDirTo: string, cacheMode: string): void {
+  core.setOutput('registry-ref', '');
+  core.setOutput('cache-from', `type=local,src=${cacheDirFrom}`);
+  core.setOutput('cache-to', `type=local,dest=${cacheDirTo},mode=${cacheMode}`);
+  core.setOutput('cache-dir', cacheDirFrom);
+  core.setOutput('save-cache-dir', cacheDirTo);
 }
 
 async function inspectDockerTemplate(containerName: string, template: string): Promise<string | null> {
@@ -1039,6 +1085,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   const cacheBackend = core.getInput('cache-backend') || 'registry';
   const registryTag = core.getInput('registry-tag') || '';
   const cacheTag = inputs.cacheTag || slugify(image);
+  const registryCacheTag = getEffectiveRegistryTag(cacheTag, registryTag);
   const cacheFlags: CacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
   const useRegistryProxy = cacheBackend !== 'local';
 
@@ -1070,7 +1117,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     const proxy = await startRegistryProxy({
       command: 'docker-registry',
       workspace: plan.workspace,
-      tag: registryTag || cacheTag,
+      tag: registryCacheTag,
       host: proxyBindHost,
       port: requestedPort,
       noGit: inputs.proxyNoGit,
@@ -1083,9 +1130,10 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
 
+    const registryCache = buildRegistryCacheSpec(proxy.port, cacheTag, registryTag, cacheMode, refHost);
+    setRegistryCacheOutputs(registryCache);
+
     if (shouldBuild) {
-      const ref = getRegistryRef(proxy.port, cacheTag, refHost);
-      const registryCache = getRegistryCacheFlags(ref, cacheMode);
       await buildDockerImage({
         dockerfile,
         context,
@@ -1106,11 +1154,12 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     }
   } else {
     ensureDir(DOCKER_CACHE_DIR_FROM);
+    ensureDir(DOCKER_CACHE_DIR_TO);
+    saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
     await restoreSimpleCache(plan.workspace, cacheTag, DOCKER_CACHE_DIR_FROM, cacheFlags);
+    setLocalCacheOutputs(DOCKER_CACHE_DIR_FROM, DOCKER_CACHE_DIR_TO, cacheMode);
 
     if (shouldBuild) {
-      ensureDir(DOCKER_CACHE_DIR_TO);
-      saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
       await buildDockerImage({
         dockerfile,
         context,
@@ -1212,6 +1261,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
   const cacheBackend = core.getInput('cache-backend') || 'registry';
   const registryTag = core.getInput('registry-tag') || '';
   const cacheTag = inputs.cacheTag || slugify(image);
+  const registryCacheTag = getEffectiveRegistryTag(cacheTag, registryTag);
   const cacheFlags: CacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
   const useRegistryProxy = cacheBackend !== 'local';
 
@@ -1246,7 +1296,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     const proxy = await startRegistryProxy({
       command: 'docker-registry',
       workspace: plan.workspace,
-      tag: registryTag || cacheTag,
+      tag: registryCacheTag,
       host: proxyBindHost,
       port: requestedPort,
       noGit: inputs.proxyNoGit,
@@ -1259,8 +1309,8 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     core.setOutput('proxy-port', String(proxy.port));
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
 
-    const ref = getRegistryRef(proxy.port, cacheTag, refHost);
-    const registryCache = getRegistryCacheFlags(ref, cacheMode);
+    const registryCache = buildRegistryCacheSpec(proxy.port, cacheTag, registryTag, cacheMode, refHost);
+    setRegistryCacheOutputs(registryCache);
     await buildWithBuildctl({
       addr: buildkitHost,
       tlsCa,
@@ -1289,6 +1339,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     ensureDir(BUILDKIT_CACHE_DIR_TO);
     saveModeState('cache-dir', BUILDKIT_CACHE_DIR_TO);
     await restoreSimpleCache(plan.workspace, cacheTag, BUILDKIT_CACHE_DIR_FROM, cacheFlags);
+    setLocalCacheOutputs(BUILDKIT_CACHE_DIR_FROM, BUILDKIT_CACHE_DIR_TO, cacheMode);
 
     await buildWithBuildctl({
       addr: buildkitHost,
