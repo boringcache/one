@@ -52,6 +52,8 @@ describe('product modes', () => {
         '--cache-to',
         expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,mode=max,registry.insecure=true'),
       ]));
+      const cacheTagCalls = (core.setOutput as jest.Mock).mock.calls.filter(([name]) => name === 'cache-tag');
+      expect(cacheTagCalls.at(-1)).toEqual(['cache-tag', 'ghcr-io-boringcache-demo']);
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'docker');
     } finally {
       await removeTempProject(project);
@@ -127,6 +129,72 @@ describe('product modes', () => {
         '--cache-to',
         expect.stringContaining('/bench-registry:buildcache,mode=max,registry.insecure=true'),
       ]));
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('supports an explicit registry-ref-tag for direct docker cache refs', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'registry-tag': 'bench-registry',
+        'registry-ref-tag': 'cache-main',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
+      );
+      expect(dockerBuildCall).toBeTruthy();
+      expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
+        '--cache-from',
+        expect.stringContaining('/bench-registry:cache-main,registry.insecure=true'),
+        '--cache-to',
+        expect.stringContaining('/bench-registry:cache-main,mode=max,registry.insecure=true'),
+      ]));
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('accepts a registry-tag with an embedded OCI tag suffix for compatibility', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'registry-tag': 'bench-registry:cache-main',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
+      );
+      expect(dockerBuildCall).toBeTruthy();
+      expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
+        '--cache-from',
+        expect.stringContaining('/bench-registry:cache-main,registry.insecure=true'),
+        '--cache-to',
+        expect.stringContaining('/bench-registry:cache-main,mode=max,registry.insecure=true'),
+      ]));
+      expect(core.warning).toHaveBeenCalledWith(
+        'registry-tag included a tag suffix; prefer registry-ref-tag for the OCI cache tag.',
+      );
     } finally {
       await removeTempProject(project);
     }

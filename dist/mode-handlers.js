@@ -173,6 +173,43 @@ async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
 function getEffectiveRegistryTag(cacheTag, registryTag) {
     return registryTag || cacheTag;
 }
+function validateRegistryRefTag(refTag) {
+    const trimmed = refTag.trim();
+    if (!trimmed) {
+        return DEFAULT_REGISTRY_CACHE_REF_TAG;
+    }
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(trimmed)) {
+        throw new Error(`Unsupported registry-ref-tag "${refTag}". Expected an OCI tag such as "buildcache" or "cache-main".`);
+    }
+    return trimmed;
+}
+function resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagInput) {
+    const rawRegistryTag = registryTagInput.trim();
+    const rawRegistryRefTag = registryRefTagInput.trim();
+    if (rawRegistryTag.includes('@')) {
+        throw new Error(`Unsupported registry-tag "${registryTagInput}". Use a repo-style cache root, not a digest reference.`);
+    }
+    if (rawRegistryTag.includes(':')) {
+        if (rawRegistryRefTag) {
+            throw new Error('registry-tag must not include a tag suffix when registry-ref-tag is also set. Use registry-tag for the cache root and registry-ref-tag for the OCI tag.');
+        }
+        const separator = rawRegistryTag.lastIndexOf(':');
+        const effectiveTag = rawRegistryTag.slice(0, separator).trim();
+        const embeddedRefTag = rawRegistryTag.slice(separator + 1).trim();
+        if (!effectiveTag || !embeddedRefTag) {
+            throw new Error(`Unsupported registry-tag "${registryTagInput}". Expected a cache root or root:tag.`);
+        }
+        core.warning('registry-tag included a tag suffix; prefer registry-ref-tag for the OCI cache tag.');
+        return {
+            effectiveTag,
+            refTag: validateRegistryRefTag(embeddedRefTag),
+        };
+    }
+    return {
+        effectiveTag: getEffectiveRegistryTag(cacheTag, rawRegistryTag),
+        refTag: validateRegistryRefTag(rawRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG),
+    };
+}
 function getRegistryRef(port, cacheTag, host = '127.0.0.1', refTag = DEFAULT_REGISTRY_CACHE_REF_TAG) {
     return `${host}:${port}/${cacheTag}:${refTag}`;
 }
@@ -182,11 +219,10 @@ function getRegistryCacheFlags(ref, cacheMode) {
         to: `type=registry,ref=${ref},mode=${cacheMode},registry.insecure=true`,
     };
 }
-function buildRegistryCacheSpec(port, cacheTag, registryTag, cacheMode, host = '127.0.0.1') {
-    const effectiveTag = getEffectiveRegistryTag(cacheTag, registryTag);
-    const ref = getRegistryRef(port, effectiveTag, host);
+function buildRegistryCacheSpec(port, registryTarget, cacheMode, host = '127.0.0.1') {
+    const ref = getRegistryRef(port, registryTarget.effectiveTag, host, registryTarget.refTag);
     const { from, to } = getRegistryCacheFlags(ref, cacheMode);
-    return { effectiveTag, ref, from, to };
+    return { effectiveTag: registryTarget.effectiveTag, refTag: registryTarget.refTag, ref, from, to };
 }
 function setRegistryCacheOutputs(spec) {
     core.setOutput('registry-ref', spec.ref);
@@ -887,9 +923,10 @@ async function runDockerRestore(plan, inputs) {
     const driverOpts = parseMultiline(core.getInput('driver-opts') || '');
     const buildkitdConfigInline = core.getInput('buildkitd-config-inline') || '';
     const cacheBackend = core.getInput('cache-backend') || 'registry';
-    const registryTag = core.getInput('registry-tag') || '';
+    const registryTagInput = core.getInput('registry-tag') || '';
+    const registryRefTagInput = core.getInput('registry-ref-tag') || '';
     const cacheTag = inputs.cacheTag || slugify(image);
-    const registryCacheTag = getEffectiveRegistryTag(cacheTag, registryTag);
+    const registryTarget = resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagInput);
     const cacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
     const useRegistryProxy = cacheBackend !== 'local';
     saveModeState('workspace', plan.workspace);
@@ -916,7 +953,7 @@ async function runDockerRestore(plan, inputs) {
         const proxy = await (0, action_core_1.startRegistryProxy)({
             command: 'docker-registry',
             workspace: plan.workspace,
-            tag: registryCacheTag,
+            tag: registryTarget.effectiveTag,
             host: proxyBindHost,
             port: requestedPort,
             noGit: inputs.proxyNoGit,
@@ -928,7 +965,7 @@ async function runDockerRestore(plan, inputs) {
         saveModeState('proxy-pid', String(proxy.pid));
         core.setOutput('proxy-port', String(proxy.port));
         core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
-        const registryCache = buildRegistryCacheSpec(proxy.port, cacheTag, registryTag, cacheMode, refHost);
+        const registryCache = buildRegistryCacheSpec(proxy.port, registryTarget, cacheMode, refHost);
         setRegistryCacheOutputs(registryCache);
         if (shouldBuild) {
             await buildDockerImage({
@@ -984,8 +1021,9 @@ async function runDockerRestore(plan, inputs) {
     core.setOutput('workspace', plan.workspace);
     core.setOutput('cache-tag', cacheTag);
     return {
+        cacheTag,
         verificationSpecs: [{
-                tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+                tag: useRegistryProxy ? registryTarget.effectiveTag : cacheTag,
                 noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
                 noGit: useRegistryProxy ? inputs.proxyNoGit : false,
                 pathHint: plan.workingDirectory,
@@ -1049,9 +1087,10 @@ async function runBuildkitRestore(plan, inputs) {
     const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBoolean(core.getInput('buildkit-tls-skip-verify'), false);
     const cacheBackend = core.getInput('cache-backend') || 'registry';
-    const registryTag = core.getInput('registry-tag') || '';
+    const registryTagInput = core.getInput('registry-tag') || '';
+    const registryRefTagInput = core.getInput('registry-ref-tag') || '';
     const cacheTag = inputs.cacheTag || slugify(image);
-    const registryCacheTag = getEffectiveRegistryTag(cacheTag, registryTag);
+    const registryTarget = resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagInput);
     const cacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
     const useRegistryProxy = cacheBackend !== 'local';
     saveModeState('workspace', plan.workspace);
@@ -1080,7 +1119,7 @@ async function runBuildkitRestore(plan, inputs) {
         const proxy = await (0, action_core_1.startRegistryProxy)({
             command: 'docker-registry',
             workspace: plan.workspace,
-            tag: registryCacheTag,
+            tag: registryTarget.effectiveTag,
             host: proxyBindHost,
             port: requestedPort,
             noGit: inputs.proxyNoGit,
@@ -1092,7 +1131,7 @@ async function runBuildkitRestore(plan, inputs) {
         saveModeState('proxy-pid', String(proxy.pid));
         core.setOutput('proxy-port', String(proxy.port));
         core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
-        const registryCache = buildRegistryCacheSpec(proxy.port, cacheTag, registryTag, cacheMode, refHost);
+        const registryCache = buildRegistryCacheSpec(proxy.port, registryTarget, cacheMode, refHost);
         setRegistryCacheOutputs(registryCache);
         await buildWithBuildctl({
             addr: buildkitHost,
@@ -1152,8 +1191,9 @@ async function runBuildkitRestore(plan, inputs) {
     core.setOutput('workspace', plan.workspace);
     core.setOutput('cache-tag', cacheTag);
     return {
+        cacheTag,
         verificationSpecs: [{
-                tag: useRegistryProxy ? (registryTag || cacheTag) : cacheTag,
+                tag: useRegistryProxy ? registryTarget.effectiveTag : cacheTag,
                 noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
                 noGit: useRegistryProxy ? inputs.proxyNoGit : false,
                 pathHint: plan.workingDirectory,
@@ -1209,6 +1249,7 @@ async function runBazelRestore(plan, inputs) {
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
     return {
+        cacheTag,
         verificationSpecs: [{
                 tag: cacheTag,
                 noPlatform: inputs.proxyNoPlatform,
@@ -1246,6 +1287,7 @@ async function runGradleRestore(plan, inputs) {
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
     return {
+        cacheTag,
         verificationSpecs: [{
                 tag: cacheTag,
                 noPlatform: inputs.proxyNoPlatform,
@@ -1289,6 +1331,7 @@ async function runMavenRestore(plan, inputs) {
     core.setOutput('maven-local-repo', localRepo);
     core.setOutput('workspace', plan.workspace);
     return {
+        cacheTag,
         verificationSpecs: [{
                 tag: cacheTag,
                 noPlatform: inputs.proxyNoPlatform,
@@ -1315,7 +1358,7 @@ async function runTurboProxyRestore(plan, inputs) {
         configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
         core.setOutput('workspace', plan.workspace);
         core.setOutput('cache-tag', cacheTag);
-        return { verificationSpecs: [] };
+        return { cacheTag, verificationSpecs: [] };
     }
     let proxy;
     try {
@@ -1331,6 +1374,7 @@ async function runTurboProxyRestore(plan, inputs) {
     core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
     core.setOutput('workspace', plan.workspace);
     return {
+        cacheTag,
         verificationSpecs: [{
                 tag: cacheTag,
                 noPlatform: true,
@@ -1484,7 +1528,7 @@ async function runRustRestore(plan, inputs) {
             saveExpected: sccacheMode !== 'proxy' || !inputs.readOnly,
         });
     }
-    return { cacheHit, verificationSpecs };
+    return { cacheHit, cacheTag: cacheTagPrefix, verificationSpecs };
 }
 async function runRustSave() {
     const workspace = getModeState('workspace');

@@ -136,6 +136,10 @@ inputs:
   registry-tag:
     description: 'Optional human-readable registry cache root for proxy-backed Docker or BuildKit cache. Generated refs use this as <registry-tag>:buildcache.'
     required: false
+  registry-ref-tag:
+    description: 'Optional OCI tag suffix for proxy-backed Docker or BuildKit cache refs. Defaults to buildcache.'
+    default: 'buildcache'
+    required: false
   buildkit-host:
     description: 'BuildKit address for buildctl mode, for example tcp://host:1234 or unix:///run/buildkit/buildkitd.sock.'
     required: false

@@ -189,6 +189,7 @@ Docker setup only for external `docker buildx build` scripts:
     workspace: my-org/my-project
     cache-tag: my-run-scope
     registry-tag: my-stable-docker-cache
+    registry-ref-tag: cache-main
     driver-opts: |
       network=host
   env:
@@ -206,6 +207,7 @@ Docker setup only for external `docker buildx build` scripts:
 
 Use `steps.<id>.outputs.buildx-name`, `cache-from`, and `cache-to` in the later `docker buildx build` step when a benchmark or custom script needs to keep full control over the build invocation.
 Registry-backed Docker and BuildKit cache refs always use an explicit `<registry-tag-or-cache-tag>:buildcache` suffix so BuildKit does not fall back to an implicit `:latest` import.
+If you need a different OCI tag strategy, set `registry-ref-tag` instead of embedding `:tag` into `registry-tag`.
 If you need to copy the CLI into a container build context, install the matching asset first and then copy `$(which boringcache)`.
 You can also use `boringcache/one` as a CLI-only bootstrap step by omitting cache entries and setting `cli-platform` when you need a non-runner asset.
 
@@ -359,7 +361,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 
 | Input | Description |
 |-------|-------------|
-| `image`, `tags`, `context`, `dockerfile`, `cache-backend`, `registry-tag` | Docker and BuildKit build inputs. |
+| `image`, `tags`, `context`, `dockerfile`, `cache-backend`, `registry-tag`, `registry-ref-tag` | Docker and BuildKit build inputs. |
 | `buildkit-host`, `output`, `ssh` | BuildKit-only inputs. |
 | `bazel-version` | Bazel version for Bazelisk. |
 | `gradle-home`, `enable-build-cache` | Gradle mode inputs. |
