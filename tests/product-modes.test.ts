@@ -427,6 +427,7 @@ describe('product modes', () => {
       expect(exec.exec).not.toHaveBeenCalledWith('rustup', expect.anything(), expect.anything());
       expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
       expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');
+      expect(core.setOutput).toHaveBeenCalledWith('sccache-hit', 'true');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'rust-sccache');
     } finally {
       await removeTempProject(project);

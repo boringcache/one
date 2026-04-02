@@ -1,6 +1,8 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import * as core from '@actions/core';
+import * as exec from '@actions/exec';
 import { getMiseInstallsDir } from '@boringcache/action-core';
 import {
   applyMiseSetup,
@@ -8,6 +10,7 @@ import {
   buildRuntimeCacheTag,
   buildRuntimeCacheEntry,
   parseToolSpecs,
+  resolveDiagnosticsConfig,
   resolveVerificationTags,
   type OneInputs,
 } from '../lib/utils';
@@ -51,9 +54,12 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     verify: 'none',
     verifyTimeoutSeconds: 60,
     verifyRequireServerSignature: false,
+    diagnostics: 'auto',
+    diagnosticsLogLines: 40,
     proxyPort: '',
     proxyNoGit: false,
     proxyNoPlatform: false,
+    cacheProfiles: '',
     entries: 'deps:node_modules',
     path: '',
     key: '',
@@ -70,6 +76,26 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
 }
 
 describe('one utils', () => {
+  it('keeps diagnostics off by default when step debug is disabled', () => {
+    expect(resolveDiagnosticsConfig('auto', 40)).toEqual({
+      level: 'off',
+      enabled: false,
+      includeLogs: false,
+      logLines: 40,
+    });
+  });
+
+  it('promotes diagnostics auto mode to verbose when step debug is enabled', () => {
+    (core.isDebug as jest.Mock).mockReturnValueOnce(true);
+
+    expect(resolveDiagnosticsConfig('auto', 80)).toEqual({
+      level: 'verbose',
+      enabled: true,
+      includeLogs: true,
+      logLines: 80,
+    });
+  });
+
   it('parses explicit tool specs and normalizes nodejs to node', () => {
     expect(parseToolSpecs('nodejs@22.4.1\nruby@3.3.6')).toEqual([
       { name: 'node', version: '22.4.1', label: 'Node.js', source: 'input' },
@@ -550,6 +576,83 @@ describe('one utils', () => {
 
     expect(plan.runtimeTag).toBe('bundler-mise-node-22.4-ruby-4.0');
     expect(plan.archiveEntries).toBe('bundler-node-22.4-ruby-4.0:vendor/bundle');
+  });
+
+  it('resolves semantic entries through CLI dry-run JSON', async () => {
+    (exec.exec as jest.Mock).mockImplementation(async (_tool: string, args: string[], options?: { listeners?: { stdout?: (data: Buffer) => void } }) => {
+      if (args.includes('--json')) {
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          workspace: 'my-org/my-project',
+          tag_path_pairs: ['bundler-gems:/cache/vendor/bundle'],
+          env_vars: {},
+        })));
+      }
+      return 0;
+    });
+
+    const plan = await buildPlan(buildInputs({
+      setup: 'none',
+      entries: 'bundler',
+      workspace: 'my-org/my-project',
+    }));
+
+    expect(plan.workspace).toBe('my-org/my-project');
+    expect(plan.archiveEntries).toBe('bundler-gems:/cache/vendor/bundle');
+    expect(plan.cacheTagPrefix).toBe('bundler-gems');
+  });
+
+  it('upgrades raw archive entries through CLI when a repo config file is present', async () => {
+    const project = await makeTempProject({
+      '.boringcache.toml': 'workspace = "config-org/config-workspace"\n',
+    });
+
+    (exec.exec as jest.Mock).mockImplementation(async (_tool: string, args: string[], options?: { listeners?: { stdout?: (data: Buffer) => void } }) => {
+      if (args.includes('--json')) {
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          workspace: 'config-org/config-workspace',
+          tag_path_pairs: ['bundler-gems:/cache/vendor/bundle'],
+          env_vars: {
+            BUNDLE_PATH: '/cache/vendor/bundle',
+          },
+        })));
+      }
+      return 0;
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        setup: 'none',
+        workspace: '',
+        workingDirectory: project,
+        entries: 'bundler:vendor/bundle',
+      }));
+
+      expect(plan.workspace).toBe('config-org/config-workspace');
+      expect(plan.archiveEntries).toBe('bundler-gems:/cache/vendor/bundle');
+      expect(plan.envVars).toEqual({
+        BUNDLE_PATH: '/cache/vendor/bundle',
+      });
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('keeps raw archive entries local when no repo config is present', async () => {
+    const project = await makeTempProject({});
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        setup: 'none',
+        workingDirectory: project,
+        entries: 'bundler:vendor/bundle',
+      }));
+
+      expect(plan.archiveEntries).toBe('bundler:vendor/bundle');
+      expect(plan.cacheTagPrefix).toBe('bundler');
+      expect(exec.exec).not.toHaveBeenCalled();
+    } finally {
+      await removeTempProject(project);
+    }
   });
 
   it('allows explicit runtime cache tags for local and CI reuse', async () => {

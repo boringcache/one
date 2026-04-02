@@ -6,7 +6,10 @@ import {
   ensureBoringCache,
   execBoringCache,
   getInputs,
+  loadDiagnosticsConfig,
   resolveVerificationTags,
+  readLogTail,
+  runDiagnosticsGroup,
   type TagVerificationSpec,
   type VerifyMode,
   parseEntries,
@@ -64,6 +67,41 @@ function filterVerifiableGenericTags(
   return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
 }
 
+async function emitPostStepDiagnostics(
+  inputs: ReturnType<typeof getInputs>,
+  resolvedMode: ResolvedMode | '',
+  workingDirectory: string,
+  genericWorkspace: string,
+  genericEntries: string,
+  verifyMode: VerifyMode,
+  verifySaveTags: string[],
+): Promise<void> {
+  const diagnostics = loadDiagnosticsConfig(inputs);
+
+  await runDiagnosticsGroup(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
+    core.info(`resolved-mode: ${resolvedMode || '(none)'}`);
+    core.info(`working-directory: ${workingDirectory || process.cwd()}`);
+    core.info(`workspace: ${genericWorkspace || '(none)'}`);
+    core.info(`generic-entries: ${genericEntries || '(none)'}`);
+    core.info(`verify-mode: ${verifyMode}`);
+    core.info(`verify-save-tags: ${verifySaveTags.join(',') || '(none)'}`);
+
+    if (diagnostics.includeLogs) {
+      const proxyLogPath = core.getState('proxy-log-path') || core.getState('mode-proxy-log-path');
+      if (proxyLogPath) {
+        const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
+        core.info(`proxy-log-path: ${proxyLogPath}`);
+        if (logTail.length > 0) {
+          core.info(`proxy-log-tail (${logTail.length} lines):`);
+          for (const line of logTail) {
+            core.info(line);
+          }
+        }
+      }
+    }
+  });
+}
+
 export async function run(): Promise<void> {
   const originalCwd = process.cwd();
   try {
@@ -91,6 +129,10 @@ export async function run(): Promise<void> {
       .split(',')
       .map((tag) => tag.trim())
       .filter(Boolean);
+
+    if (cliVersion.toLowerCase() !== 'skip') {
+      await ensureBoringCache({ version: cliVersion, platform: cliPlatform });
+    }
 
     if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
       const plan = await buildPlan(inputs);
@@ -123,11 +165,16 @@ export async function run(): Promise<void> {
       } else if (genericEntries) {
         core.notice(`Save skipped: ${missingSaveTokenMessage()}`);
       }
+      await emitPostStepDiagnostics(
+        inputs,
+        resolvedMode,
+        workingDirectory || process.cwd(),
+        genericWorkspace,
+        genericEntries,
+        verifyMode,
+        verifySaveTags,
+      );
       return;
-    }
-
-    if (cliVersion.toLowerCase() !== 'skip') {
-      await ensureBoringCache({ version: cliVersion, platform: cliPlatform });
     }
 
     if (resolvedMode && resolvedMode !== 'archive') {
@@ -143,6 +190,15 @@ export async function run(): Promise<void> {
           verbose,
         });
       }
+      await emitPostStepDiagnostics(
+        inputs,
+        resolvedMode,
+        workingDirectory || process.cwd(),
+        genericWorkspace,
+        genericEntries,
+        verifyMode,
+        verifySaveTags,
+      );
       return;
     }
 
@@ -180,6 +236,16 @@ export async function run(): Promise<void> {
         verbose,
       });
     }
+
+    await emitPostStepDiagnostics(
+      inputs,
+      resolvedMode,
+      workingDirectory || process.cwd(),
+      genericWorkspace,
+      genericEntries,
+      verifyMode,
+      verifySaveTags,
+    );
   } catch (error) {
     core.setFailed(`boringcache/one save failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {

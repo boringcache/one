@@ -39,6 +39,13 @@ interface ModeRestoreResult {
   verificationSpecs?: TagVerificationSpec[];
 }
 
+interface SccacheStatsSummary {
+  compileRequests: number;
+  cacheHits: number;
+  cacheMisses: number;
+  rustHitRate: string | null;
+}
+
 interface CacheFlags {
   verbose?: boolean;
   exclude?: string;
@@ -199,6 +206,19 @@ function addLocalBinPaths(): void {
 
 function registryProxyLogPath(port: number): string {
   return path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
+}
+
+function setProxyOutputs(port: number): void {
+  const logPath = registryProxyLogPath(port);
+  core.saveState('proxy-port', String(port));
+  core.saveState('proxy-log-path', logPath);
+  core.setOutput('proxy-port', String(port));
+  core.setOutput('proxy-log-path', logPath);
+}
+
+function saveProxyModeState(port: number): void {
+  saveModeState('proxy-port', String(port));
+  saveModeState('proxy-log-path', registryProxyLogPath(port));
 }
 
 async function execBoringCache(args: string[], options?: Parameters<typeof execBoringCacheCore>[1]): Promise<number> {
@@ -998,12 +1018,34 @@ async function installSccache(versionInput = '0.14.0'): Promise<void> {
   }
 }
 
-async function stopSccacheServer(): Promise<void> {
+async function stopSccacheServer(): Promise<SccacheStatsSummary | null> {
+  let output = '';
+
   try {
-    await exec.exec('sccache', ['--show-stats'], { ignoreReturnCode: true });
-    await exec.exec('sccache', ['--stop-server'], { ignoreReturnCode: true });
+    await exec.exec('sccache', ['--show-stats'], {
+      ignoreReturnCode: true,
+      listeners: {
+        stdout: (data: Buffer) => {
+          const text = data.toString();
+          output += text;
+          process.stdout.write(text);
+        },
+        stderr: (data: Buffer) => {
+          const text = data.toString();
+          output += text;
+          process.stderr.write(text);
+        },
+      },
+    });
   } catch {
+  } finally {
+    try {
+      await exec.exec('sccache', ['--stop-server'], { ignoreReturnCode: true });
+    } catch {
+    }
   }
+
+  return summarizeSccacheStats(output);
 }
 
 async function startPortableCacheProxy(workspace: string, port: number, tag: string, readOnly = false): Promise<{ pid: number; port: number }> {
@@ -1019,6 +1061,59 @@ async function startPortableCacheProxy(workspace: string, port: number, tag: str
   });
   await waitForProxy(proxy.port, undefined, proxy.pid);
   return proxy;
+}
+
+function parseSccacheIntegerStat(output: string, label: string): number | null {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = output.match(new RegExp(`^${escaped}\\s+(\\d+)$`, 'm'));
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function parseSccacheTextStat(output: string, label: string): string | null {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = output.match(new RegExp(`^${escaped}\\s+(.+)$`, 'm'));
+  return match ? match[1].trim() : null;
+}
+
+function summarizeSccacheStats(output: string): SccacheStatsSummary | null {
+  if (!output.trim()) {
+    return null;
+  }
+
+  const compileRequests = parseSccacheIntegerStat(output, 'Compile requests');
+  const cacheHits = parseSccacheIntegerStat(output, 'Cache hits');
+  const cacheMisses = parseSccacheIntegerStat(output, 'Cache misses');
+
+  if (compileRequests === null || cacheHits === null || cacheMisses === null) {
+    return null;
+  }
+
+  return {
+    compileRequests,
+    cacheHits,
+    cacheMisses,
+    rustHitRate: parseSccacheTextStat(output, 'Cache hits rate (Rust)'),
+  };
+}
+
+async function checkRustTagHit(
+  workspace: string,
+  tag: string,
+  { noPlatform = false, noGit = false }: { noPlatform?: boolean; noGit?: boolean } = {},
+): Promise<boolean> {
+  const args = ['check', workspace, tag];
+  if (noPlatform) {
+    args.push('--no-platform');
+  }
+  if (noGit) {
+    args.push('--no-git');
+  }
+
+  const exitCode = await execBoringCache(args, {
+    ignoreReturnCode: true,
+    silent: true,
+  });
+  return exitCode === 0;
 }
 
 function configureTurboRemoteEnv(apiUrl: string, token: string, team?: string): void {
@@ -1186,8 +1281,8 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     });
     await waitForProxy(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
-    core.setOutput('proxy-port', String(proxy.port));
-    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+    saveProxyModeState(proxy.port);
+    setProxyOutputs(proxy.port);
 
     const registryCache = buildRegistryCacheSpec(proxy.port, registryTarget, cacheMode, refHost);
     setRegistryCacheOutputs(registryCache);
@@ -1367,8 +1462,8 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     });
     await waitForProxy(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
-    core.setOutput('proxy-port', String(proxy.port));
-    core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+    saveProxyModeState(proxy.port);
+    setProxyOutputs(proxy.port);
 
     const registryCache = buildRegistryCacheSpec(proxy.port, registryTarget, cacheMode, refHost);
     setRegistryCacheOutputs(registryCache);
@@ -1488,11 +1583,11 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   });
   await waitForProxy(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
+  saveProxyModeState(proxy.port);
 
   writeBazelrc(proxy.port, proxy.readOnly ?? inputs.readOnly);
   core.setOutput('cache-tag', cacheTag);
-  core.setOutput('proxy-port', String(proxy.port));
-  core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+  setProxyOutputs(proxy.port);
   core.setOutput('workspace', plan.workspace);
   return {
     cacheTag,
@@ -1525,6 +1620,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   });
   await waitForProxy(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
+  saveProxyModeState(proxy.port);
 
   writeGradleInitScript(gradleHome, proxy.port, proxy.readOnly ?? inputs.readOnly);
   if (enableBuildCache) {
@@ -1532,8 +1628,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   }
 
   core.setOutput('cache-tag', cacheTag);
-  core.setOutput('proxy-port', String(proxy.port));
-  core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+  setProxyOutputs(proxy.port);
   core.setOutput('workspace', plan.workspace);
   return {
     cacheTag,
@@ -1573,13 +1668,13 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   });
   await waitForProxy(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
+  saveProxyModeState(proxy.port);
 
   ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);
   writeMavenBuildCacheConfig(buildCacheConfigPath, proxy.port, proxy.readOnly ?? inputs.readOnly, cacheId);
   ensureDir(localRepo);
   core.setOutput('cache-tag', cacheTag);
-  core.setOutput('proxy-port', String(proxy.port));
-  core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+  setProxyOutputs(proxy.port);
   core.setOutput('maven-extensions-path', extensionsPath);
   core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
   core.setOutput('maven-local-repo', localRepo);
@@ -1626,10 +1721,10 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
   }
 
   saveModeState('proxy-pid', String(proxy.pid));
+  saveProxyModeState(proxy.port);
   configureTurboRemoteEnv(`http://127.0.0.1:${proxy.port}`, turboToken, turboTeam);
   core.setOutput('cache-tag', cacheTag);
-  core.setOutput('proxy-port', String(proxy.port));
-  core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+  setProxyOutputs(proxy.port);
   core.setOutput('workspace', plan.workspace);
   return {
     cacheTag,
@@ -1728,14 +1823,15 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
     await installSccache(sccacheVersion);
 
     if (sccacheMode === 'proxy') {
+      sccacheRestored = await checkRustTagHit(plan.workspace, sccacheTag, { noPlatform: true, noGit: true });
       const proxy = await startPortableCacheProxy(plan.workspace, await findAvailablePort(), sccacheTag, inputs.readOnly);
       configureSccacheProxyEnv(proxy.port);
       await startSccacheServer();
       saveModeState('proxy-pid', String(proxy.pid));
-      saveModeState('proxy-port', String(proxy.port));
+      saveProxyModeState(proxy.port);
       saveModeState('sccache-tag', sccacheTag);
-      core.setOutput('proxy-port', String(proxy.port));
-      core.setOutput('proxy-log-path', registryProxyLogPath(proxy.port));
+      saveModeState('sccache-preflight-hit', String(sccacheRestored));
+      setProxyOutputs(proxy.port);
     } else {
       configureSccacheEnv(sccacheCacheSize);
       const sccacheDir = getSccacheDir();
@@ -1897,8 +1993,33 @@ async function runRustSave(): Promise<void> {
 
   if (useSccache) {
     if (sccacheMode === 'proxy') {
-      await stopSccacheServer();
+      const sccacheTag = getModeState('sccache-tag');
+      const preflightHit = getModeState('sccache-preflight-hit') === 'true';
+      const sccacheStats = await stopSccacheServer();
       await stopProxyFromState();
+      if (sccacheTag && sccacheStats && sccacheStats.compileRequests > 0) {
+        const postShutdownHit = await checkRustTagHit(workspace, sccacheTag, { noPlatform: true, noGit: true });
+        const rustHitRate = sccacheStats.rustHitRate || 'unknown';
+        core.info(
+          `sccache proxy stats for ${sccacheTag}: compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`,
+        );
+
+        if (sccacheStats.cacheHits === 0) {
+          if (preflightHit) {
+            core.warning(
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for existing tag '${sccacheTag}'. Check emitted tag semantics and BORINGCACHE_SAVE_TOKEN/BORINGCACHE_RESTORE_TOKEN alignment.`,
+            );
+          } else if (!postShutdownHit) {
+            core.warning(
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was still missing after shutdown. Check BORINGCACHE_SAVE_TOKEN scope and proxy publish logs.`,
+            );
+          } else {
+            core.notice(
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests, but '${sccacheTag}' published successfully. This looks like a cold fill.`,
+            );
+          }
+        }
+      }
     } else {
       const sccacheTag = getModeState('sccache-tag');
       if (sccacheTag) {

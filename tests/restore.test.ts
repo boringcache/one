@@ -4,10 +4,28 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { run as restoreRun } from '../lib/restore';
+import { resolveVerificationTags, type TagVerificationSpec } from '../lib/utils';
 import { actionCoreMocks, mockGetBooleanInput, mockGetInput } from './setup';
 
 describe('restore action', () => {
   it('restores archive entries and records state', async () => {
+    const resolvedTags = resolveVerificationTags([
+      {
+        tag: 'deps',
+        noPlatform: true,
+        noGit: false,
+        pathHint: 'node_modules',
+        saveExpected: true,
+      },
+      {
+        tag: 'build',
+        noPlatform: true,
+        noGit: false,
+        pathHint: 'dist',
+        saveExpected: true,
+      },
+    ] satisfies TagVerificationSpec[], process.cwd());
+
     mockGetInput({
       workspace: 'my-org/my-project',
       entries: 'deps:node_modules,build:dist',
@@ -27,11 +45,11 @@ describe('restore action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'deps');
     expect(core.setOutput).toHaveBeenCalledWith('runtime-cache-tag', '');
     expect(core.setOutput).toHaveBeenCalledWith('resolved-entries', 'deps:node_modules,build:dist');
-    expect(core.setOutput).toHaveBeenCalledWith('resolved-tags', 'deps,build');
+    expect(core.setOutput).toHaveBeenCalledWith('resolved-tags', resolvedTags.join(','));
     expect(core.saveState).toHaveBeenCalledWith('working-directory', process.cwd());
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-entries', 'deps:node_modules,build:dist');
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-workspace', 'my-org/my-project');
-    expect(core.saveState).toHaveBeenCalledWith('resolved-tags', 'deps,build');
+    expect(core.saveState).toHaveBeenCalledWith('resolved-tags', resolvedTags.join(','));
   });
 
   it('falls back through restore keys in actions/cache compatibility mode', async () => {
@@ -117,6 +135,24 @@ describe('restore action', () => {
     expect(core.notice).toHaveBeenCalledWith('No cache entries resolved; boringcache/one will install the CLI only.');
   });
 
+  it('emits grouped diagnostics when requested', async () => {
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+      diagnostics: 'summary',
+    });
+    mockGetBooleanInput({ 'no-platform': true });
+
+    await restoreRun();
+
+    expect(core.setOutput).toHaveBeenCalledWith('diagnostics-level', 'summary');
+    expect(core.group).toHaveBeenCalledWith('BoringCache Diagnostics', expect.any(Function));
+    expect(core.info).toHaveBeenCalledWith('workspace: my-org/my-project');
+    expect((core.info as jest.Mock).mock.calls.some(
+      ([line]) => typeof line === 'string' && line.startsWith('token-capabilities: restore='),
+    )).toBe(true);
+  });
+
   it('does not persist a mise runtime cache entry when matching tools come from PATH', async () => {
     actionCoreMocks.hasToolVersionOnPath.mockResolvedValueOnce(true);
 
@@ -146,6 +182,14 @@ describe('restore action', () => {
   });
 
   it('verifies exact tags immediately when no save-capable token is present', async () => {
+    const exactVerifyTag = resolveVerificationTags([{
+      tag: 'deps',
+      noPlatform: true,
+      noGit: false,
+      pathHint: 'node_modules',
+      saveExpected: true,
+    }], process.cwd())[0];
+
     delete process.env.BORINGCACHE_SAVE_TOKEN;
     delete process.env.BORINGCACHE_API_TOKEN;
     process.env.BORINGCACHE_RESTORE_TOKEN = 'test-restore-token';
@@ -161,7 +205,7 @@ describe('restore action', () => {
 
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
-      ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
+      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--no-git', '--fail-on-miss'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
   });

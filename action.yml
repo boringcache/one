@@ -61,6 +61,14 @@ inputs:
     description: 'Require signed cache hits during verification.'
     default: 'false'
     required: false
+  diagnostics:
+    description: 'Action-level diagnostics: auto follows ACTIONS_STEP_DEBUG, off disables grouped diagnostics, summary emits grouped state, and verbose also tails proxy logs.'
+    default: 'auto'
+    required: false
+  diagnostics-log-lines:
+    description: 'When diagnostics includes logs, tail up to this many proxy log lines.'
+    default: '40'
+    required: false
   proxy-port:
     description: 'Proxy-backed modes: explicit proxy port.'
     required: false
@@ -277,8 +285,11 @@ inputs:
     description: 'Preferred port for a local Turbo proxy.'
     default: '4227'
     required: false
+  cache-profiles:
+    description: 'Optional repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). These resolve through the CLI source of truth before any extra raw entries are appended.'
+    required: false
   entries:
-    description: 'Optional extra archive cache entries in tag:path format (comma-separated or newline-separated). These append to any mode, preset, or mise-derived defaults.'
+    description: 'Optional extra archive entries. Accepts repo/built-in entry ids such as bundler or node_modules, or raw tag:path pairs (comma-separated or newline-separated). Semantic entries resolve through the CLI source of truth.'
     required: false
   path:
     description: 'A list of files, directories, and wildcard patterns to cache and restore (actions/cache compatible)'
@@ -327,6 +338,8 @@ outputs:
     description: 'A boolean value indicating an archive or mode-specific cache hit was found'
   runtime-cache-hit:
     description: 'A boolean value indicating the mise runtime cache was restored'
+  diagnostics-level:
+    description: 'Effective diagnostics level used by the action: off, summary, or verbose'
   resolved-mode:
     description: 'The effective cache mode used by the action'
   resolved-tools:

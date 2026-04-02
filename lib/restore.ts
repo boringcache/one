@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import { hasSaveToken } from '@boringcache/action-core';
+import { hasRestoreToken, hasSaveToken, isUsingLegacyApiTokenOnly } from '@boringcache/action-core';
 import {
   applyPresetCacheEnv,
   applyMiseSetup,
@@ -10,10 +10,13 @@ import {
   ensureBoringCache,
   execBoringCache,
   getInputs,
+  loadDiagnosticsConfig,
   getPlatformSuffix,
   getRestoreKeyCandidates,
   parseEntries,
+  readLogTail,
   resolveVerificationTags,
+  runDiagnosticsGroup,
   serializeTools,
   verifyResolvedTags,
 } from './utils';
@@ -22,6 +25,48 @@ import { runModeRestore } from './mode-handlers';
 interface RestoreResult {
   hit: boolean;
   saveEntries: string;
+}
+
+async function emitRestoreDiagnostics(
+  plan: Awaited<ReturnType<typeof buildPlan>>,
+  inputs: ReturnType<typeof getInputs>,
+  resolvedTags: string[],
+  overallHit: boolean,
+  runtimeHit: boolean,
+): Promise<void> {
+  const diagnostics = loadDiagnosticsConfig(inputs);
+
+  await runDiagnosticsGroup(diagnostics, 'BoringCache Diagnostics', async () => {
+    core.info(`workspace: ${plan.workspace}`);
+    core.info(`setup: ${plan.setup}`);
+    core.info(`mode: ${plan.mode}`);
+    core.info(`preset: ${plan.preset}`);
+    core.info(`working-directory: ${plan.workingDirectory}`);
+    core.info(`cache-tag: ${plan.cacheTagPrefix || '(none)'}`);
+    core.info(`runtime-cache-tag: ${plan.runtimeTag || '(none)'}`);
+    core.info(`resolved-entries: ${plan.archiveEntries || '(none)'}`);
+    core.info(`resolved-tags: ${resolvedTags.join(',') || '(none)'}`);
+    core.info(`cache-hit: ${String(overallHit)}`);
+    core.info(`runtime-cache-hit: ${String(runtimeHit)}`);
+    core.info(`verify-mode: ${inputs.verify}`);
+    core.info(
+      `token-capabilities: restore=${String(hasRestoreToken())} save=${String(hasSaveToken())} legacy-api-only=${String(isUsingLegacyApiTokenOnly())}`,
+    );
+
+    if (diagnostics.includeLogs) {
+      const proxyLogPath = core.getState('proxy-log-path');
+      if (proxyLogPath) {
+        const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
+        core.info(`proxy-log-path: ${proxyLogPath}`);
+        if (logTail.length > 0) {
+          core.info(`proxy-log-tail (${logTail.length} lines):`);
+          for (const line of logTail) {
+            core.info(line);
+          }
+        }
+      }
+    }
+  });
 }
 
 async function restoreEntries(
@@ -98,12 +143,13 @@ export async function run(): Promise<void> {
   const originalCwd = process.cwd();
   try {
     const inputs = getInputs();
-    const plan = await buildPlan(inputs);
     const cliPlatform = inputs.cliPlatform || undefined;
 
     if (inputs.cliVersion.toLowerCase() !== 'skip') {
       await ensureBoringCache({ version: inputs.cliVersion, platform: cliPlatform });
     }
+
+    const plan = await buildPlan(inputs);
 
     process.chdir(plan.workingDirectory);
     await applyPresetCacheEnv(plan);
@@ -144,9 +190,11 @@ export async function run(): Promise<void> {
       : resolvedTags;
 
     const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
+    const diagnostics = loadDiagnosticsConfig(inputs);
 
     core.setOutput('cache-hit', String(overallHit));
     core.setOutput('runtime-cache-hit', String(runtimeRestore.hit));
+    core.setOutput('diagnostics-level', diagnostics.level);
     core.setOutput('resolved-mode', plan.mode);
     core.setOutput('resolved-tools', serializeTools(plan.runtimeTools));
     core.setOutput('workspace', plan.workspace);
@@ -167,6 +215,8 @@ export async function run(): Promise<void> {
     core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));
     core.saveState('force', String(inputs.force));
     core.saveState('verbose', String(inputs.verbose));
+    core.saveState('diagnostics-level', diagnostics.level);
+    core.saveState('diagnostics-log-lines', String(diagnostics.logLines));
     core.saveState('resolved-tags', resolvedTags.join(','));
     core.saveState('verify-save-tags', deferredVerifyTags.join(','));
     core.saveState('verify-mode', inputs.verify);
@@ -181,6 +231,8 @@ export async function run(): Promise<void> {
         verbose: inputs.verbose,
       });
     }
+
+    await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeRestore.hit);
   } catch (error) {
     core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {

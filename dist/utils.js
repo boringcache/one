@@ -35,6 +35,12 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
+exports.normalizeDiagnosticsMode = normalizeDiagnosticsMode;
+exports.normalizeDiagnosticsLogLines = normalizeDiagnosticsLogLines;
+exports.resolveDiagnosticsConfig = resolveDiagnosticsConfig;
+exports.loadDiagnosticsConfig = loadDiagnosticsConfig;
+exports.runDiagnosticsGroup = runDiagnosticsGroup;
+exports.readLogTail = readLogTail;
 exports.normalizeVerifyMode = normalizeVerifyMode;
 exports.normalizeVerifyTimeoutSeconds = normalizeVerifyTimeoutSeconds;
 exports.normalizeSetup = normalizeSetup;
@@ -121,9 +127,12 @@ function getInputs() {
         verify: normalizeVerifyMode(core.getInput('verify')),
         verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
         verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
+        diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
+        diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
+        cacheProfiles: core.getInput('cache-profiles'),
         entries: core.getInput('entries'),
         path: core.getInput('path'),
         key: core.getInput('key'),
@@ -136,6 +145,79 @@ function getInputs() {
         verbose: core.getBooleanInput('verbose'),
         exclude: core.getInput('exclude'),
     };
+}
+function normalizeDiagnosticsMode(value) {
+    switch ((value || 'auto').trim().toLowerCase()) {
+        case 'auto':
+        case 'off':
+        case 'summary':
+        case 'verbose':
+            return (value || 'auto').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported diagnostics mode "${value}". Expected auto, off, summary, or verbose.`);
+    }
+}
+function normalizeDiagnosticsLogLines(value) {
+    if (!value || !value.trim()) {
+        return 40;
+    }
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        throw new Error(`Unsupported diagnostics-log-lines "${value}". Expected a positive integer.`);
+    }
+    return parsed;
+}
+function resolveDiagnosticsConfig(mode, logLines) {
+    let level;
+    switch (mode) {
+        case 'auto':
+            level = core.isDebug() ? 'verbose' : 'off';
+            break;
+        case 'off':
+        case 'summary':
+        case 'verbose':
+            level = mode;
+            break;
+    }
+    return {
+        level,
+        enabled: level !== 'off',
+        includeLogs: level === 'verbose',
+        logLines,
+    };
+}
+function loadDiagnosticsConfig(inputs) {
+    const savedLevel = (core.getState('diagnostics-level') || '').trim().toLowerCase();
+    if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
+        const savedLogLines = normalizeDiagnosticsLogLines((core.getState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
+        return {
+            level: savedLevel,
+            enabled: savedLevel !== 'off',
+            includeLogs: savedLevel === 'verbose',
+            logLines: savedLogLines,
+        };
+    }
+    return resolveDiagnosticsConfig(inputs.diagnostics, inputs.diagnosticsLogLines);
+}
+async function runDiagnosticsGroup(diagnostics, title, fn) {
+    if (!diagnostics.enabled) {
+        return;
+    }
+    await core.group(title, fn);
+}
+function readLogTail(filePath, maxLines) {
+    if (!filePath || maxLines < 1) {
+        return [];
+    }
+    try {
+        return fs.readFileSync(filePath, 'utf8')
+            .split(/\r?\n/)
+            .filter((line) => line.trim().length > 0)
+            .slice(-maxLines);
+    }
+    catch {
+        return [];
+    }
 }
 function normalizeVerifyMode(value) {
     switch ((value || 'none').trim().toLowerCase()) {
@@ -206,6 +288,10 @@ function expandUserPath(value) {
         return path.join(os.homedir(), value.slice(2));
     }
     return value;
+}
+function resolveWorkingPath(value, workingDirectory) {
+    const expanded = expandUserPath(value);
+    return path.isAbsolute(expanded) ? expanded : path.resolve(workingDirectory, expanded);
 }
 function normalizeRef(value) {
     let normalized = '';
@@ -288,7 +374,7 @@ function envDefaultBranch() {
     return value ? normalizeRef(value) : undefined;
 }
 function resolveGitStartPath(pathHint, workingDirectory) {
-    const candidate = pathHint ? expandUserPath(pathHint) : workingDirectory;
+    const candidate = pathHint ? resolveWorkingPath(pathHint, workingDirectory) : workingDirectory;
     if (fs.existsSync(candidate)) {
         return fs.statSync(candidate).isDirectory() ? candidate : path.dirname(candidate);
     }
@@ -1094,6 +1180,105 @@ function normalizeEntriesInput(entries) {
         .filter(Boolean)
         .join(',');
 }
+function splitEntriesInput(entries) {
+    return entries
+        .split(/[\r\n,]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+const PROJECT_CONFIG_FILE_NAMES = ['.boringcache.toml', 'boringcache.toml'];
+function findNearestRepoConfigPath(workingDirectory) {
+    let current = path.resolve(workingDirectory);
+    while (true) {
+        for (const fileName of PROJECT_CONFIG_FILE_NAMES) {
+            const candidate = path.join(current, fileName);
+            if (fs.existsSync(candidate)) {
+                return candidate;
+            }
+        }
+        const parent = path.dirname(current);
+        if (parent === current) {
+            return null;
+        }
+        current = parent;
+    }
+}
+async function runDryRunPlan(workingDirectory, workspaceInput, entryIds, profileNames, fallbackWorkspace) {
+    const executePlan = async (candidateWorkspace) => {
+        const args = ['run'];
+        const trimmedWorkspace = candidateWorkspace.trim();
+        if (trimmedWorkspace) {
+            args.push(trimmedWorkspace);
+        }
+        for (const profileName of profileNames) {
+            args.push('--profile', profileName);
+        }
+        for (const entryId of entryIds) {
+            args.push('--entry', entryId);
+        }
+        args.push('--dry-run', '--json');
+        let stdout = '';
+        let stderr = '';
+        const exitCode = await exec.exec('boringcache', args, {
+            cwd: workingDirectory,
+            ignoreReturnCode: true,
+            silent: true,
+            listeners: {
+                stdout: (data) => {
+                    stdout += data.toString();
+                },
+                stderr: (data) => {
+                    stderr += data.toString();
+                },
+            },
+        });
+        if (exitCode !== 0) {
+            throw new Error(stderr.trim() || stdout.trim() || `boringcache run --dry-run --json exited with code ${exitCode}`);
+        }
+        try {
+            return JSON.parse(stdout);
+        }
+        catch (error) {
+            throw new Error(`Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    };
+    try {
+        return await executePlan(workspaceInput);
+    }
+    catch (error) {
+        if (!workspaceInput.trim()
+            && fallbackWorkspace
+            && error instanceof Error
+            && /No workspace specified/i.test(error.message)) {
+            return executePlan(fallbackWorkspace);
+        }
+        throw error;
+    }
+}
+function isUnknownEntryResolutionError(error) {
+    return error instanceof Error && /Unknown cache entry/i.test(error.message);
+}
+async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawTag, fallbackWorkspace) {
+    try {
+        return await runDryRunPlan(workingDirectory, workspaceInput, [rawTag], [], fallbackWorkspace);
+    }
+    catch (error) {
+        if (isUnknownEntryResolutionError(error)) {
+            return null;
+        }
+        throw error;
+    }
+}
+function scopeLiteralEntry(entry, cacheTag, tools, versionScope) {
+    const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
+    const scopedTag = tools.length > 0
+        ? scopeTagToRuntimeTools(prefixedTag, tools, versionScope)
+        : prefixedTag;
+    const pathSpec = entry.restorePath === entry.savePath
+        ? entry.restorePath
+        : `${entry.restorePath}=>${entry.savePath}`;
+    return `${scopedTag}:${pathSpec}`;
+}
 function normalizeCacheFormatPathSegment(segment) {
     if (segment === '~') {
         return '';
@@ -1291,43 +1476,107 @@ async function detectNodeDefaultArchiveEntries(workingDirectory) {
     }
 }
 async function buildArchiveEntries(inputs, runtimeTools) {
-    let archiveEntries = '';
+    let archiveEntries = [];
     let usesCacheFormat = false;
+    const envVars = {};
+    let cacheTagPrefix;
+    let resolvedWorkspace;
     let sourceEntries = inputs.entries;
-    if (sourceEntries) {
-        archiveEntries = inputs.setup === 'mise'
-            ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
-            : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
+    const cacheProfiles = splitEntriesInput(inputs.cacheProfiles);
+    const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
+    const fallbackWorkspace = resolveWorkspace(inputs.workspace);
+    const cliWorkspaceInput = inputs.workspace.trim() || (!repoConfigPath ? fallbackWorkspace : '');
+    const mergeCliPlan = (plan) => {
+        archiveEntries.push(...plan.tag_path_pairs);
+        if (!cacheTagPrefix) {
+            const firstPair = plan.tag_path_pairs[0];
+            const firstEntry = firstPair ? (0, action_core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0] : undefined;
+            if (firstEntry) {
+                cacheTagPrefix = firstEntry.tag;
+            }
+        }
+        Object.assign(envVars, plan.env_vars);
+        if (!resolvedWorkspace && plan.workspace) {
+            resolvedWorkspace = plan.workspace;
+        }
+    };
+    if (cacheProfiles.length > 0 || sourceEntries.trim()) {
+        const semanticEntries = [];
+        const rawEntries = [];
+        for (const entry of splitEntriesInput(sourceEntries)) {
+            if (entry.includes(':')) {
+                rawEntries.push(entry);
+            }
+            else {
+                semanticEntries.push(entry);
+            }
+        }
+        if (cacheProfiles.length > 0 || semanticEntries.length > 0) {
+            mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, cliWorkspaceInput, semanticEntries, cacheProfiles, fallbackWorkspace));
+        }
+        for (const entryToken of rawEntries) {
+            const parsedEntry = (0, action_core_1.parseEntries)(entryToken, 'restore', { resolvePaths: false })[0];
+            if (!parsedEntry) {
+                continue;
+            }
+            if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
+                const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, fallbackWorkspace);
+                if (resolved && resolved.tag_path_pairs.length > 0) {
+                    mergeCliPlan(resolved);
+                    continue;
+                }
+            }
+            if (!cacheTagPrefix) {
+                cacheTagPrefix = prefixArchiveTag(parsedEntry.tag, inputs.cacheTag);
+            }
+            archiveEntries.push(scopeLiteralEntry(parsedEntry, inputs.cacheTag, inputs.setup === 'mise' ? runtimeTools : [], inputs.toolVersionScope));
+        }
     }
     else if (inputs.path || inputs.key) {
         if (!inputs.path || !inputs.key) {
             throw new Error('actions/cache compatibility mode requires both path and key');
         }
-        archiveEntries = convertCacheFormatToEntries({
-            path: inputs.path,
-            key: inputs.key,
-            noPlatform: inputs.noPlatform,
-            enableCrossOsArchive: inputs.enableCrossOsArchive,
-            workingDirectory: inputs.workingDirectory,
-        }, 'restore');
+        archiveEntries = [convertCacheFormatToEntries({
+                path: inputs.path,
+                key: inputs.key,
+                noPlatform: inputs.noPlatform,
+                enableCrossOsArchive: inputs.enableCrossOsArchive,
+                workingDirectory: inputs.workingDirectory,
+            }, 'restore')];
         usesCacheFormat = true;
+        cacheTagPrefix = inputs.key.trim() || undefined;
     }
     else {
         sourceEntries = await detectDefaultArchiveEntries(inputs);
-        if (sourceEntries) {
-            archiveEntries = inputs.setup === 'mise'
-                ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
-                : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
+        for (const entryToken of splitEntriesInput(sourceEntries)) {
+            const parsedEntry = (0, action_core_1.parseEntries)(entryToken, 'restore', { resolvePaths: false })[0];
+            if (!parsedEntry) {
+                continue;
+            }
+            if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
+                const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, fallbackWorkspace);
+                if (resolved && resolved.tag_path_pairs.length > 0) {
+                    mergeCliPlan(resolved);
+                    continue;
+                }
+            }
+            if (!cacheTagPrefix) {
+                cacheTagPrefix = prefixArchiveTag(parsedEntry.tag, inputs.cacheTag);
+            }
+            archiveEntries.push(scopeLiteralEntry(parsedEntry, inputs.cacheTag, inputs.setup === 'mise' ? runtimeTools : [], inputs.toolVersionScope));
         }
     }
     return {
-        entries: archiveEntries,
+        entries: archiveEntries.join(','),
         usesCacheFormat,
+        envVars,
+        cacheTagPrefix,
+        workspace: resolvedWorkspace,
     };
 }
 function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries) {
-    if (inputs.entries && (inputs.path || inputs.key)) {
-        core.warning('Both explicit entries and actions/cache compatibility inputs were provided. Using entries.');
+    if ((inputs.entries || inputs.cacheProfiles.trim()) && (inputs.path || inputs.key)) {
+        core.warning('Both explicit entries/cache-profiles and actions/cache compatibility inputs were provided. Using entries/cache-profiles.');
     }
     if ((inputs.path && !inputs.key) || (!inputs.path && inputs.key)) {
         throw new Error('actions/cache compatibility mode requires both path and key');
@@ -1351,7 +1600,6 @@ function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archive
     }
 }
 async function buildPlan(inputs) {
-    const workspace = resolveWorkspace(inputs.workspace);
     const modeSpec = (0, modes_1.resolveModeSpec)(inputs.mode);
     (0, modes_1.assertImplementedMode)(modeSpec);
     const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
@@ -1367,14 +1615,17 @@ async function buildPlan(inputs) {
             source: 'mode',
         });
     }
-    const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools);
+    const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
+    const workspace = !inputs.workspace.trim() && archiveEntries.workspace
+        ? archiveEntries.workspace
+        : resolveWorkspace(inputs.workspace);
+    const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools, archiveEntries.cacheTagPrefix);
     const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
         ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
         : null;
     const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
         ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
         : null;
-    const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
     validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
     return {
         workspace,
@@ -1387,19 +1638,17 @@ async function buildPlan(inputs) {
         runtimeTools,
         runtimeTag,
         runtimeEntry,
+        envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
         usesCacheFormat: archiveEntries.usesCacheFormat,
     };
 }
-function getCacheTagPrefix(inputs, runtimeTools) {
+function getCacheTagPrefix(inputs, runtimeTools, resolvedArchivePrefix) {
     if (inputs.cacheTag) {
         return inputs.cacheTag;
     }
-    if (inputs.entries) {
-        const firstEntry = (0, action_core_1.parseEntries)(normalizeEntriesInput(inputs.entries), 'restore', { resolvePaths: false })[0];
-        if (firstEntry) {
-            return firstEntry.tag;
-        }
+    if (resolvedArchivePrefix === null || resolvedArchivePrefix === void 0 ? void 0 : resolvedArchivePrefix.trim()) {
+        return resolvedArchivePrefix.trim();
     }
     if (inputs.key) {
         return inputs.key;
@@ -1542,6 +1791,9 @@ async function applyPresetCacheEnv(plan) {
             break;
         default:
             break;
+    }
+    for (const [key, value] of Object.entries(plan.envVars)) {
+        core.exportVariable(key, value);
     }
 }
 function serializeTools(runtimeTools) {

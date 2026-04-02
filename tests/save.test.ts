@@ -180,4 +180,85 @@ describe('save action', () => {
       expect.objectContaining({ ignoreReturnCode: true }),
     );
   });
+
+  it('warns when proxy sccache sees zero hits for an existing tag', async () => {
+    const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      if (command === 'sccache' && args?.[0] === '--show-stats') {
+        options?.listeners?.stdout?.(Buffer.from(
+          'Compile requests                   1352\n' +
+          'Cache hits                            0\n' +
+          'Cache misses                       1125\n' +
+          'Cache hits rate (Rust)             0.00 %\n',
+        ));
+        return 0;
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'rust-sccache',
+      'cli-version': 'skip',
+      'working-directory': '/tmp/project',
+      'generic-cache-workspace': 'my-org/my-project',
+      'mode-workspace': 'my-org/my-project',
+      'mode-cache-cargo': 'false',
+      'mode-cache-cargo-bin': 'false',
+      'mode-cache-target': 'false',
+      'mode-use-sccache': 'true',
+      'mode-sccache-mode': 'proxy',
+      'mode-sccache-tag': 'rust-1.94.1-ci-test-sccache-rust1.94',
+      'mode-sccache-preflight-hit': 'true',
+      'mode-proxy-pid': '4321',
+    });
+
+    await saveRun();
+
+    expect(core.warning).toHaveBeenCalledWith(
+      "sccache proxy saw 0 cache hits across 1352 compile requests for existing tag 'rust-1.94.1-ci-test-sccache-rust1.94'. Check emitted tag semantics and BORINGCACHE_SAVE_TOKEN/BORINGCACHE_RESTORE_TOKEN alignment.",
+    );
+    chdirSpy.mockRestore();
+  });
+
+  it('tails proxy logs in grouped diagnostics when enabled', async () => {
+    const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-save-log-'));
+    const logPath = path.join(logDir, 'proxy.log');
+    fs.writeFileSync(logPath, 'first line\nsecond line\nthird line\n');
+
+    try {
+      mockGetInput({});
+      mockGetBooleanInput({});
+      mockGetState({
+        'resolved-mode': 'archive',
+        'working-directory': '/tmp/project',
+        'generic-cache-workspace': 'my-org/my-project',
+        'generic-cache-entries': '',
+        'verify-mode': 'none',
+        'verify-timeout-seconds': '60',
+        'verify-require-server-signature': 'false',
+        'verify-save-tags': '',
+        'diagnostics-level': 'verbose',
+        'diagnostics-log-lines': '2',
+        'proxy-log-path': logPath,
+      });
+
+      await saveRun();
+
+      expect(core.group).toHaveBeenCalledWith('BoringCache Post-Step Diagnostics', expect.any(Function));
+      expect(core.info).toHaveBeenCalledWith(`proxy-log-path: ${logPath}`);
+      expect(core.info).toHaveBeenCalledWith('proxy-log-tail (2 lines):');
+      expect(core.info).toHaveBeenCalledWith('second line');
+      expect(core.info).toHaveBeenCalledWith('third line');
+    } finally {
+      chdirSpy.mockRestore();
+      fs.rmSync(logDir, { recursive: true, force: true });
+    }
+  });
 });

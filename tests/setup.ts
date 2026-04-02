@@ -22,6 +22,8 @@ jest.mock('@actions/core', () => ({
   getInput: jest.fn(),
   getBooleanInput: jest.fn(),
   getState: jest.fn(),
+  isDebug: jest.fn().mockReturnValue(false),
+  group: jest.fn(async (_title: string, fn: () => Promise<void>) => fn()),
   setOutput: jest.fn(),
   setFailed: jest.fn(),
   setSecret: jest.fn(),
@@ -91,6 +93,8 @@ beforeEach(() => {
   delete process.env.GITHUB_REPOSITORY;
   delete process.env.GITHUB_SHA;
   process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
+  (core.isDebug as jest.Mock).mockReturnValue(false);
+  (core.group as jest.Mock).mockImplementation(async (_title: string, fn: () => Promise<void>) => fn());
 
   mockEnsureBoringCache.mockImplementation(async (options: { version: string; token?: string }) => {
     const token = options?.token || process.env.BORINGCACHE_API_TOKEN;

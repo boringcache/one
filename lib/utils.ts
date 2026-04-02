@@ -49,6 +49,8 @@ export {
 export type SetupMode = 'mise' | 'external' | 'none';
 export type Preset = 'none' | 'rails' | 'ruby' | 'node' | 'node-turbo' | 'python-uv' | 'go' | 'php-composer';
 export type VerifyMode = 'none' | 'check' | 'wait';
+export type DiagnosticsInputMode = 'auto' | 'off' | 'summary' | 'verbose';
+export type DiagnosticsLevel = 'off' | 'summary' | 'verbose';
 
 export interface ToolSpec {
   name: string;
@@ -86,9 +88,12 @@ export interface OneInputs {
   verify: VerifyMode;
   verifyTimeoutSeconds: number;
   verifyRequireServerSignature: boolean;
+  diagnostics: DiagnosticsInputMode;
+  diagnosticsLogLines: number;
   proxyPort: string;
   proxyNoGit: boolean;
   proxyNoPlatform: boolean;
+  cacheProfiles: string;
   entries: string;
   path: string;
   key: string;
@@ -117,6 +122,13 @@ export interface VerifyResolvedTagsOptions {
   verbose: boolean;
 }
 
+export interface DiagnosticsConfig {
+  level: DiagnosticsLevel;
+  enabled: boolean;
+  includeLogs: boolean;
+  logLines: number;
+}
+
 export interface ResolvedPlan {
   workspace: string;
   workingDirectory: string;
@@ -128,6 +140,7 @@ export interface ResolvedPlan {
   runtimeTools: ToolSpec[];
   runtimeTag: string | null;
   runtimeEntry: string | null;
+  envVars: Record<string, string>;
   archiveEntries: string;
   usesCacheFormat: boolean;
 }
@@ -177,9 +190,12 @@ export function getInputs(): OneInputs {
     verify: normalizeVerifyMode(core.getInput('verify')),
     verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
     verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
+    diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
+    diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
     proxyPort: core.getInput('proxy-port'),
     proxyNoGit: core.getBooleanInput('proxy-no-git'),
     proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
+    cacheProfiles: core.getInput('cache-profiles'),
     entries: core.getInput('entries'),
     path: core.getInput('path'),
     key: core.getInput('key'),
@@ -192,6 +208,96 @@ export function getInputs(): OneInputs {
     verbose: core.getBooleanInput('verbose'),
     exclude: core.getInput('exclude'),
   };
+}
+
+export function normalizeDiagnosticsMode(value: string): DiagnosticsInputMode {
+  switch ((value || 'auto').trim().toLowerCase()) {
+    case 'auto':
+    case 'off':
+    case 'summary':
+    case 'verbose':
+      return (value || 'auto').trim().toLowerCase() as DiagnosticsInputMode;
+    default:
+      throw new Error(`Unsupported diagnostics mode "${value}". Expected auto, off, summary, or verbose.`);
+  }
+}
+
+export function normalizeDiagnosticsLogLines(value: string): number {
+  if (!value || !value.trim()) {
+    return 40;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(`Unsupported diagnostics-log-lines "${value}". Expected a positive integer.`);
+  }
+  return parsed;
+}
+
+export function resolveDiagnosticsConfig(mode: DiagnosticsInputMode, logLines: number): DiagnosticsConfig {
+  let level: DiagnosticsLevel;
+
+  switch (mode) {
+    case 'auto':
+      level = core.isDebug() ? 'verbose' : 'off';
+      break;
+    case 'off':
+    case 'summary':
+    case 'verbose':
+      level = mode;
+      break;
+  }
+
+  return {
+    level,
+    enabled: level !== 'off',
+    includeLogs: level === 'verbose',
+    logLines,
+  };
+}
+
+export function loadDiagnosticsConfig(inputs: OneInputs): DiagnosticsConfig {
+  const savedLevel = (core.getState('diagnostics-level') || '').trim().toLowerCase();
+  if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
+    const savedLogLines = normalizeDiagnosticsLogLines(
+      (core.getState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines),
+    );
+    return {
+      level: savedLevel as DiagnosticsLevel,
+      enabled: savedLevel !== 'off',
+      includeLogs: savedLevel === 'verbose',
+      logLines: savedLogLines,
+    };
+  }
+
+  return resolveDiagnosticsConfig(inputs.diagnostics, inputs.diagnosticsLogLines);
+}
+
+export async function runDiagnosticsGroup(
+  diagnostics: DiagnosticsConfig,
+  title: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  if (!diagnostics.enabled) {
+    return;
+  }
+
+  await core.group(title, fn);
+}
+
+export function readLogTail(filePath: string, maxLines: number): string[] {
+  if (!filePath || maxLines < 1) {
+    return [];
+  }
+
+  try {
+    return fs.readFileSync(filePath, 'utf8')
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .slice(-maxLines);
+  } catch {
+    return [];
+  }
 }
 
 export function normalizeVerifyMode(value: string): VerifyMode {
@@ -270,6 +376,11 @@ function expandUserPath(value: string): string {
     return path.join(os.homedir(), value.slice(2));
   }
   return value;
+}
+
+function resolveWorkingPath(value: string, workingDirectory: string): string {
+  const expanded = expandUserPath(value);
+  return path.isAbsolute(expanded) ? expanded : path.resolve(workingDirectory, expanded);
 }
 
 function normalizeRef(value: string): string {
@@ -367,7 +478,7 @@ function envDefaultBranch(): string | undefined {
 }
 
 function resolveGitStartPath(pathHint: string | undefined, workingDirectory: string): string {
-  const candidate = pathHint ? expandUserPath(pathHint) : workingDirectory;
+  const candidate = pathHint ? resolveWorkingPath(pathHint, workingDirectory) : workingDirectory;
   if (fs.existsSync(candidate)) {
     return fs.statSync(candidate).isDirectory() ? candidate : path.dirname(candidate);
   }
@@ -1379,6 +1490,149 @@ function normalizeEntriesInput(entries: string): string {
     .join(',');
 }
 
+function splitEntriesInput(entries: string): string[] {
+  return entries
+    .split(/[\r\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+interface CliDryRunPlan {
+  workspace: string;
+  tag_path_pairs: string[];
+  env_vars: Record<string, string>;
+}
+
+interface ResolvedArchiveEntries {
+  entries: string;
+  usesCacheFormat: boolean;
+  envVars: Record<string, string>;
+  cacheTagPrefix?: string;
+  workspace?: string;
+}
+
+const PROJECT_CONFIG_FILE_NAMES = ['.boringcache.toml', 'boringcache.toml'];
+
+function findNearestRepoConfigPath(workingDirectory: string): string | null {
+  let current = path.resolve(workingDirectory);
+
+  while (true) {
+    for (const fileName of PROJECT_CONFIG_FILE_NAMES) {
+      const candidate = path.join(current, fileName);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+async function runDryRunPlan(
+  workingDirectory: string,
+  workspaceInput: string,
+  entryIds: string[],
+  profileNames: string[],
+  fallbackWorkspace?: string,
+): Promise<CliDryRunPlan> {
+  const executePlan = async (candidateWorkspace: string): Promise<CliDryRunPlan> => {
+    const args = ['run'];
+    const trimmedWorkspace = candidateWorkspace.trim();
+    if (trimmedWorkspace) {
+      args.push(trimmedWorkspace);
+    }
+    for (const profileName of profileNames) {
+      args.push('--profile', profileName);
+    }
+    for (const entryId of entryIds) {
+      args.push('--entry', entryId);
+    }
+    args.push('--dry-run', '--json');
+
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await exec.exec('boringcache', args, {
+      cwd: workingDirectory,
+      ignoreReturnCode: true,
+      silent: true,
+      listeners: {
+        stdout: (data: Buffer) => {
+          stdout += data.toString();
+        },
+        stderr: (data: Buffer) => {
+          stderr += data.toString();
+        },
+      },
+    });
+
+    if (exitCode !== 0) {
+      throw new Error(stderr.trim() || stdout.trim() || `boringcache run --dry-run --json exited with code ${exitCode}`);
+    }
+
+    try {
+      return JSON.parse(stdout) as CliDryRunPlan;
+    } catch (error) {
+      throw new Error(
+        `Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
+  try {
+    return await executePlan(workspaceInput);
+  } catch (error) {
+    if (
+      !workspaceInput.trim()
+      && fallbackWorkspace
+      && error instanceof Error
+      && /No workspace specified/i.test(error.message)
+    ) {
+      return executePlan(fallbackWorkspace);
+    }
+    throw error;
+  }
+}
+
+function isUnknownEntryResolutionError(error: unknown): boolean {
+  return error instanceof Error && /Unknown cache entry/i.test(error.message);
+}
+
+async function maybeResolveRawEntryViaCli(
+  workingDirectory: string,
+  workspaceInput: string,
+  rawTag: string,
+  fallbackWorkspace?: string,
+): Promise<CliDryRunPlan | null> {
+  try {
+    return await runDryRunPlan(workingDirectory, workspaceInput, [rawTag], [], fallbackWorkspace);
+  } catch (error) {
+    if (isUnknownEntryResolutionError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function scopeLiteralEntry(
+  entry: { tag: string; restorePath: string; savePath: string },
+  cacheTag: string,
+  tools: ToolSpec[],
+  versionScope: MiseVersionScope,
+): string {
+  const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
+  const scopedTag = tools.length > 0
+    ? scopeTagToRuntimeTools(prefixedTag, tools, versionScope)
+    : prefixedTag;
+  const pathSpec = entry.restorePath === entry.savePath
+    ? entry.restorePath
+    : `${entry.restorePath}=>${entry.savePath}`;
+  return `${scopedTag}:${pathSpec}`;
+}
+
 function normalizeCacheFormatPathSegment(segment: string): string {
   if (segment === '~') {
     return '';
@@ -1632,39 +1886,136 @@ async function detectNodeDefaultArchiveEntries(workingDirectory: string): Promis
 export async function buildArchiveEntries(
   inputs: OneInputs,
   runtimeTools: ToolSpec[],
-): Promise<{ entries: string; usesCacheFormat: boolean }> {
-  let archiveEntries = '';
+): Promise<ResolvedArchiveEntries> {
+  let archiveEntries: string[] = [];
   let usesCacheFormat = false;
+  const envVars: Record<string, string> = {};
+  let cacheTagPrefix: string | undefined;
+  let resolvedWorkspace: string | undefined;
   let sourceEntries = inputs.entries;
+  const cacheProfiles = splitEntriesInput(inputs.cacheProfiles);
+  const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
+  const fallbackWorkspace = resolveWorkspace(inputs.workspace);
+  const cliWorkspaceInput = inputs.workspace.trim() || (!repoConfigPath ? fallbackWorkspace : '');
 
-  if (sourceEntries) {
-    archiveEntries = inputs.setup === 'mise'
-      ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
-      : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
+  const mergeCliPlan = (plan: CliDryRunPlan): void => {
+    archiveEntries.push(...plan.tag_path_pairs);
+    if (!cacheTagPrefix) {
+      const firstPair = plan.tag_path_pairs[0];
+      const firstEntry = firstPair ? parseEntries(firstPair, 'restore', { resolvePaths: false })[0] : undefined;
+      if (firstEntry) {
+        cacheTagPrefix = firstEntry.tag;
+      }
+    }
+    Object.assign(envVars, plan.env_vars);
+    if (!resolvedWorkspace && plan.workspace) {
+      resolvedWorkspace = plan.workspace;
+    }
+  };
+
+  if (cacheProfiles.length > 0 || sourceEntries.trim()) {
+    const semanticEntries: string[] = [];
+    const rawEntries: string[] = [];
+
+    for (const entry of splitEntriesInput(sourceEntries)) {
+      if (entry.includes(':')) {
+        rawEntries.push(entry);
+      } else {
+        semanticEntries.push(entry);
+      }
+    }
+
+    if (cacheProfiles.length > 0 || semanticEntries.length > 0) {
+      mergeCliPlan(await runDryRunPlan(
+        inputs.workingDirectory,
+        cliWorkspaceInput,
+        semanticEntries,
+        cacheProfiles,
+        fallbackWorkspace,
+      ));
+    }
+
+    for (const entryToken of rawEntries) {
+      const parsedEntry = parseEntries(entryToken, 'restore', { resolvePaths: false })[0];
+      if (!parsedEntry) {
+        continue;
+      }
+
+      if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
+        const resolved = await maybeResolveRawEntryViaCli(
+          inputs.workingDirectory,
+          cliWorkspaceInput,
+          parsedEntry.tag,
+          fallbackWorkspace,
+        );
+        if (resolved && resolved.tag_path_pairs.length > 0) {
+          mergeCliPlan(resolved);
+          continue;
+        }
+      }
+
+      if (!cacheTagPrefix) {
+        cacheTagPrefix = prefixArchiveTag(parsedEntry.tag, inputs.cacheTag);
+      }
+      archiveEntries.push(scopeLiteralEntry(
+        parsedEntry,
+        inputs.cacheTag,
+        inputs.setup === 'mise' ? runtimeTools : [],
+        inputs.toolVersionScope,
+      ));
+    }
   } else if (inputs.path || inputs.key) {
     if (!inputs.path || !inputs.key) {
       throw new Error('actions/cache compatibility mode requires both path and key');
     }
-    archiveEntries = convertCacheFormatToEntries({
+    archiveEntries = [convertCacheFormatToEntries({
       path: inputs.path,
       key: inputs.key,
       noPlatform: inputs.noPlatform,
       enableCrossOsArchive: inputs.enableCrossOsArchive,
       workingDirectory: inputs.workingDirectory,
-    }, 'restore');
+    }, 'restore')];
     usesCacheFormat = true;
+    cacheTagPrefix = inputs.key.trim() || undefined;
   } else {
     sourceEntries = await detectDefaultArchiveEntries(inputs);
-    if (sourceEntries) {
-      archiveEntries = inputs.setup === 'mise'
-        ? scopeArchiveEntries(sourceEntries, inputs.cacheTag, runtimeTools, inputs.toolVersionScope)
-        : scopeArchiveEntries(sourceEntries, inputs.cacheTag, [], inputs.toolVersionScope);
+    for (const entryToken of splitEntriesInput(sourceEntries)) {
+      const parsedEntry = parseEntries(entryToken, 'restore', { resolvePaths: false })[0];
+      if (!parsedEntry) {
+        continue;
+      }
+
+      if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
+        const resolved = await maybeResolveRawEntryViaCli(
+          inputs.workingDirectory,
+          cliWorkspaceInput,
+          parsedEntry.tag,
+          fallbackWorkspace,
+        );
+        if (resolved && resolved.tag_path_pairs.length > 0) {
+          mergeCliPlan(resolved);
+          continue;
+        }
+      }
+
+      if (!cacheTagPrefix) {
+        cacheTagPrefix = prefixArchiveTag(parsedEntry.tag, inputs.cacheTag);
+      }
+      archiveEntries.push(scopeLiteralEntry(
+        parsedEntry,
+        inputs.cacheTag,
+        inputs.setup === 'mise' ? runtimeTools : [],
+        inputs.toolVersionScope,
+      ));
     }
   }
 
   return {
-    entries: archiveEntries,
+    entries: archiveEntries.join(','),
     usesCacheFormat,
+    envVars,
+    cacheTagPrefix,
+    workspace: resolvedWorkspace,
   };
 }
 
@@ -1675,8 +2026,8 @@ export function validateOneInputs(
   runtimeEntry: string | null,
   archiveEntries: string,
 ): void {
-  if (inputs.entries && (inputs.path || inputs.key)) {
-    core.warning('Both explicit entries and actions/cache compatibility inputs were provided. Using entries.');
+  if ((inputs.entries || inputs.cacheProfiles.trim()) && (inputs.path || inputs.key)) {
+    core.warning('Both explicit entries/cache-profiles and actions/cache compatibility inputs were provided. Using entries/cache-profiles.');
   }
 
   if ((inputs.path && !inputs.key) || (!inputs.path && inputs.key)) {
@@ -1706,7 +2057,6 @@ export function validateOneInputs(
 }
 
 export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
-  const workspace = resolveWorkspace(inputs.workspace);
   const modeSpec = resolveModeSpec(inputs.mode);
   assertImplementedMode(modeSpec);
   const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
@@ -1733,15 +2083,17 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
       source: 'mode',
     });
   }
-  const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools);
+  const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
+  const workspace = !inputs.workspace.trim() && archiveEntries.workspace
+    ? archiveEntries.workspace
+    : resolveWorkspace(inputs.workspace);
+  const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools, archiveEntries.cacheTagPrefix);
   const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
     ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
     : null;
   const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
     ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
     : null;
-
-  const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
   validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
 
   return {
@@ -1755,21 +2107,23 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     runtimeTools,
     runtimeTag,
     runtimeEntry,
+    envVars: archiveEntries.envVars,
     archiveEntries: archiveEntries.entries,
     usesCacheFormat: archiveEntries.usesCacheFormat,
   };
 }
 
-export function getCacheTagPrefix(inputs: OneInputs, runtimeTools: ToolSpec[]): string {
+export function getCacheTagPrefix(
+  inputs: OneInputs,
+  runtimeTools: ToolSpec[],
+  resolvedArchivePrefix?: string,
+): string {
   if (inputs.cacheTag) {
     return inputs.cacheTag;
   }
 
-  if (inputs.entries) {
-    const firstEntry = parseEntries(normalizeEntriesInput(inputs.entries), 'restore', { resolvePaths: false })[0];
-    if (firstEntry) {
-      return firstEntry.tag;
-    }
+  if (resolvedArchivePrefix?.trim()) {
+    return resolvedArchivePrefix.trim();
   }
 
   if (inputs.key) {
@@ -1909,7 +2263,7 @@ async function configurePhpComposerPresetEnv(workingDirectory: string): Promise<
   core.exportVariable('COMPOSER_VENDOR_DIR', composerVendorDir);
 }
 
-export async function applyPresetCacheEnv(plan: Pick<ResolvedPlan, 'preset' | 'workingDirectory'>): Promise<void> {
+export async function applyPresetCacheEnv(plan: Pick<ResolvedPlan, 'preset' | 'workingDirectory' | 'envVars'>): Promise<void> {
   switch (plan.preset) {
     case 'rails':
       await configureRubyPresetEnv(plan.workingDirectory);
@@ -1933,6 +2287,10 @@ export async function applyPresetCacheEnv(plan: Pick<ResolvedPlan, 'preset' | 'w
       break;
     default:
       break;
+  }
+
+  for (const [key, value] of Object.entries(plan.envVars)) {
+    core.exportVariable(key, value);
   }
 }
 

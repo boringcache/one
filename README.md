@@ -42,6 +42,8 @@ That means:
 - `mise` runtime caching is separate from `entries`
 - a step can be valid as CLI-only, archive-only, proxy-only, or a mix of proxy plus extra archive entries
 
+If the repo already uses the CLI repo config in `.boringcache.toml` or `boringcache.toml`, `one` can resolve the same semantic entry ids and cache profiles through the CLI source of truth instead of inventing new tags locally. Built-in entry ids such as `bundler` or `node_modules` still work without repo config, repo profiles still come from repo config, and raw `tag:path` pairs stay local unless a matching repo entry is present.
+
 ## Quick start
 
 Archive caching:
@@ -63,6 +65,18 @@ When `cache-runtime: true`, `one` caches `mise` installs and rebuilds shims afte
 Generated tags are deterministic and readable. With `cache-tag: web`, `tools: ruby@4.0.1`, and the default `tool-version-scope: patch`, the runtime cache tag becomes `web-mise-ruby-4.0.1` and an archive entry such as `bundler:vendor/bundle` resolves to `web-bundler-ruby-4.0.1`.
 
 If you want the exact same runtime tag across GitHub Actions, local CLI use, and Docker-based workflows, set `runtime-cache-tag` explicitly.
+
+If you want the exact same archive tag semantics too, use semantic entries or repo profiles instead of raw `tag:path` pairs:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    cache-profiles: bundle-install
+    entries: bootsnap
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+```
 
 CLI-only bootstrap:
 
@@ -326,6 +340,23 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 - `verify: check` runs one exact-tag presence check, while `verify: wait` polls until saved tags are visible
 - Save-capable tags verify in the post step after `boringcache/one` finishes saving them
 
+## Diagnostics
+
+Keep normal workflow logs quiet and turn diagnostics on only when needed:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    workspace: my-org/my-project
+    mode: rust-sccache
+    diagnostics: summary
+```
+
+- `diagnostics: auto` is the default. It stays off unless GitHub Actions step debug is enabled through `ACTIONS_STEP_DEBUG`.
+- `diagnostics: summary` emits grouped action state such as resolved mode, tags, entries, and token capability shape.
+- `diagnostics: verbose` also tails proxy logs, capped by `diagnostics-log-lines`.
+- `verbose: true` is separate. It passes `--verbose` down to the CLI and proxy; it does not replace grouped action diagnostics.
+
 ## Core inputs
 
 | Input | Description |
@@ -337,12 +368,14 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 | `working-directory` | Project root used for detection and relative paths. |
 | `cache-tag` | Human-readable cache tag or prefix for generated tags. |
 | `runtime-cache-tag` | Optional exact tag override for the `mise` installs cache. |
+| `cache-profiles` | Repo cache profile names from `.boringcache.toml` or `boringcache.toml`, resolved through the CLI source of truth. |
 | `tools` | Explicit `mise` tools in `tool@version` form. |
 | `uv-version` | Default `uv` version for `preset: python-uv` when the project does not already pin `uv`. |
 | `composer-version` | Default Composer version for `preset: php-composer` when the project does not already pin it. |
 | `tool-version-scope` | `patch`, `minor`, or `major` for generated tool-scoped tags. |
 | `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
 | `verify` / `verify-timeout-seconds` / `verify-require-server-signature` | Optional exact-tag verification controls. |
+| `diagnostics` / `diagnostics-log-lines` | Grouped action diagnostics. `auto` follows `ACTIONS_STEP_DEBUG`; `verbose` also tails proxy logs. |
 | `cli-version` | BoringCache CLI version to install. Set to `skip` to disable automatic CLI setup. |
 | `cli-platform` | Optional CLI asset override such as `alpine-amd64` or `debian-bookworm-amd64` when the runner binary is not the one you need to copy downstream. |
 
@@ -350,7 +383,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 
 | Input | Description |
 |-------|-------------|
-| `entries` | Optional extra archive cache entries as comma-separated or newline-separated `tag:path` pairs. These append to any defaults from presets, `mise`, or the selected mode. |
+| `entries` | Optional extra archive entries. Accepts semantic entry ids such as `bundler` or `node_modules`, plus raw `tag:path` pairs. Semantic entries resolve through the CLI source of truth. |
 | `path`, `key`, `restore-keys` | `actions/cache` compatibility inputs. |
 | `no-platform` / `enableCrossOsArchive` | Disable platform suffixing for portable caches only. |
 | `fail-on-cache-miss` | Fail if restore misses. |
@@ -376,6 +409,7 @@ That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which
 |--------|-------------|
 | `cache-hit` | Whether a restore hit was found. |
 | `runtime-cache-hit` | Whether the `mise` runtime cache was restored. |
+| `diagnostics-level` | Effective diagnostics level for this run: `off`, `summary`, or `verbose`. |
 | `resolved-mode` | Effective mode used by the action. |
 | `resolved-tools` | Resolved `mise` tools as newline-separated `tool@version` values. |
 | `workspace`, `cache-tag`, `runtime-cache-tag`, `resolved-entries`, `resolved-tags`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
