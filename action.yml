@@ -1,5 +1,5 @@
 name: 'BoringCache One'
-description: 'Primary mise-powered GitHub Action for the BoringCache suite across archive caches, proxy-backed modes, and build adapters.'
+description: 'Maintained GitHub Action entrypoint for the BoringCache suite across archive caches, proxy-backed modes, and build adapters.'
 author: 'BoringCache'
 inputs:
   cli-version:
@@ -22,7 +22,7 @@ inputs:
     default: 'none'
     required: false
   workspace:
-    description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses BORINGCACHE_DEFAULT_WORKSPACE or the repository name.'
+    description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses repo config workspace, BORINGCACHE_DEFAULT_WORKSPACE, or the repository name.'
     required: false
   cache-tag:
     description: 'Human-readable cache tag or prefix. Generated archive entries, runtime caches, and proxy tags derive deterministic names from this when you do not set exact overrides.'

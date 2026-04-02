@@ -2,6 +2,8 @@
 
 One action for the BoringCache product suite.
 
+New GitHub Actions workflows should start here. Legacy wrapper actions are archived compatibility surfaces, not parallel product entrypoints.
+
 Defaults are opinionated:
 
 - `setup: mise`
@@ -42,7 +44,7 @@ That means:
 - `mise` runtime caching is separate from `entries`
 - a step can be valid as CLI-only, archive-only, proxy-only, or a mix of proxy plus extra archive entries
 
-If the repo already uses the CLI repo config in `.boringcache.toml` or `boringcache.toml`, `one` can resolve the same semantic entry ids and cache profiles through the CLI source of truth instead of inventing new tags locally. Built-in entry ids such as `bundler` or `node_modules` still work without repo config, repo profiles still come from repo config, and raw `tag:path` pairs stay local unless a matching repo entry is present.
+If the repo already uses the CLI repo config in `.boringcache.toml` or `boringcache.toml`, `one` can resolve the same semantic entry ids and cache profiles through the CLI source of truth instead of inventing new tags locally. That means the CLI owns the final archive tag and path semantics for those entries. If you want `one` to keep generating deterministic `cache-tag` plus tool-version-scoped tags, stick to preset defaults or raw `tag:path` pairs.
 
 ## Quick start
 
@@ -89,6 +91,7 @@ CLI-only bootstrap:
 ```
 
 This installs the CLI without requiring any archive entries. Use it when a later script or Dockerfile wants to copy `$(which boringcache)` directly.
+Use this instead of the archived `setup-boringcache` action when you only need the CLI binary on the runner.
 
 Mise-powered Rails-style workflow:
 
