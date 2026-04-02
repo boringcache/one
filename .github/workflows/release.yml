@@ -12,6 +12,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: one-release-${{ github.workflow }}-${{ github.ref_name || github.run_id }}
   cancel-in-progress: false
