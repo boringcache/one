@@ -1269,6 +1269,17 @@ async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawT
         throw error;
     }
 }
+function cliPlanHasProvenance(plan) {
+    return Boolean(plan.workspace_source || plan.repo_config_path || plan.archive_entries);
+}
+function cliPlanUsesRepoConfigResolution(plan) {
+    var _a;
+    const firstEntry = (_a = plan.archive_entries) === null || _a === void 0 ? void 0 : _a[0];
+    if (firstEntry) {
+        return firstEntry.resolution_source === 'repo-config';
+    }
+    return Boolean(plan.repo_config_path);
+}
 function scopeLiteralEntry(entry, cacheTag, tools, versionScope) {
     const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
     const scopedTag = tools.length > 0
@@ -1485,7 +1496,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
     const cacheProfiles = splitEntriesInput(inputs.cacheProfiles);
     const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
     const fallbackWorkspace = resolveWorkspace(inputs.workspace);
-    const cliWorkspaceInput = inputs.workspace.trim() || (!repoConfigPath ? fallbackWorkspace : '');
+    const cliWorkspaceInput = inputs.workspace.trim();
     const mergeCliPlan = (plan) => {
         archiveEntries.push(...plan.tag_path_pairs);
         if (!cacheTagPrefix) {
@@ -1521,7 +1532,11 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             }
             if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
                 const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, fallbackWorkspace);
-                if (resolved && resolved.tag_path_pairs.length > 0) {
+                const shouldUpgrade = resolved
+                    && resolved.tag_path_pairs.length > 0
+                    && (cliPlanUsesRepoConfigResolution(resolved)
+                        || (!cliPlanHasProvenance(resolved) && Boolean(repoConfigPath)));
+                if (shouldUpgrade) {
                     mergeCliPlan(resolved);
                     continue;
                 }
@@ -1555,7 +1570,11 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             }
             if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
                 const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, fallbackWorkspace);
-                if (resolved && resolved.tag_path_pairs.length > 0) {
+                const shouldUpgrade = resolved
+                    && resolved.tag_path_pairs.length > 0
+                    && (cliPlanUsesRepoConfigResolution(resolved)
+                        || (!cliPlanHasProvenance(resolved) && Boolean(repoConfigPath)));
+                if (shouldUpgrade) {
                     mergeCliPlan(resolved);
                     continue;
                 }

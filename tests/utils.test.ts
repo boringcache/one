@@ -583,7 +583,16 @@ describe('one utils', () => {
       if (args.includes('--json')) {
         options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
           workspace: 'my-org/my-project',
+          workspace_source: 'explicit',
           tag_path_pairs: ['bundler-gems:/cache/vendor/bundle'],
+          archive_entries: [{
+            requested: 'bundler',
+            request_source: 'entry',
+            resolution_source: 'repo-config',
+            tag: 'bundler-gems',
+            path: '/cache/vendor/bundle',
+            tag_path_pair: 'bundler-gems:/cache/vendor/bundle',
+          }],
           env_vars: {},
         })));
       }
@@ -610,7 +619,17 @@ describe('one utils', () => {
       if (args.includes('--json')) {
         options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
           workspace: 'config-org/config-workspace',
+          workspace_source: 'repo-config',
+          repo_config_path: `${project}/.boringcache.toml`,
           tag_path_pairs: ['bundler-gems:/cache/vendor/bundle'],
+          archive_entries: [{
+            requested: 'bundler',
+            request_source: 'entry',
+            resolution_source: 'repo-config',
+            tag: 'bundler-gems',
+            path: '/cache/vendor/bundle',
+            tag_path_pair: 'bundler-gems:/cache/vendor/bundle',
+          }],
           env_vars: {
             BUNDLE_PATH: '/cache/vendor/bundle',
           },

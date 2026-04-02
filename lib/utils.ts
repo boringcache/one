@@ -1499,8 +1499,21 @@ function splitEntriesInput(entries: string): string[] {
 
 interface CliDryRunPlan {
   workspace: string;
+  workspace_source?: 'explicit' | 'repo-config' | 'configured-default';
+  repo_config_path?: string;
   tag_path_pairs: string[];
+  archive_entries?: CliDryRunArchiveEntry[];
   env_vars: Record<string, string>;
+}
+
+interface CliDryRunArchiveEntry {
+  requested: string;
+  request_source: 'profile' | 'entry' | 'command-inferred' | 'manual';
+  profile?: string;
+  resolution_source: 'repo-config' | 'built-in' | 'manual';
+  tag: string;
+  path?: string | null;
+  tag_path_pair: string;
 }
 
 interface ResolvedArchiveEntries {
@@ -1615,6 +1628,18 @@ async function maybeResolveRawEntryViaCli(
     }
     throw error;
   }
+}
+
+function cliPlanHasProvenance(plan: CliDryRunPlan): boolean {
+  return Boolean(plan.workspace_source || plan.repo_config_path || plan.archive_entries);
+}
+
+function cliPlanUsesRepoConfigResolution(plan: CliDryRunPlan): boolean {
+  const firstEntry = plan.archive_entries?.[0];
+  if (firstEntry) {
+    return firstEntry.resolution_source === 'repo-config';
+  }
+  return Boolean(plan.repo_config_path);
 }
 
 function scopeLiteralEntry(
@@ -1896,7 +1921,7 @@ export async function buildArchiveEntries(
   const cacheProfiles = splitEntriesInput(inputs.cacheProfiles);
   const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
   const fallbackWorkspace = resolveWorkspace(inputs.workspace);
-  const cliWorkspaceInput = inputs.workspace.trim() || (!repoConfigPath ? fallbackWorkspace : '');
+  const cliWorkspaceInput = inputs.workspace.trim();
 
   const mergeCliPlan = (plan: CliDryRunPlan): void => {
     archiveEntries.push(...plan.tag_path_pairs);
@@ -1948,7 +1973,13 @@ export async function buildArchiveEntries(
           parsedEntry.tag,
           fallbackWorkspace,
         );
-        if (resolved && resolved.tag_path_pairs.length > 0) {
+        const shouldUpgrade = resolved
+          && resolved.tag_path_pairs.length > 0
+          && (
+            cliPlanUsesRepoConfigResolution(resolved)
+            || (!cliPlanHasProvenance(resolved) && Boolean(repoConfigPath))
+          );
+        if (shouldUpgrade) {
           mergeCliPlan(resolved);
           continue;
         }
@@ -1992,7 +2023,13 @@ export async function buildArchiveEntries(
           parsedEntry.tag,
           fallbackWorkspace,
         );
-        if (resolved && resolved.tag_path_pairs.length > 0) {
+        const shouldUpgrade = resolved
+          && resolved.tag_path_pairs.length > 0
+          && (
+            cliPlanUsesRepoConfigResolution(resolved)
+            || (!cliPlanHasProvenance(resolved) && Boolean(repoConfigPath))
+          );
+        if (shouldUpgrade) {
           mergeCliPlan(resolved);
           continue;
         }
