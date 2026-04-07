@@ -168,6 +168,26 @@ describe('restore action', () => {
     expect(core.saveState).toHaveBeenCalledWith('generic-cache-entries', '');
   });
 
+  it('applies no-platform to the mise runtime restore path', async () => {
+    const runtimeEntry = `ruby-mise-ruby-3.3.6:${path.join(os.homedir(), '.local', 'share', 'mise', 'installs')}`;
+
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      tools: 'ruby@3.3.6',
+    });
+    mockGetBooleanInput({
+      'cache-runtime': true,
+      'no-platform': true,
+    });
+
+    await restoreRun();
+
+    expect(actionCoreMocks.execBoringCache).toHaveBeenCalledWith(
+      ['restore', 'my-org/my-project', runtimeEntry, '--no-platform'],
+      expect.objectContaining({ ignoreReturnCode: true }),
+    );
+  });
+
   it('exports mise environment after installing runtime tools', async () => {
     mockGetInput({
       workspace: 'my-org/my-project',

@@ -45027,6 +45027,16 @@ const core = __importStar(__nccwpck_require__(37484));
 const action_core_1 = __nccwpck_require__(68701);
 const utils_1 = __nccwpck_require__(2219);
 const mode_handlers_1 = __nccwpck_require__(80861);
+function buildRuntimeRestoreFlagArgs(inputs) {
+    const flagArgs = [];
+    if (inputs.enableCrossOsArchive || inputs.noPlatform) {
+        flagArgs.push('--no-platform');
+    }
+    if (inputs.verbose) {
+        flagArgs.push('--verbose');
+    }
+    return flagArgs;
+}
 async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
     await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Diagnostics', async () => {
@@ -45119,7 +45129,7 @@ async function run() {
         const plan = await (0, utils_1.buildPlan)(inputs);
         process.chdir(plan.workingDirectory);
         await (0, utils_1.applyPresetCacheEnv)(plan);
-        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', inputs.verbose ? ['--verbose'] : [], false);
+        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs), false);
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
             usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);

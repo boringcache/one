@@ -1,186 +1,43 @@
 # boringcache/one
 
-One action for the BoringCache product suite.
+`boringcache/one` is the main GitHub Actions entrypoint for BoringCache.
 
-New GitHub Actions workflows should start here. Legacy wrapper actions are archived compatibility surfaces, not parallel product entrypoints.
+If you are starting fresh, the preferred path is:
 
-Defaults are opinionated:
+1. install the CLI locally
+2. run `boringcache onboard`
+3. commit `.boringcache.toml` when it helps
+4. use `boringcache/one@v1` in GitHub Actions
 
-- `setup: mise`
-- `mode: auto`
+That keeps local runs, Dockerfiles, and GitHub Actions on the same workspace, cache names, and trust model.
 
-In most workflows you only set `workspace` plus one of `entries`, `preset`, or a mode-specific input such as `image`.
-
-Use `boringcache/one` when you want a single GitHub Action entrypoint for:
-
-- archive caching
-- mise-powered language and build tool setup
-- Docker and BuildKit cache flows
-- Bazel, Gradle, Maven, Turbo, and Rust+sccache proxy-backed modes
-
-## When to use it
-
-Choose this if you want BoringCache to feel closer to a buildpack:
-
-- install the right tools with `mise`
-- restore the right cache or start the right proxy
-- run the build with one action entrypoint
-- save on the way out
-
-You usually do not need to set `setup` or `mode` unless you want a specific adapter such as Docker, Bazel, Gradle, Turbo, or Rust+sccache.
-
-## Mental model
-
-Think about `boringcache/one` in three layers:
-
-- CLI bootstrap: `cli-version` installs the BoringCache CLI and is independent from cache behavior.
-- Archive caches: `entries` are optional extra archive paths you want restored and saved.
-- Proxy and adapter modes: `docker`, `buildkit`, `bazel`, `gradle`, `maven`, `turbo-proxy`, and `rust-sccache` own the main cache/proxy behavior for the step.
-
-That means:
-
-- `entries` are additive, not required for every step
-- presets and modes can contribute their own defaults
-- `mise` runtime caching is separate from `entries`
-- a step can be valid as CLI-only, archive-only, proxy-only, or a mix of proxy plus extra archive entries
-
-If the repo already uses the CLI repo config in `.boringcache.toml` or `boringcache.toml`, `one` can resolve the same semantic entry ids and cache profiles through the CLI source of truth instead of inventing new tags locally. That means the CLI owns the final archive tag and path semantics for those entries. If you want `one` to keep generating deterministic `cache-tag` plus tool-version-scoped tags, stick to preset defaults or raw `tag:path` pairs.
+If you are migrating an existing workflow and do not want repo config yet, raw `entries` plus `actions/cache` compatibility inputs such as `path`, `key`, and `restore-keys` still work.
 
 ## Quick start
 
-Archive caching:
-
 ```yaml
 - uses: boringcache/one@v1
   with:
     workspace: my-org/my-project
-    entries: deps:node_modules,build:dist
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-With the default `setup: mise`, `boringcache/one` resolves project tools from `mise.toml`, `.tool-versions`, and common version files such as `.ruby-version`, `.python-version`, `.go-version`, `.nvmrc`, and `rust-toolchain`. Use `tools` only when you want to override or add to what the project already declares.
-
-When `cache-runtime: true`, `one` caches `mise` installs and rebuilds shims after restore. It does not archive the shim directory itself.
-
-Generated tags are deterministic and readable. With `cache-tag: web`, `tools: ruby@4.0.1`, and the default `tool-version-scope: patch`, the runtime cache tag becomes `web-mise-ruby-4.0.1` and an archive entry such as `bundler:vendor/bundle` resolves to `web-bundler-ruby-4.0.1`.
-
-If you want the exact same runtime tag across GitHub Actions, local CLI use, and Docker-based workflows, set `runtime-cache-tag` explicitly.
-
-If you want the exact same archive tag semantics too, use semantic entries or repo profiles instead of raw `tag:path` pairs:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
     cache-profiles: bundle-install
-    entries: bootsnap
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-CLI-only bootstrap:
+If you do not have repo config yet, start with explicit entries:
 
 ```yaml
 - uses: boringcache/one@v1
   with:
-    setup: none
     workspace: my-org/my-project
-    cli-platform: alpine-amd64
-```
-
-This installs the CLI without requiring any archive entries. Use it when a later script or Dockerfile wants to copy `$(which boringcache)` directly.
-Use this instead of the archived `setup-boringcache` action when you only need the CLI binary on the runner.
-
-Mise-powered Rails-style workflow:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    preset: rails
-    workspace: my-org/my-project
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-    RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
-```
-
-The Rails preset defaults Bundler plus the detected Node package-manager cache and `node_modules`. It also exports `BUNDLE_PATH` and the package-manager cache env so those directories are actually used.
-
-If the app uses Rails credentials, set `RAILS_MASTER_KEY` in the workflow environment for the Rails steps that run after `boringcache/one`. The Rails preset sets up Ruby and Node toolchains; it does not materialize app secrets for you.
-
-Generic Ruby workflow:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    preset: ruby
-    workspace: my-org/my-project
+    entries: bundler:vendor/bundle,node:node_modules
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-The Ruby preset defaults a Bundler cache at `vendor/bundle` and exports `BUNDLE_PATH` there.
-
-Generic Node workflow:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    preset: node
-    workspace: my-org/my-project
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-The Node preset detects `npm`, `pnpm`, or `yarn`, defaults the package-manager cache plus `node_modules`, and exports the matching local cache directory env vars.
-
-Python with uv:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    preset: python-uv
-    workspace: my-org/my-project
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-The `python-uv` preset installs `uv` through `mise`, defaults a project-local `UV_CACHE_DIR`, and archives `.uv-cache`. Add extra entries such as `.venv` only if your workflow wants them.
-
-Go workflow:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    preset: go
-    workspace: my-org/my-project
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-The `go` preset exports project-local `GOMODCACHE` and `GOCACHE`, then archives those directories by default.
-
-PHP with Composer:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    preset: php-composer
-    workspace: my-org/my-project
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-The `php-composer` preset installs `php` plus `composer`, exports `COMPOSER_CACHE_DIR` and `COMPOSER_VENDOR_DIR`, and archives both the Composer cache and `vendor` by default.
-
-Docker build with cache:
+For Docker or native remote-cache flows, set the mode you need and keep the same workspace:
 
 ```yaml
 - uses: boringcache/one@v1
@@ -194,235 +51,40 @@ Docker build with cache:
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-Docker setup only for external `docker buildx build` scripts:
-
-```yaml
-- id: cache
-  uses: boringcache/one@v1
-  with:
-    cli-platform: debian-bookworm-amd64
-    mode: docker
-    docker-command: setup
-    workspace: my-org/my-project
-    cache-tag: my-run-scope
-    registry-tag: my-stable-docker-cache
-    registry-ref-tag: cache-main
-    driver-opts: |
-      network=host
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-
-- run: |
-    docker buildx build \
-      --builder "${{ steps.cache.outputs.buildx-name }}" \
-      --cache-from "${{ steps.cache.outputs.cache-from }}" \
-      --cache-to "${{ steps.cache.outputs.cache-to }}" \
-      --tag ghcr.io/${{ github.repository }}:${{ github.sha }} \
-      .
-```
-
-Use `steps.<id>.outputs.buildx-name`, `cache-from`, and `cache-to` in the later `docker buildx build` step when a benchmark or custom script needs to keep full control over the build invocation.
-Registry-backed Docker and BuildKit cache refs always use an explicit `<registry-tag-or-cache-tag>:buildcache` suffix so BuildKit does not fall back to an implicit `:latest` import.
-If you need a different OCI tag strategy, set `registry-ref-tag` instead of embedding `:tag` into `registry-tag`.
-If you need to copy the CLI into a container build context, install the matching asset first and then copy `$(which boringcache)`.
-You can also use `boringcache/one` as a CLI-only bootstrap step by omitting cache entries and setting `cli-platform` when you need a non-runner asset.
-
-Rust with remote sccache:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    mode: rust-sccache
-    workspace: my-org/my-project
-    sccache: true
-    sccache-mode: proxy
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-Turbo monorepo with automatic package-manager cache defaults:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    mode: turbo-proxy
-    workspace: my-org/my-project
-    cache-tag: web
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-When you omit `entries` in `mode: turbo-proxy`, `one` detects `npm`, `pnpm`, or `yarn` from the project and defaults archive entries for the package-manager cache plus `node_modules`. It also exports project-local cache directories such as `PNPM_STORE_DIR`, `YARN_CACHE_FOLDER`, or `npm_config_cache`.
-
-Maven with generated build-cache config:
-
-```yaml
-- uses: boringcache/one@v1
-  with:
-    mode: maven
-    workspace: my-org/my-project
-    cache-tag: service
-    maven-local-repo: .m2/repository
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
-```
-
-In `mode: maven`, `one` starts the cache-registry proxy, ensures `.mvn/extensions.xml` contains the Maven build-cache extension, writes `.mvn/maven-build-cache-config.xml`, and defaults the archive cache to the Maven local repository when you do not pass `entries`.
-
 ## What it handles
 
-- `mode: archive` for generic portable directory caches
-- `mode: docker` for Docker builds with BuildKit cache orchestration
-- `mode: buildkit` for direct `buildctl` flows
-- `mode: bazel` for remote cache proxy wiring
-- `mode: gradle` for Gradle remote build cache wiring
-- `mode: maven` for Maven build cache extension and proxy wiring
-- `mode: turbo-proxy` for Turbo remote cache proxy wiring
-- `mode: rust-sccache` for Rust toolchain, cargo caches, and remote `sccache`
-- `setup: mise` for installing toolchains such as Node, pnpm, Yarn, Ruby, Python, Go, Java, Maven, Gradle, Rust, Elixir, Erlang, and Bazel
-- `preset: rails`, `ruby`, `node`, `node-turbo`, `python-uv`, `go`, or `php-composer` for opinionated workflow defaults on top of `mise`
-
-## Setup model
-
-`boringcache/one` supports three setup modes:
-
-- `setup: mise` means `one` installs and activates userland tools with `mise`
-- `setup: external` means you manage runtimes elsewhere and `one` only handles BoringCache integration
-- `setup: none` means no runtime setup is performed
-
-For Docker and BuildKit, `one` uses the runner's Docker/Buildx environment rather than trying to install a container daemon through `mise`. In practice that means `one` can create builders and manage cache flow for you, but the runner still needs Docker support.
-
-## Mode model
-
-- One invocation of `boringcache/one` runs one primary `mode`
-- `archive` is the portable directory-cache mode
-- the other modes are proxy/build adapters
-- that invocation can still install multiple tools through `mise`
-- that invocation can also restore extra archive `entries` alongside the primary mode
-
-In practice:
-
-- Ruby plus Node is one step
-- Docker plus Rails tooling can be one step
-- Bazel plus Gradle should be separate `boringcache/one` steps in the same job
-- Maven plus Docker should be separate `boringcache/one` steps in the same job
-
-## Tag model
-
-- `cache-tag` gives `one` a stable human prefix for generated tags
-- for archive `entries`, `cache-tag` prefixes each entry tag unless you already included that prefix yourself
-- `runtime-cache-tag` lets you set the exact runtime cache tag when you need local and CI reuse to line up exactly
-- `tool-version-scope` controls how generated tags encode versions: `patch`, `minor`, or `major`
-- `resolved-tags` outputs the exact cache tags `one` resolved for checks and verification
-- `resolved-entries` and `runtime-cache-tag` still show the deterministic archive and runtime tag plan
-
-Example:
-
-```yaml
-- id: cache
-  uses: boringcache/one@v1
-  with:
-    workspace: boringcache/web
-    cache-tag: web
-    tool-version-scope: minor
-    entries: bundler:vendor/bundle
-```
-
-That resolves to tags like `web-mise-ruby-4.0` and `web-bundler-ruby-4.0`, which are deterministic across the same tool versions on local Ubuntu, Docker-based Ubuntu, and GitHub-hosted Ubuntu runners.
+- archive caching for repeated directories
+- `mise`-based tool setup by default
+- Docker and BuildKit cache flows
+- Bazel, Gradle, Maven, Turbo, and Rust plus `sccache` proxy-backed modes
+- repo-config-driven cache profiles after `boringcache onboard`
 
 ## Trust model
 
-- On `pull_request` jobs, restore can run with `BORINGCACHE_RESTORE_TOKEN`
-- Save is skipped cleanly when no save-capable token is present
-- Use `BORINGCACHE_SAVE_TOKEN` only on trusted branch, tag, or manual jobs
-- `BORINGCACHE_API_TOKEN` still works, but new workflows should prefer split tokens
-- `verify: check` runs one exact-tag presence check, while `verify: wait` polls until saved tags are visible
-- Save-capable tags verify in the post step after `boringcache/one` finishes saving them
+- every job that should read cache gets `BORINGCACHE_RESTORE_TOKEN`
+- only trusted jobs get `BORINGCACHE_SAVE_TOKEN`
+- pull requests can stay restore-only
+- new workflows should avoid broad `BORINGCACHE_API_TOKEN` use in CI
 
-## Diagnostics
+## Mental model
 
-Keep normal workflow logs quiet and turn diagnostics on only when needed:
+- `workspace` is the shared cache boundary
+- `entries` add archive caches
+- `cache-profiles` resolve repo-defined cache groups from `.boringcache.toml`
+- `mode` selects the primary adapter when you need Docker or a native remote-cache flow
+- `setup` defaults to `mise`
 
-```yaml
-- uses: boringcache/one@v1
-  with:
-    workspace: my-org/my-project
-    mode: rust-sccache
-    diagnostics: summary
-```
+In most workflows, set `workspace` and then one of:
 
-- `diagnostics: auto` is the default. It stays off unless GitHub Actions step debug is enabled through `ACTIONS_STEP_DEBUG`.
-- `diagnostics: summary` emits grouped action state such as resolved mode, tags, entries, and token capability shape.
-- `diagnostics: verbose` also tails proxy logs, capped by `diagnostics-log-lines`.
-- `verbose: true` is separate. It passes `--verbose` down to the CLI and proxy; it does not replace grouped action diagnostics.
+- `cache-profiles`
+- `entries`
+- `preset`
+- a mode-specific input such as `image`
 
-## Core inputs
-
-| Input | Description |
-|-------|-------------|
-| `setup` | `mise`, `external`, or `none`. Defaults to `mise`. |
-| `mode` | `auto`, `archive`, `docker`, `buildkit`, `bazel`, `gradle`, `maven`, `turbo-proxy`, or `rust-sccache`. Defaults to `auto`. |
-| `preset` | `none`, `rails`, `ruby`, `node`, `node-turbo`, `python-uv`, `go`, or `php-composer`. |
-| `workspace` | Workspace in `org/repo` form. Defaults to `BORINGCACHE_DEFAULT_WORKSPACE`, then the repository name. |
-| `working-directory` | Project root used for detection and relative paths. |
-| `cache-tag` | Human-readable cache tag or prefix for generated tags. |
-| `runtime-cache-tag` | Optional exact tag override for the `mise` installs cache. |
-| `cache-profiles` | Repo cache profile names from `.boringcache.toml` or `boringcache.toml`, resolved through the CLI source of truth. |
-| `tools` | Explicit `mise` tools in `tool@version` form. |
-| `uv-version` | Default `uv` version for `preset: python-uv` when the project does not already pin `uv`. |
-| `composer-version` | Default Composer version for `preset: php-composer` when the project does not already pin it. |
-| `tool-version-scope` | `patch`, `minor`, or `major` for generated tool-scoped tags. |
-| `cache-runtime` | Cache `mise` tool installs and regenerate shims after restore. |
-| `verify` / `verify-timeout-seconds` / `verify-require-server-signature` | Optional exact-tag verification controls. |
-| `diagnostics` / `diagnostics-log-lines` | Grouped action diagnostics. `auto` follows `ACTIONS_STEP_DEBUG`; `verbose` also tails proxy logs. |
-| `cli-version` | BoringCache CLI version to install. Set to `skip` to disable automatic CLI setup. |
-| `cli-platform` | Optional CLI asset override such as `alpine-amd64` or `debian-bookworm-amd64` when the runner binary is not the one you need to copy downstream. |
-
-## Archive inputs
-
-| Input | Description |
-|-------|-------------|
-| `entries` | Optional extra archive entries. Accepts semantic entry ids such as `bundler` or `node_modules`, plus raw `tag:path` pairs. Semantic entries resolve through the CLI source of truth. |
-| `path`, `key`, `restore-keys` | `actions/cache` compatibility inputs. |
-| `no-platform` / `enableCrossOsArchive` | Disable platform suffixing for portable caches only. |
-| `fail-on-cache-miss` | Fail if restore misses. |
-| `lookup-only` | Check for a hit without downloading. |
-| `exclude` | Exclude globs on save. |
-
-## Mode-specific inputs
-
-| Input | Description |
-|-------|-------------|
-| `image`, `tags`, `context`, `dockerfile`, `cache-backend`, `registry-tag`, `registry-ref-tag` | Docker and BuildKit build inputs. |
-| `buildkit-host`, `output`, `ssh` | BuildKit-only inputs. |
-| `bazel-version` | Bazel version for Bazelisk. |
-| `gradle-home`, `enable-build-cache` | Gradle mode inputs. |
-| `maven-local-repo`, `maven-extensions-path`, `maven-build-cache-config-path`, `maven-build-cache-extension-version`, `maven-build-cache-id` | Maven mode inputs. |
-| `rust-version`, `toolchain`, `targets`, `components`, `cargo-tag`, `cargo-git-tag`, `cargo-bin-tag`, `target-tag`, `sccache-tag`, `sccache`, `sccache-version`, `sccache-mode` | Rust mode inputs. |
-| `turbo-api-url`, `turbo-token`, `turbo-team`, `turbo-port` | Turbo proxy mode inputs. |
-| `read-only`, `proxy-port`, `proxy-no-git`, `proxy-no-platform` | Shared proxy-mode controls. |
-
-## Outputs
-
-| Output | Description |
-|--------|-------------|
-| `cache-hit` | Whether a restore hit was found. |
-| `runtime-cache-hit` | Whether the `mise` runtime cache was restored. |
-| `diagnostics-level` | Effective diagnostics level for this run: `off`, `summary`, or `verbose`. |
-| `resolved-mode` | Effective mode used by the action. |
-| `resolved-tools` | Resolved `mise` tools as newline-separated `tool@version` values. |
-| `workspace`, `cache-tag`, `runtime-cache-tag`, `resolved-entries`, `resolved-tags`, `proxy-port`, `proxy-log-path` | Shared mode outputs. |
-| `registry-ref`, `cache-from`, `cache-to`, `cache-dir`, `save-cache-dir`, `image-id`, `digest`, `buildx-name`, `buildx-platforms` | Docker and BuildKit outputs. |
-| `package-manager`, `package-manager-cache-dir` | Turbo mode outputs. |
-| `maven-extensions-path`, `maven-build-cache-config-path`, `maven-local-repo` | Maven mode outputs. |
-| `rust-version`, `cargo-tag`, `target-tag`, `cargo-bin-tag`, `sccache-tag`, `sccache-hit` | Rust mode outputs. |
+`action.yml` is the source of truth for the full input and output surface.
 
 ## Learn more
 
 - [GitHub Actions docs](https://boringcache.com/docs#github-actions)
 - [GitHub Actions auth and trust model](https://boringcache.com/docs#actions-auth)
-- [CLI auth model](https://boringcache.com/docs#cli-auth)
+- [CLI docs](https://github.com/boringcache/cli/tree/main/docs)

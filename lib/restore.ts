@@ -27,6 +27,21 @@ interface RestoreResult {
   saveEntries: string;
 }
 
+function buildRuntimeRestoreFlagArgs(
+  inputs: Pick<ReturnType<typeof getInputs>, 'enableCrossOsArchive' | 'noPlatform' | 'verbose'>,
+): string[] {
+  const flagArgs: string[] = [];
+
+  if (inputs.enableCrossOsArchive || inputs.noPlatform) {
+    flagArgs.push('--no-platform');
+  }
+  if (inputs.verbose) {
+    flagArgs.push('--verbose');
+  }
+
+  return flagArgs;
+}
+
 async function emitRestoreDiagnostics(
   plan: Awaited<ReturnType<typeof buildPlan>>,
   inputs: ReturnType<typeof getInputs>,
@@ -157,7 +172,7 @@ export async function run(): Promise<void> {
     const runtimeRestore = await restoreEntries(
       plan.workspace,
       plan.runtimeEntry || '',
-      inputs.verbose ? ['--verbose'] : [],
+      buildRuntimeRestoreFlagArgs(inputs),
       false,
     );
 
