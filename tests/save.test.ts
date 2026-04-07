@@ -80,7 +80,7 @@ describe('save action', () => {
       'generic-cache-entries': 'deps:node_modules',
       'generic-cache-workspace': 'my-org/my-project',
       'generic-cache-exclude': '*.log',
-      'cli-version': 'v1.12.17',
+      'cli-version': 'v1.12.19',
       'no-platform': 'true',
       'enableCrossOsArchive': 'false',
       'force': 'true',
@@ -89,7 +89,7 @@ describe('save action', () => {
 
     await saveRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.17' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.19' });
     expect(chdirSpy).toHaveBeenNthCalledWith(1, '/tmp/project');
     expect(chdirSpy).toHaveBeenLastCalledWith(expect.any(String));
     expect(exec.exec).toHaveBeenCalledWith(
@@ -128,6 +128,43 @@ describe('save action', () => {
       ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
+  });
+
+  it('waits for deferred save tags after saving even when verify mode is check', async () => {
+    jest.useFakeTimers();
+    let checkAttempts = 0;
+    (exec.exec as jest.Mock).mockImplementation(async (command: string, args?: string[]) => {
+      if (command === 'boringcache' && args?.[0] === 'check') {
+        checkAttempts += 1;
+        return checkAttempts === 1 ? 1 : 0;
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'archive',
+      'generic-cache-entries': 'deps:node_modules',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+      'verify-mode': 'check',
+      'verify-timeout-seconds': '60',
+      'verify-require-server-signature': 'false',
+      'verify-save-tags': 'deps',
+    });
+
+    try {
+      const runPromise = saveRun();
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(2000);
+      await runPromise;
+
+      expect(checkAttempts).toBe(2);
+      expect(core.info).toHaveBeenCalledWith('Waiting for tags to become visible (1): deps');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('does not verify exact generic tags for entries skipped as missing paths', async () => {

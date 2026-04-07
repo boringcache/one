@@ -45056,6 +45056,9 @@ function filterVerifiableGenericTags(entriesString, verifyTags, workingDirectory
     const declaredGenericTags = new Set(resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, false));
     return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
 }
+function resolvePostSaveVerifyMode(verifyMode) {
+    return verifyMode === 'check' ? 'wait' : verifyMode;
+}
 async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
     await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
@@ -45096,6 +45099,7 @@ async function run() {
         let force = core.getState('force') === 'true';
         let verbose = core.getState('verbose') === 'true';
         const verifyMode = (core.getState('verify-mode') || inputs.verify);
+        const postSaveVerifyMode = resolvePostSaveVerifyMode(verifyMode);
         const verifyTimeoutSeconds = Number.parseInt(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds), 10);
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
@@ -45166,7 +45170,7 @@ async function run() {
         if (!genericEntries || !genericWorkspace) {
             if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
                 await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifySaveTags, {
-                    mode: verifyMode,
+                    mode: postSaveVerifyMode,
                     timeoutSeconds: verifyTimeoutSeconds,
                     requireServerSignature: verifyRequireServerSignature,
                     verbose,
@@ -45195,7 +45199,7 @@ async function run() {
         const verifiableSaveTags = filterVerifiableGenericTags(genericEntries, verifySaveTags, workingDirectory || process.cwd(), enableCrossOsArchive || noPlatform);
         if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
             await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifiableSaveTags, {
-                mode: verifyMode,
+                mode: postSaveVerifyMode,
                 timeoutSeconds: verifyTimeoutSeconds,
                 requireServerSignature: verifyRequireServerSignature,
                 verbose,
@@ -45339,7 +45343,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.12.17',
+        cliVersion: core.getInput('cli-version') || 'v1.12.19',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),

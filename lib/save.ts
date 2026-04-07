@@ -71,6 +71,10 @@ function filterVerifiableGenericTags(
   return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
 }
 
+function resolvePostSaveVerifyMode(verifyMode: VerifyMode): VerifyMode {
+  return verifyMode === 'check' ? 'wait' : verifyMode;
+}
+
 async function emitPostStepDiagnostics(
   inputs: ReturnType<typeof getInputs>,
   resolvedMode: ResolvedMode | '',
@@ -123,6 +127,7 @@ export async function run(): Promise<void> {
     let force = core.getState('force') === 'true';
     let verbose = core.getState('verbose') === 'true';
     const verifyMode = (core.getState('verify-mode') || inputs.verify) as VerifyMode;
+    const postSaveVerifyMode = resolvePostSaveVerifyMode(verifyMode);
     const verifyTimeoutSeconds = Number.parseInt(
       core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds),
       10,
@@ -226,7 +231,7 @@ export async function run(): Promise<void> {
     if (!genericEntries || !genericWorkspace) {
       if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
         await verifyResolvedTags(genericWorkspace, verifySaveTags, {
-          mode: verifyMode,
+          mode: postSaveVerifyMode,
           timeoutSeconds: verifyTimeoutSeconds,
           requireServerSignature: verifyRequireServerSignature,
           verbose,
@@ -272,7 +277,7 @@ export async function run(): Promise<void> {
 
     if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
       await verifyResolvedTags(genericWorkspace, verifiableSaveTags, {
-        mode: verifyMode,
+        mode: postSaveVerifyMode,
         timeoutSeconds: verifyTimeoutSeconds,
         requireServerSignature: verifyRequireServerSignature,
         verbose,
