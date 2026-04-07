@@ -49,6 +49,14 @@ inputs:
     description: 'Proxy-backed modes: run without writes when supported.'
     default: 'false'
     required: false
+  save-policy:
+    description: 'Whether boringcache/one should publish cache updates in the post step: auto (default) saves when event policy and tokens allow it, off keeps the step restore-only by configuration.'
+    default: 'auto'
+    required: false
+  save-on-pull-request:
+    description: 'Allow save-capable tokens to publish cache updates on pull_request events. Defaults to false so pull requests stay restore-only unless you opt in.'
+    default: 'false'
+    required: false
   verify:
     description: 'Optional internal verification for resolved tags: none, check, or wait. Save-capable tags verify in the post step after save completes.'
     default: 'none'

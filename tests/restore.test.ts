@@ -230,6 +230,55 @@ describe('restore action', () => {
     );
   });
 
+  it('keeps the post step restore-only when save-policy is off', async () => {
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+      'save-policy': 'off',
+    });
+    mockGetBooleanInput({ 'no-platform': true });
+
+    await restoreRun();
+
+    expect(core.saveState).toHaveBeenCalledWith('save-configured', 'false');
+    expect(core.saveState).toHaveBeenCalledWith('save-allowed', 'false');
+    expect(core.info).toHaveBeenCalledWith('Post step save is disabled by save-policy: off.');
+  });
+
+  it('treats pull_request save tokens as restore-only by default', async () => {
+    const exactVerifyTag = resolveVerificationTags([{
+      tag: 'deps',
+      noPlatform: true,
+      noGit: false,
+      pathHint: 'node_modules',
+      saveExpected: true,
+    }], process.cwd())[0];
+
+    process.env.GITHUB_EVENT_NAME = 'pull_request';
+    process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
+    delete process.env.BORINGCACHE_RESTORE_TOKEN;
+    delete process.env.BORINGCACHE_API_TOKEN;
+
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+      verify: 'check',
+    });
+    mockGetBooleanInput({ 'no-platform': true });
+
+    await restoreRun();
+
+    expect(core.notice).toHaveBeenCalledWith(
+      'pull_request detected: treating save-capable BoringCache tokens as restore-only. Set save-on-pull-request: true to allow writes.',
+    );
+    expect(core.saveState).toHaveBeenCalledWith('save-allowed', 'false');
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--no-git', '--fail-on-miss'],
+      expect.objectContaining({ ignoreReturnCode: true }),
+    );
+  });
+
   it('exports bundler and package-manager cache env for the rails preset', async () => {
     const project = await fs.mkdtemp(path.join(os.tmpdir(), 'one-restore-rails-'));
     await fs.writeFile(path.join(project, '.ruby-version'), '3.3.6\n');

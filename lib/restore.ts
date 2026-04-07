@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import { hasRestoreToken, hasSaveToken, isUsingLegacyApiTokenOnly } from '@boringcache/action-core';
 import {
+  applySaveTokenPolicy,
   applyPresetCacheEnv,
   applyMiseSetup,
   buildGenericVerificationSpecs,
@@ -10,6 +11,8 @@ import {
   ensureBoringCache,
   execBoringCache,
   getInputs,
+  isPullRequestEvent,
+  saveConfigured,
   loadDiagnosticsConfig,
   getPlatformSuffix,
   getRestoreKeyCandidates,
@@ -158,6 +161,8 @@ export async function run(): Promise<void> {
   const originalCwd = process.cwd();
   try {
     const inputs = getInputs();
+    const saveEnabled = saveConfigured(inputs);
+    const saveAllowed = saveEnabled ? applySaveTokenPolicy(inputs) : false;
     const cliPlatform = inputs.cliPlatform || undefined;
 
     if (inputs.cliVersion.toLowerCase() !== 'skip') {
@@ -197,10 +202,11 @@ export async function run(): Promise<void> {
       ...(modeRestore.verificationSpecs || []),
     ];
     const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
-    const deferredVerifyTags = hasSaveToken()
+    const saveCapable = saveEnabled && hasSaveToken();
+    const deferredVerifyTags = saveCapable
       ? resolveVerificationTags(verificationSpecs.filter((spec) => spec.saveExpected), plan.workingDirectory)
       : [];
-    const immediateVerifyTags = hasSaveToken()
+    const immediateVerifyTags = saveCapable
       ? resolveVerificationTags(verificationSpecs.filter((spec) => !spec.saveExpected), plan.workingDirectory)
       : resolvedTags;
 
@@ -237,6 +243,8 @@ export async function run(): Promise<void> {
     core.saveState('verify-mode', inputs.verify);
     core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
     core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
+    core.saveState('save-configured', String(saveEnabled));
+    core.saveState('save-allowed', String(saveAllowed));
 
     if (inputs.verify !== 'none' && immediateVerifyTags.length > 0) {
       await verifyResolvedTags(plan.workspace, immediateVerifyTags, {
@@ -248,6 +256,13 @@ export async function run(): Promise<void> {
     }
 
     await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeRestore.hit);
+
+    if (!saveEnabled) {
+      core.info('Post step save is disabled by save-policy: off.');
+    }
+    if (saveEnabled && isPullRequestEvent() && !saveAllowed) {
+      core.info('Post step will stay restore-only unless save-on-pull-request: true is set.');
+    }
   } catch (error) {
     core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {

@@ -29,6 +29,47 @@ describe('save action', () => {
     expect(exec.exec).not.toHaveBeenCalled();
   });
 
+  it('skips save on pull_request when save-on-pull-request is not enabled', async () => {
+    process.env.GITHUB_EVENT_NAME = 'pull_request';
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'archive',
+      'generic-cache-entries': 'deps:node_modules',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+      'save-allowed': 'false',
+    });
+
+    await saveRun();
+
+    expect(core.notice).toHaveBeenCalledWith(
+      'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.',
+    );
+    expect(exec.exec).not.toHaveBeenCalled();
+  });
+
+  it('skips save cleanly when save-policy is off', async () => {
+    mockGetInput({ 'save-policy': 'off' });
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'archive',
+      'generic-cache-entries': 'deps:node_modules',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+      'save-configured': 'false',
+      'save-allowed': 'false',
+    });
+
+    await saveRun();
+
+    expect(core.info).toHaveBeenCalledWith(
+      'Save skipped: save-policy is off; this step is restore-only by configuration.',
+    );
+    expect(exec.exec).not.toHaveBeenCalled();
+  });
+
   it('reuses saved state and forwards save flags', async () => {
     const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     mockGetInput({});

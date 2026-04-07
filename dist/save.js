@@ -109,6 +109,8 @@ async function run() {
         const verifyMode = (core.getState('verify-mode') || inputs.verify);
         const verifyTimeoutSeconds = Number.parseInt(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds), 10);
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
+        const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
+        const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
         const verifySaveTags = core.getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())
@@ -138,6 +140,26 @@ async function run() {
         }
         if (workingDirectory) {
             process.chdir(workingDirectory);
+        }
+        if (!saveConfigured) {
+            if (resolvedMode && resolvedMode !== 'archive') {
+                await (0, mode_handlers_1.runModeSave)(resolvedMode);
+            }
+            else if (genericEntries) {
+                core.info((0, utils_1.saveSkippedByConfigurationMessage)());
+            }
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
+            return;
+        }
+        if (!saveAllowed) {
+            if (resolvedMode && resolvedMode !== 'archive') {
+                await (0, mode_handlers_1.runModeSave)(resolvedMode);
+            }
+            else if (genericEntries) {
+                core.notice((0, utils_1.saveSkippedByPolicyMessage)());
+            }
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
+            return;
         }
         if (!(0, action_core_1.hasSaveToken)()) {
             if (resolvedMode && resolvedMode !== 'archive') {

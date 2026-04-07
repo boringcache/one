@@ -51,6 +51,8 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     composerVersion: '2.9.5',
     mavenLocalRepo: '~/.m2/repository',
     readOnly: false,
+    savePolicy: 'auto',
+    saveOnPullRequest: false,
     verify: 'none',
     verifyTimeoutSeconds: 60,
     verifyRequireServerSignature: false,

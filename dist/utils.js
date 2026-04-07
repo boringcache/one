@@ -35,6 +35,15 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
+exports.isPullRequestEvent = isPullRequestEvent;
+exports.saveConfigured = saveConfigured;
+exports.saveAllowedForEvent = saveAllowedForEvent;
+exports.saveSkippedByConfigurationMessage = saveSkippedByConfigurationMessage;
+exports.saveSkippedByPolicyMessage = saveSkippedByPolicyMessage;
+exports.applySaveTokenPolicy = applySaveTokenPolicy;
+exports.readSavedSaveAllowance = readSavedSaveAllowance;
+exports.readSavedSaveConfiguration = readSavedSaveConfiguration;
+exports.normalizeSavePolicy = normalizeSavePolicy;
 exports.normalizeDiagnosticsMode = normalizeDiagnosticsMode;
 exports.normalizeDiagnosticsLogLines = normalizeDiagnosticsLogLines;
 exports.resolveDiagnosticsConfig = resolveDiagnosticsConfig;
@@ -124,6 +133,8 @@ function getInputs() {
         composerVersion: core.getInput('composer-version') || '2.9.5',
         mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
         readOnly: core.getBooleanInput('read-only'),
+        savePolicy: normalizeSavePolicy(core.getInput('save-policy') || 'auto'),
+        saveOnPullRequest: core.getBooleanInput('save-on-pull-request'),
         verify: normalizeVerifyMode(core.getInput('verify')),
         verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
         verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
@@ -145,6 +156,70 @@ function getInputs() {
         verbose: core.getBooleanInput('verbose'),
         exclude: core.getInput('exclude'),
     };
+}
+function isPullRequestEvent() {
+    return (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'pull_request';
+}
+function saveConfigured(inputs) {
+    return inputs.savePolicy !== 'off';
+}
+function saveAllowedForEvent(inputs) {
+    return !isPullRequestEvent() || inputs.saveOnPullRequest;
+}
+function saveSkippedByConfigurationMessage() {
+    return 'Save skipped: save-policy is off; this step is restore-only by configuration.';
+}
+function saveSkippedByPolicyMessage() {
+    return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
+}
+function applySaveTokenPolicy(inputs) {
+    const saveAllowed = saveAllowedForEvent(inputs);
+    if (saveAllowed) {
+        return true;
+    }
+    const restoreFallback = process.env.BORINGCACHE_RESTORE_TOKEN ||
+        process.env.BORINGCACHE_SAVE_TOKEN ||
+        process.env.BORINGCACHE_API_TOKEN;
+    const hadSaveCapableToken = Boolean(process.env.BORINGCACHE_SAVE_TOKEN || process.env.BORINGCACHE_API_TOKEN);
+    if (restoreFallback) {
+        process.env.BORINGCACHE_RESTORE_TOKEN = restoreFallback;
+    }
+    delete process.env.BORINGCACHE_SAVE_TOKEN;
+    delete process.env.BORINGCACHE_API_TOKEN;
+    if (hadSaveCapableToken) {
+        core.notice('pull_request detected: treating save-capable BoringCache tokens as restore-only. Set save-on-pull-request: true to allow writes.');
+    }
+    return false;
+}
+function readSavedSaveAllowance(inputs, savedValue) {
+    if (!saveConfigured(inputs)) {
+        return false;
+    }
+    if (savedValue === 'true') {
+        return true;
+    }
+    if (savedValue === 'false') {
+        return false;
+    }
+    return saveAllowedForEvent(inputs);
+}
+function readSavedSaveConfiguration(inputs, savedValue) {
+    if (savedValue === 'true') {
+        return true;
+    }
+    if (savedValue === 'false') {
+        return false;
+    }
+    return saveConfigured(inputs);
+}
+function normalizeSavePolicy(value) {
+    switch ((value || 'auto').trim().toLowerCase()) {
+        case 'auto':
+        case 'off':
+            return (value || 'auto').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported save-policy "${value}". Expected auto or off.`);
+    }
 }
 function normalizeDiagnosticsMode(value) {
     switch ((value || 'auto').trim().toLowerCase()) {

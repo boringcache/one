@@ -22,7 +22,7 @@ If you are migrating an existing workflow and do not want repo config yet, raw `
     cache-profiles: bundle-install
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
 If you do not have repo config yet, start with explicit entries:
@@ -34,7 +34,7 @@ If you do not have repo config yet, start with explicit entries:
     entries: bundler:vendor/bundle,node:node_modules
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
 For Docker or native remote-cache flows, set the mode you need and keep the same workspace:
@@ -48,7 +48,7 @@ For Docker or native remote-cache flows, set the mode you need and keep the same
     tags: latest,${{ github.sha }}
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name == 'pull_request' && '' || secrets.BORINGCACHE_SAVE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
 ## What it handles
@@ -63,8 +63,19 @@ For Docker or native remote-cache flows, set the mode you need and keep the same
 
 - every job that should read cache gets `BORINGCACHE_RESTORE_TOKEN`
 - only trusted jobs get `BORINGCACHE_SAVE_TOKEN`
+- `pull_request` jobs stay restore-only by default; set `save-on-pull-request: true` only when the write scope is intentionally isolated
 - pull requests can stay restore-only
 - new workflows should avoid broad `BORINGCACHE_API_TOKEN` use in CI
+
+For bootstrap or setup-only steps that should never publish cache, set:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    save-policy: off
+```
+
+That keeps the step restore-only by configuration instead of emitting missing-save-token noise in the post step.
 
 ## Mental model
 

@@ -48,6 +48,7 @@ export {
 
 export type SetupMode = 'mise' | 'external' | 'none';
 export type Preset = 'none' | 'rails' | 'ruby' | 'node' | 'node-turbo' | 'python-uv' | 'go' | 'php-composer';
+export type SavePolicy = 'auto' | 'off';
 export type VerifyMode = 'none' | 'check' | 'wait';
 export type DiagnosticsInputMode = 'auto' | 'off' | 'summary' | 'verbose';
 export type DiagnosticsLevel = 'off' | 'summary' | 'verbose';
@@ -85,6 +86,8 @@ export interface OneInputs {
   composerVersion: string;
   mavenLocalRepo: string;
   readOnly: boolean;
+  savePolicy: SavePolicy;
+  saveOnPullRequest: boolean;
   verify: VerifyMode;
   verifyTimeoutSeconds: number;
   verifyRequireServerSignature: boolean;
@@ -187,6 +190,8 @@ export function getInputs(): OneInputs {
     composerVersion: core.getInput('composer-version') || '2.9.5',
     mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
     readOnly: core.getBooleanInput('read-only'),
+    savePolicy: normalizeSavePolicy(core.getInput('save-policy') || 'auto'),
+    saveOnPullRequest: core.getBooleanInput('save-on-pull-request'),
     verify: normalizeVerifyMode(core.getInput('verify')),
     verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
     verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
@@ -208,6 +213,95 @@ export function getInputs(): OneInputs {
     verbose: core.getBooleanInput('verbose'),
     exclude: core.getInput('exclude'),
   };
+}
+
+export function isPullRequestEvent(): boolean {
+  return (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'pull_request';
+}
+
+export function saveConfigured(inputs: Pick<OneInputs, 'savePolicy'>): boolean {
+  return inputs.savePolicy !== 'off';
+}
+
+export function saveAllowedForEvent(inputs: Pick<OneInputs, 'saveOnPullRequest'>): boolean {
+  return !isPullRequestEvent() || inputs.saveOnPullRequest;
+}
+
+export function saveSkippedByConfigurationMessage(): string {
+  return 'Save skipped: save-policy is off; this step is restore-only by configuration.';
+}
+
+export function saveSkippedByPolicyMessage(): string {
+  return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
+}
+
+export function applySaveTokenPolicy(inputs: Pick<OneInputs, 'saveOnPullRequest'>): boolean {
+  const saveAllowed = saveAllowedForEvent(inputs);
+  if (saveAllowed) {
+    return true;
+  }
+
+  const restoreFallback =
+    process.env.BORINGCACHE_RESTORE_TOKEN ||
+    process.env.BORINGCACHE_SAVE_TOKEN ||
+    process.env.BORINGCACHE_API_TOKEN;
+  const hadSaveCapableToken = Boolean(
+    process.env.BORINGCACHE_SAVE_TOKEN || process.env.BORINGCACHE_API_TOKEN,
+  );
+
+  if (restoreFallback) {
+    process.env.BORINGCACHE_RESTORE_TOKEN = restoreFallback;
+  }
+
+  delete process.env.BORINGCACHE_SAVE_TOKEN;
+  delete process.env.BORINGCACHE_API_TOKEN;
+
+  if (hadSaveCapableToken) {
+    core.notice(
+      'pull_request detected: treating save-capable BoringCache tokens as restore-only. Set save-on-pull-request: true to allow writes.',
+    );
+  }
+
+  return false;
+}
+
+export function readSavedSaveAllowance(
+  inputs: Pick<OneInputs, 'saveOnPullRequest' | 'savePolicy'>,
+  savedValue: string,
+): boolean {
+  if (!saveConfigured(inputs)) {
+    return false;
+  }
+  if (savedValue === 'true') {
+    return true;
+  }
+  if (savedValue === 'false') {
+    return false;
+  }
+  return saveAllowedForEvent(inputs);
+}
+
+export function readSavedSaveConfiguration(
+  inputs: Pick<OneInputs, 'savePolicy'>,
+  savedValue: string,
+): boolean {
+  if (savedValue === 'true') {
+    return true;
+  }
+  if (savedValue === 'false') {
+    return false;
+  }
+  return saveConfigured(inputs);
+}
+
+export function normalizeSavePolicy(value: string): SavePolicy {
+  switch ((value || 'auto').trim().toLowerCase()) {
+    case 'auto':
+    case 'off':
+      return (value || 'auto').trim().toLowerCase() as SavePolicy;
+    default:
+      throw new Error(`Unsupported save-policy "${value}". Expected auto or off.`);
+  }
 }
 
 export function normalizeDiagnosticsMode(value: string): DiagnosticsInputMode {

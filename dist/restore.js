@@ -133,6 +133,8 @@ async function run() {
     const originalCwd = process.cwd();
     try {
         const inputs = (0, utils_1.getInputs)();
+        const saveEnabled = (0, utils_1.saveConfigured)(inputs);
+        const saveAllowed = saveEnabled ? (0, utils_1.applySaveTokenPolicy)(inputs) : false;
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
             await (0, utils_1.ensureBoringCache)({ version: inputs.cliVersion, platform: cliPlatform });
@@ -155,10 +157,11 @@ async function run() {
             ...(modeRestore.verificationSpecs || []),
         ];
         const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
-        const deferredVerifyTags = (0, action_core_1.hasSaveToken)()
+        const saveCapable = saveEnabled && (0, action_core_1.hasSaveToken)();
+        const deferredVerifyTags = saveCapable
             ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => spec.saveExpected), plan.workingDirectory)
             : [];
-        const immediateVerifyTags = (0, action_core_1.hasSaveToken)()
+        const immediateVerifyTags = saveCapable
             ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => !spec.saveExpected), plan.workingDirectory)
             : resolvedTags;
         const overallHit = (_a = modeRestore.cacheHit) !== null && _a !== void 0 ? _a : (runtimeRestore.hit || archiveRestore.hit);
@@ -192,6 +195,8 @@ async function run() {
         core.saveState('verify-mode', inputs.verify);
         core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
         core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
+        core.saveState('save-configured', String(saveEnabled));
+        core.saveState('save-allowed', String(saveAllowed));
         if (inputs.verify !== 'none' && immediateVerifyTags.length > 0) {
             await (0, utils_1.verifyResolvedTags)(plan.workspace, immediateVerifyTags, {
                 mode: inputs.verify,
@@ -201,6 +206,12 @@ async function run() {
             });
         }
         await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeRestore.hit);
+        if (!saveEnabled) {
+            core.info('Post step save is disabled by save-policy: off.');
+        }
+        if (saveEnabled && (0, utils_1.isPullRequestEvent)() && !saveAllowed) {
+            core.info('Post step will stay restore-only unless save-on-pull-request: true is set.');
+        }
     }
     catch (error) {
         core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);

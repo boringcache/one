@@ -7,12 +7,16 @@ import {
   execBoringCache,
   getInputs,
   loadDiagnosticsConfig,
-  resolveVerificationTags,
   readLogTail,
+  readSavedSaveAllowance,
+  readSavedSaveConfiguration,
+  resolveVerificationTags,
   runDiagnosticsGroup,
+  parseEntries,
+  saveSkippedByConfigurationMessage,
+  saveSkippedByPolicyMessage,
   type TagVerificationSpec,
   type VerifyMode,
-  parseEntries,
   verifyResolvedTags,
 } from './utils';
 import { runModeSave } from './mode-handlers';
@@ -125,6 +129,8 @@ export async function run(): Promise<void> {
     );
     const verifyRequireServerSignature =
       core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
+    const saveConfigured = readSavedSaveConfiguration(inputs, core.getState('save-configured'));
+    const saveAllowed = readSavedSaveAllowance(inputs, core.getState('save-allowed'));
     const verifySaveTags = core.getState('verify-save-tags')
       .split(',')
       .map((tag) => tag.trim())
@@ -157,6 +163,42 @@ export async function run(): Promise<void> {
 
     if (workingDirectory) {
       process.chdir(workingDirectory);
+    }
+
+    if (!saveConfigured) {
+      if (resolvedMode && resolvedMode !== 'archive') {
+        await runModeSave(resolvedMode);
+      } else if (genericEntries) {
+        core.info(saveSkippedByConfigurationMessage());
+      }
+      await emitPostStepDiagnostics(
+        inputs,
+        resolvedMode,
+        workingDirectory || process.cwd(),
+        genericWorkspace,
+        genericEntries,
+        verifyMode,
+        verifySaveTags,
+      );
+      return;
+    }
+
+    if (!saveAllowed) {
+      if (resolvedMode && resolvedMode !== 'archive') {
+        await runModeSave(resolvedMode);
+      } else if (genericEntries) {
+        core.notice(saveSkippedByPolicyMessage());
+      }
+      await emitPostStepDiagnostics(
+        inputs,
+        resolvedMode,
+        workingDirectory || process.cwd(),
+        genericWorkspace,
+        genericEntries,
+        verifyMode,
+        verifySaveTags,
+      );
+      return;
     }
 
     if (!hasSaveToken()) {
