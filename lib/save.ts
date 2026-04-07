@@ -22,6 +22,8 @@ import {
 import { runModeSave } from './mode-handlers';
 import type { ResolvedMode } from './modes';
 
+const MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS = 180;
+
 function toSaveEntries(entriesString: string): string {
   if (!entriesString.trim()) {
     return '';
@@ -73,6 +75,10 @@ function filterVerifiableGenericTags(
 
 function resolvePostSaveVerifyMode(verifyMode: VerifyMode): VerifyMode {
   return verifyMode === 'check' ? 'wait' : verifyMode;
+}
+
+function resolvePostSaveVerifyTimeoutSeconds(timeoutSeconds: number): number {
+  return Math.max(timeoutSeconds, MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS);
 }
 
 async function emitPostStepDiagnostics(
@@ -132,6 +138,7 @@ export async function run(): Promise<void> {
       core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds),
       10,
     );
+    const postSaveVerifyTimeoutSeconds = resolvePostSaveVerifyTimeoutSeconds(verifyTimeoutSeconds);
     const verifyRequireServerSignature =
       core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
     const saveConfigured = readSavedSaveConfiguration(inputs, core.getState('save-configured'));
@@ -232,7 +239,7 @@ export async function run(): Promise<void> {
       if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
         await verifyResolvedTags(genericWorkspace, verifySaveTags, {
           mode: postSaveVerifyMode,
-          timeoutSeconds: verifyTimeoutSeconds,
+          timeoutSeconds: postSaveVerifyTimeoutSeconds,
           requireServerSignature: verifyRequireServerSignature,
           verbose,
         });
@@ -278,7 +285,7 @@ export async function run(): Promise<void> {
     if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
       await verifyResolvedTags(genericWorkspace, verifiableSaveTags, {
         mode: postSaveVerifyMode,
-        timeoutSeconds: verifyTimeoutSeconds,
+        timeoutSeconds: postSaveVerifyTimeoutSeconds,
         requireServerSignature: verifyRequireServerSignature,
         verbose,
       });

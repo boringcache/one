@@ -45028,6 +45028,7 @@ const fs = __importStar(__nccwpck_require__(79896));
 const action_core_1 = __nccwpck_require__(68701);
 const utils_1 = __nccwpck_require__(2219);
 const mode_handlers_1 = __nccwpck_require__(80861);
+const MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS = 180;
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
         return '';
@@ -45058,6 +45059,9 @@ function filterVerifiableGenericTags(entriesString, verifyTags, workingDirectory
 }
 function resolvePostSaveVerifyMode(verifyMode) {
     return verifyMode === 'check' ? 'wait' : verifyMode;
+}
+function resolvePostSaveVerifyTimeoutSeconds(timeoutSeconds) {
+    return Math.max(timeoutSeconds, MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS);
 }
 async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
@@ -45101,6 +45105,7 @@ async function run() {
         const verifyMode = (core.getState('verify-mode') || inputs.verify);
         const postSaveVerifyMode = resolvePostSaveVerifyMode(verifyMode);
         const verifyTimeoutSeconds = Number.parseInt(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds), 10);
+        const postSaveVerifyTimeoutSeconds = resolvePostSaveVerifyTimeoutSeconds(verifyTimeoutSeconds);
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
         const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
@@ -45171,7 +45176,7 @@ async function run() {
             if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
                 await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifySaveTags, {
                     mode: postSaveVerifyMode,
-                    timeoutSeconds: verifyTimeoutSeconds,
+                    timeoutSeconds: postSaveVerifyTimeoutSeconds,
                     requireServerSignature: verifyRequireServerSignature,
                     verbose,
                 });
@@ -45200,7 +45205,7 @@ async function run() {
         if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
             await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifiableSaveTags, {
                 mode: postSaveVerifyMode,
-                timeoutSeconds: verifyTimeoutSeconds,
+                timeoutSeconds: postSaveVerifyTimeoutSeconds,
                 requireServerSignature: verifyRequireServerSignature,
                 verbose,
             });

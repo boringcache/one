@@ -167,6 +167,43 @@ describe('save action', () => {
     }
   });
 
+  it('extends post-save verification beyond the requested timeout floor', async () => {
+    jest.useFakeTimers();
+    let checkAttempts = 0;
+    (exec.exec as jest.Mock).mockImplementation(async (command: string, args?: string[]) => {
+      if (command === 'boringcache' && args?.[0] === 'check') {
+        checkAttempts += 1;
+        return checkAttempts <= 40 ? 1 : 0;
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'archive',
+      'generic-cache-entries': 'deps:node_modules',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+      'verify-mode': 'check',
+      'verify-timeout-seconds': '60',
+      'verify-require-server-signature': 'false',
+      'verify-save-tags': 'deps',
+    });
+
+    try {
+      const runPromise = saveRun();
+      await Promise.resolve();
+      await jest.runAllTimersAsync();
+      await runPromise;
+
+      expect(checkAttempts).toBe(41);
+      expect(core.setFailed).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('does not verify exact generic tags for entries skipped as missing paths', async () => {
     const originalCwd = process.cwd();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-save-test-'));
