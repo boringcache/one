@@ -43215,6 +43215,9 @@ const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-l
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
 let rustLastOutput = '';
+function currentHomeDir() {
+    return process.env.HOME || os.homedir();
+}
 async function runModeRestore(plan, inputs) {
     switch (plan.mode) {
         case 'docker':
@@ -43296,7 +43299,7 @@ function getModeState(key) {
     return core.getState(modeStateKey(key));
 }
 function addLocalBinPaths() {
-    const home = os.homedir();
+    const home = currentHomeDir();
     core.addPath(path.join(home, '.local', 'bin'));
     core.addPath(path.join(home, '.boringcache', 'bin'));
 }
@@ -43621,7 +43624,7 @@ async function installBuildctl() {
     const version = 'v0.19.0';
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'buildctl-'));
     const archivePath = path.join(tmpDir, 'buildkit.tar.gz');
-    const installDir = path.join(os.homedir(), '.local', 'bin');
+    const installDir = path.join(currentHomeDir(), '.local', 'bin');
     try {
         const url = `https://github.com/moby/buildkit/releases/download/${version}/buildkit-${version}.linux-amd64.tar.gz`;
         const curlCode = await exec.exec('curl', ['-fsSL', '--output', archivePath, url], { ignoreReturnCode: true });
@@ -43715,33 +43718,41 @@ function readBuildkitDigest(metadataFile) {
         return '';
     }
 }
-function writeBazelrc(port, readOnly) {
-    const bazelrcPath = path.join(os.homedir(), '.bazelrc');
+function writeBazelrc(port, readOnly, extraLines = '') {
+    const bazelrcPath = path.join(currentHomeDir(), '.bazelrc');
     const remoteMaxConnections = parseInt(process.env.BORINGCACHE_BAZEL_REMOTE_MAX_CONNECTIONS || '', 10);
     const maxConnections = Number.isFinite(remoteMaxConnections) && remoteMaxConnections > 0
         ? remoteMaxConnections
         : 64;
-    const config = [
+    const normalizedExtraLines = extraLines
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const configLines = [
         '',
         '# BoringCache remote cache',
         `build --remote_cache=http://127.0.0.1:${port}`,
         `build --remote_upload_local_results=${!readOnly}`,
         'build --remote_download_minimal',
         `build --remote_max_connections=${maxConnections}`,
-        '',
-    ].join('\n');
+    ];
+    if (normalizedExtraLines.length > 0) {
+        configLines.push(...normalizedExtraLines);
+    }
+    configLines.push('');
+    const config = configLines.join('\n');
     fs.appendFileSync(bazelrcPath, config);
 }
 function resolveGradleHome(input) {
     const gradleHome = input || '~/.gradle';
     if (gradleHome.startsWith('~')) {
-        return path.join(os.homedir(), gradleHome.slice(1));
+        return path.join(currentHomeDir(), gradleHome.slice(1));
     }
     return path.resolve(gradleHome);
 }
 function resolveUserPath(input, workingDirectory) {
     if (input.startsWith('~')) {
-        return path.join(os.homedir(), input.slice(1));
+        return path.join(currentHomeDir(), input.slice(1));
     }
     if (path.isAbsolute(input)) {
         return input;
@@ -43841,7 +43852,7 @@ function wasRustCacheHit(exitCode) {
     return ![/Cache miss/i, /No cache entries/i, /Found 0\//i].some((pattern) => pattern.test(rustLastOutput));
 }
 function getCargoHome() {
-    return process.env.CARGO_HOME || path.join(os.homedir(), '.cargo');
+    return process.env.CARGO_HOME || path.join(currentHomeDir(), '.cargo');
 }
 function configureCargoEnv() {
     const cargoHome = getCargoHome();
@@ -43905,7 +43916,7 @@ async function hasGitDependencies(lockPath) {
     }
 }
 function getSccacheDir() {
-    return process.env.SCCACHE_DIR || path.join(os.homedir(), '.cache', 'sccache');
+    return process.env.SCCACHE_DIR || path.join(currentHomeDir(), '.cache', 'sccache');
 }
 function configureSccacheEnv(cacheSize) {
     const sccacheDir = getSccacheDir();
@@ -43966,7 +43977,7 @@ async function installSccache(versionInput = '0.14.0') {
         else {
             await exec.exec('tar', ['-xzf', archivePath, '-C', tempDir]);
         }
-        const installDir = path.join(os.homedir(), '.local', 'bin');
+        const installDir = path.join(currentHomeDir(), '.local', 'bin');
         await fs.promises.mkdir(installDir, { recursive: true });
         const binaryName = process.platform === 'win32' ? 'sccache.exe' : 'sccache';
         const srcPath = path.join(tempDir, assetName, binaryName);
@@ -44461,6 +44472,7 @@ async function runBuildkitSave() {
 async function runBazelRestore(plan, inputs) {
     var _a, _b;
     const inputVersion = core.getInput('bazel-version') || '';
+    const bazelrcLines = core.getInput('bazelrc-lines') || '';
     const runtimeVersion = ((_a = plan.runtimeTools.find((tool) => tool.name === 'bazel')) === null || _a === void 0 ? void 0 : _a.version) || '';
     const bazelVersion = inputVersion || runtimeVersion;
     const cacheTag = inputs.cacheTag || getModeCacheTag('', 'bazel');
@@ -44483,7 +44495,7 @@ async function runBazelRestore(plan, inputs) {
     await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
-    writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : inputs.readOnly);
+    writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : inputs.readOnly, bazelrcLines);
     core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
     core.setOutput('workspace', plan.workspace);
@@ -45582,7 +45594,7 @@ function resolveWorkspace(workspace) {
 }
 function expandUserPath(value) {
     if (value.startsWith('~/')) {
-        return path.join(os.homedir(), value.slice(2));
+        return path.join(process.env.HOME || os.homedir(), value.slice(2));
     }
     return value;
 }

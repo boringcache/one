@@ -360,7 +360,7 @@ function resolveWorkspace(workspace) {
 }
 function expandUserPath(value) {
     if (value.startsWith('~/')) {
-        return path.join(os.homedir(), value.slice(2));
+        return path.join(process.env.HOME || os.homedir(), value.slice(2));
     }
     return value;
 }

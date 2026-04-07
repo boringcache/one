@@ -277,11 +277,14 @@ describe('product modes', () => {
 
   it('uses mise-detected bazel tooling for bazel mode', async () => {
     const project = await makeTempProject({ '.bazelversion': '8.0.1\n' });
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'boringcache-one-bazel-home-'));
 
     try {
+      process.env.HOME = home;
       mockGetInput({
         mode: 'bazel',
         'working-directory': project,
+        'bazelrc-lines': 'build --remote_cache_async=false\nbuild --experimental_remote_cache_eviction_retries=5',
       });
       mockGetBooleanInput({});
 
@@ -291,8 +294,13 @@ describe('product modes', () => {
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
       }));
+      const bazelrc = await fs.readFile(path.join(home, '.bazelrc'), 'utf8');
+      expect(bazelrc).toContain('build --remote_cache=http://127.0.0.1:5000');
+      expect(bazelrc).toContain('build --remote_cache_async=false');
+      expect(bazelrc).toContain('build --experimental_remote_cache_eviction_retries=5');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'bazel');
     } finally {
+      await removeTempProject(home);
       await removeTempProject(project);
     }
   });

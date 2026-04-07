@@ -181,6 +181,9 @@ inputs:
   bazel-version:
     description: 'Bazel version for Bazelisk. Sets USE_BAZEL_VERSION when provided or auto-detected via mise.'
     required: false
+  bazelrc-lines:
+    description: 'Additional newline-separated Bazel rc lines appended after boringcache/one writes the remote cache block.'
+    required: false
   gradle-home:
     description: 'Gradle user home directory.'
     default: '~/.gradle'
