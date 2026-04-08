@@ -291,6 +291,13 @@ function resolveRegistryCacheTarget(
 ): { effectiveTag: string; refTag: string } {
   const rawRegistryTag = registryTagInput.trim();
   const rawRegistryRefTag = registryRefTagInput.trim();
+  const normalizedRegistryRefTag = rawRegistryRefTag
+    ? validateRegistryRefTag(rawRegistryRefTag)
+    : '';
+  const hasExplicitNonDefaultRefTag = Boolean(
+    normalizedRegistryRefTag
+    && normalizedRegistryRefTag !== DEFAULT_REGISTRY_CACHE_REF_TAG,
+  );
 
   if (rawRegistryTag.includes('@')) {
     throw new Error(
@@ -299,7 +306,7 @@ function resolveRegistryCacheTarget(
   }
 
   if (rawRegistryTag.includes(':')) {
-    if (rawRegistryRefTag) {
+    if (hasExplicitNonDefaultRefTag) {
       throw new Error(
         'registry-tag must not include a tag suffix when registry-ref-tag is also set. Use registry-tag for the cache root and registry-ref-tag for the OCI tag.',
       );
@@ -323,7 +330,7 @@ function resolveRegistryCacheTarget(
 
   return {
     effectiveTag: getEffectiveRegistryTag(cacheTag, rawRegistryTag),
-    refTag: validateRegistryRefTag(rawRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG),
+    refTag: normalizedRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG,
   };
 }
 

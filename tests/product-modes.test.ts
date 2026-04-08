@@ -200,6 +200,41 @@ describe('product modes', () => {
     }
   });
 
+  it('keeps embedded registry-tag compatibility when registry-ref-tag uses the default', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'registry-tag': 'bench-registry:cache-main',
+        'registry-ref-tag': 'buildcache',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
+      );
+      expect(dockerBuildCall).toBeTruthy();
+      expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
+        '--cache-from',
+        expect.stringContaining('/bench-registry:cache-main,registry.insecure=true'),
+        '--cache-to',
+        expect.stringContaining('/bench-registry:cache-main,mode=max,registry.insecure=true'),
+      ]));
+      expect(core.warning).toHaveBeenCalledWith(
+        'registry-tag included a tag suffix; prefer registry-ref-tag for the OCI cache tag.',
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('uses a distinct buildx builder name for each docker invocation in the same job', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 

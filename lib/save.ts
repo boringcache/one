@@ -17,7 +17,7 @@ import {
   saveSkippedByPolicyMessage,
   type TagVerificationSpec,
   type VerifyMode,
-  verifyResolvedTags,
+  verifyVerificationSpecs,
 } from './utils';
 import { runModeSave } from './mode-handlers';
 import type { ResolvedMode } from './modes';
@@ -34,14 +34,51 @@ function toSaveEntries(entriesString: string): string {
     .join(',');
 }
 
-function resolveGenericEntryVerificationTags(
+function parseSavedVerificationSpecs(raw: string): TagVerificationSpec[] {
+  if (!raw.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((spec): spec is TagVerificationSpec => {
+        return spec && typeof spec.tag === 'string' && typeof spec.noPlatform === 'boolean' && typeof spec.noGit === 'boolean';
+      })
+      .map((spec) => ({
+        tag: spec.tag,
+        noPlatform: spec.noPlatform,
+        noGit: spec.noGit,
+        pathHint: spec.pathHint,
+        saveExpected: spec.saveExpected,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function filterVerifiableSpecs(specs: TagVerificationSpec[]): TagVerificationSpec[] {
+  return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
+}
+
+function buildLegacyVerificationSpecs(
+  verifySaveTags: string[],
   entriesString: string,
   workingDirectory: string,
   noPlatform: boolean,
-  onlyExistingPaths: boolean,
-): string[] {
-  const specs: TagVerificationSpec[] = parseEntries(entriesString, 'restore', { resolvePaths: false })
-    .filter((entry) => !onlyExistingPaths || fs.existsSync(entry.savePath))
+): TagVerificationSpec[] {
+  if (!entriesString.trim()) {
+    return verifySaveTags.map((tag) => ({
+      tag,
+      noPlatform: true,
+      noGit: true,
+    }));
+  }
+
+  const entrySpecs: TagVerificationSpec[] = parseEntries(entriesString, 'restore', { resolvePaths: false })
     .map((entry) => ({
       tag: entry.tag,
       noPlatform,
@@ -49,28 +86,22 @@ function resolveGenericEntryVerificationTags(
       pathHint: entry.savePath,
       saveExpected: true,
     }));
+  const resolvedEntryTags = resolveVerificationTags(entrySpecs, workingDirectory);
+  const pathHintsByResolvedTag = new Map<string, string>();
+  resolvedEntryTags.forEach((resolvedTag, index) => {
+    const pathHint = entrySpecs[index]?.pathHint;
+    if (pathHint) {
+      pathHintsByResolvedTag.set(resolvedTag, pathHint);
+    }
+  });
 
-  return resolveVerificationTags(specs, workingDirectory);
-}
-
-function filterVerifiableGenericTags(
-  entriesString: string,
-  verifyTags: string[],
-  workingDirectory: string,
-  noPlatform: boolean,
-): string[] {
-  if (!entriesString.trim() || verifyTags.length === 0) {
-    return verifyTags;
-  }
-
-  const existingGenericTags = new Set(
-    resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, true),
-  );
-  const declaredGenericTags = new Set(
-    resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, false),
-  );
-
-  return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
+  return verifySaveTags.map((tag) => ({
+    tag,
+    noPlatform: true,
+    noGit: true,
+    pathHint: pathHintsByResolvedTag.get(tag),
+    saveExpected: true,
+  }));
 }
 
 function resolvePostSaveVerifyMode(verifyMode: VerifyMode): VerifyMode {
@@ -147,6 +178,7 @@ export async function run(): Promise<void> {
       .split(',')
       .map((tag) => tag.trim())
       .filter(Boolean);
+    let verifySaveSpecs = parseSavedVerificationSpecs(core.getState('verify-save-specs'));
 
     if (cliVersion.toLowerCase() !== 'skip') {
       await ensureBoringCache({ version: cliVersion, platform: cliPlatform });
@@ -171,6 +203,15 @@ export async function run(): Promise<void> {
       enableCrossOsArchive = inputs.enableCrossOsArchive;
       force = inputs.force;
       verbose = inputs.verbose;
+    }
+
+    if (verifySaveSpecs.length === 0 && verifySaveTags.length > 0) {
+      verifySaveSpecs = buildLegacyVerificationSpecs(
+        verifySaveTags,
+        genericEntries || '',
+        workingDirectory || process.cwd(),
+        enableCrossOsArchive || noPlatform,
+      );
     }
 
     if (workingDirectory) {
@@ -236,8 +277,8 @@ export async function run(): Promise<void> {
     }
 
     if (!genericEntries || !genericWorkspace) {
-      if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
-        await verifyResolvedTags(genericWorkspace, verifySaveTags, {
+      if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {
+        await verifyVerificationSpecs(genericWorkspace, verifySaveSpecs, {
           mode: postSaveVerifyMode,
           timeoutSeconds: postSaveVerifyTimeoutSeconds,
           requireServerSignature: verifyRequireServerSignature,
@@ -275,15 +316,10 @@ export async function run(): Promise<void> {
 
     await execBoringCache(args);
 
-    const verifiableSaveTags = filterVerifiableGenericTags(
-      genericEntries,
-      verifySaveTags,
-      workingDirectory || process.cwd(),
-      enableCrossOsArchive || noPlatform,
-    );
+    const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
 
-    if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
-      await verifyResolvedTags(genericWorkspace, verifiableSaveTags, {
+    if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
+      await verifyVerificationSpecs(genericWorkspace, verifiableSaveSpecs, {
         mode: postSaveVerifyMode,
         timeoutSeconds: postSaveVerifyTimeoutSeconds,
         requireServerSignature: verifyRequireServerSignature,

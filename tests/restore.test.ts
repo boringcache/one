@@ -225,7 +225,7 @@ describe('restore action', () => {
 
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
-      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--no-git', '--fail-on-miss'],
+      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--exact', '--fail-on-miss'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
   });
@@ -274,7 +274,7 @@ describe('restore action', () => {
     expect(core.saveState).toHaveBeenCalledWith('save-allowed', 'false');
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
-      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--no-git', '--fail-on-miss'],
+      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--exact', '--fail-on-miss'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
   });

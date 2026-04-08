@@ -125,7 +125,7 @@ describe('save action', () => {
     expect(exec.exec).toHaveBeenNthCalledWith(
       2,
       'boringcache',
-      ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--fail-on-miss'],
+      ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--exact', '--fail-on-miss'],
       expect.objectContaining({ ignoreReturnCode: true }),
     );
   });
@@ -247,7 +247,7 @@ describe('save action', () => {
       expect(exec.exec).toHaveBeenNthCalledWith(
         2,
         'boringcache',
-        ['check', 'my-org/my-project', verifyTags[0], '--no-platform', '--no-git', '--fail-on-miss'],
+        ['check', 'my-org/my-project', verifyTags[0], '--no-platform', '--no-git', '--exact', '--fail-on-miss'],
         expect.objectContaining({ ignoreReturnCode: true }),
       );
     } finally {

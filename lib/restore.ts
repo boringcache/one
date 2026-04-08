@@ -21,7 +21,7 @@ import {
   resolveVerificationTags,
   runDiagnosticsGroup,
   serializeTools,
-  verifyResolvedTags,
+  verifyVerificationSpecs,
 } from './utils';
 import { runModeRestore } from './mode-handlers';
 
@@ -203,12 +203,13 @@ export async function run(): Promise<void> {
     ];
     const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
     const saveCapable = saveEnabled && hasSaveToken();
-    const deferredVerifyTags = saveCapable
-      ? resolveVerificationTags(verificationSpecs.filter((spec) => spec.saveExpected), plan.workingDirectory)
+    const deferredVerifySpecs = saveCapable
+      ? verificationSpecs.filter((spec) => spec.saveExpected)
       : [];
-    const immediateVerifyTags = saveCapable
-      ? resolveVerificationTags(verificationSpecs.filter((spec) => !spec.saveExpected), plan.workingDirectory)
-      : resolvedTags;
+    const immediateVerifySpecs = saveCapable
+      ? verificationSpecs.filter((spec) => !spec.saveExpected)
+      : verificationSpecs;
+    const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
 
     const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
     const diagnostics = loadDiagnosticsConfig(inputs);
@@ -239,6 +240,7 @@ export async function run(): Promise<void> {
     core.saveState('diagnostics-level', diagnostics.level);
     core.saveState('diagnostics-log-lines', String(diagnostics.logLines));
     core.saveState('resolved-tags', resolvedTags.join(','));
+    core.saveState('verify-save-specs', JSON.stringify(deferredVerifySpecs));
     core.saveState('verify-save-tags', deferredVerifyTags.join(','));
     core.saveState('verify-mode', inputs.verify);
     core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
@@ -246,8 +248,8 @@ export async function run(): Promise<void> {
     core.saveState('save-configured', String(saveEnabled));
     core.saveState('save-allowed', String(saveAllowed));
 
-    if (inputs.verify !== 'none' && immediateVerifyTags.length > 0) {
-      await verifyResolvedTags(plan.workspace, immediateVerifyTags, {
+    if (inputs.verify !== 'none' && immediateVerifySpecs.length > 0) {
+      await verifyVerificationSpecs(plan.workspace, immediateVerifySpecs, {
         mode: inputs.verify,
         timeoutSeconds: inputs.verifyTimeoutSeconds,
         requireServerSignature: inputs.verifyRequireServerSignature,

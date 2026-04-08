@@ -838,9 +838,34 @@ interface CheckExecutionResult {
   stderr: string;
 }
 
-async function runExactTagCheck(
+interface TagCheckBatch {
+  tags: string[];
+  noPlatform: boolean;
+  noGit: boolean;
+}
+
+function groupVerificationSpecs(specs: TagVerificationSpec[]): TagCheckBatch[] {
+  const grouped = new Map<string, TagCheckBatch>();
+
+  for (const spec of specs) {
+    const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}`;
+    const batch = grouped.get(key) || {
+      tags: [],
+      noPlatform: spec.noPlatform,
+      noGit: spec.noGit,
+    };
+    if (!batch.tags.includes(spec.tag)) {
+      batch.tags.push(spec.tag);
+    }
+    grouped.set(key, batch);
+  }
+
+  return Array.from(grouped.values());
+}
+
+async function runTagCheck(
   workspace: string,
-  exactTags: string[],
+  batch: TagCheckBatch,
   options: Pick<VerifyResolvedTagsOptions, 'requireServerSignature' | 'verbose'>,
 ): Promise<CheckExecutionResult> {
   const args: string[] = [];
@@ -853,9 +878,16 @@ async function runExactTagCheck(
   args.push(
     'check',
     workspace,
-    exactTags.join(','),
-    '--no-platform',
-    '--no-git',
+    batch.tags.join(','),
+  );
+  if (batch.noPlatform) {
+    args.push('--no-platform');
+  }
+  if (batch.noGit) {
+    args.push('--no-git');
+  }
+  args.push(
+    '--exact',
     '--fail-on-miss',
   );
 
@@ -887,38 +919,65 @@ export async function verifyResolvedTags(
   exactTags: string[],
   options: VerifyResolvedTagsOptions,
 ): Promise<void> {
-  if (options.mode === 'none' || exactTags.length === 0) {
+  const specs: TagVerificationSpec[] = exactTags.map((tag) => ({
+    tag,
+    noPlatform: true,
+    noGit: true,
+  }));
+  return verifyVerificationSpecs(workspace, specs, options);
+}
+
+export async function verifyVerificationSpecs(
+  workspace: string,
+  specs: TagVerificationSpec[],
+  options: VerifyResolvedTagsOptions,
+): Promise<void> {
+  const batches = groupVerificationSpecs(specs);
+  if (options.mode === 'none' || batches.length === 0) {
     return;
   }
 
   if (options.mode === 'check') {
-    const result = await runExactTagCheck(workspace, exactTags, options);
-    if (result.exitCode !== 0) {
-      throw new Error(`Verification failed for tags ${exactTags.join(', ')}: ${formatCheckFailure(result)}`);
+    for (const batch of batches) {
+      const result = await runTagCheck(workspace, batch, options);
+      if (result.exitCode !== 0) {
+        throw new Error(`Verification failed for tags ${batch.tags.join(', ')}: ${formatCheckFailure(result)}`);
+      }
     }
-    core.info(`Verified ${exactTags.length} tag${exactTags.length === 1 ? '' : 's'} in ${workspace}`);
+    const total = batches.reduce((sum, batch) => sum + batch.tags.length, 0);
+    core.info(`Verified ${total} tag${total === 1 ? '' : 's'} in ${workspace}`);
     return;
   }
 
   const deadline = Date.now() + options.timeoutSeconds * 1000;
   let attempt = 0;
   let lastFailure = '';
+  const total = batches.reduce((sum, batch) => sum + batch.tags.length, 0);
 
   while (Date.now() < deadline) {
     attempt += 1;
-    const result = await runExactTagCheck(workspace, exactTags, options);
-    if (result.exitCode === 0) {
-      core.info(`Verified ${exactTags.length} tag${exactTags.length === 1 ? '' : 's'} in ${workspace} after ${attempt} attempt${attempt === 1 ? '' : 's'}`);
+    let pendingBatch: TagCheckBatch | null = null;
+
+    for (const batch of batches) {
+      const result = await runTagCheck(workspace, batch, options);
+      if (result.exitCode !== 0) {
+        pendingBatch = batch;
+        lastFailure = formatCheckFailure(result);
+        break;
+      }
+    }
+
+    if (!pendingBatch) {
+      core.info(`Verified ${total} tag${total === 1 ? '' : 's'} in ${workspace} after ${attempt} attempt${attempt === 1 ? '' : 's'}`);
       return;
     }
 
-    lastFailure = formatCheckFailure(result);
-    core.info(`Waiting for tags to become visible (${attempt}): ${exactTags.join(', ')}`);
+    core.info(`Waiting for tags to become visible (${attempt}): ${pendingBatch.tags.join(', ')}`);
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
   throw new Error(
-    `Timed out waiting ${options.timeoutSeconds}s for tags ${exactTags.join(', ')} in ${workspace}: ${lastFailure}`,
+    `Timed out waiting ${options.timeoutSeconds}s for ${total} tag${total === 1 ? '' : 's'} in ${workspace}: ${lastFailure}`,
   );
 }
 
