@@ -48,9 +48,43 @@ function toSaveEntries(entriesString) {
         .map((entry) => `${entry.tag}:${entry.savePath}`)
         .join(',');
 }
-function resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, onlyExistingPaths) {
-    const specs = (0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false })
-        .filter((entry) => !onlyExistingPaths || fs.existsSync(entry.savePath))
+function parseSavedVerificationSpecs(raw) {
+    if (!raw.trim()) {
+        return [];
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .filter((spec) => {
+            return spec && typeof spec.tag === 'string' && typeof spec.noPlatform === 'boolean' && typeof spec.noGit === 'boolean';
+        })
+            .map((spec) => ({
+            tag: spec.tag,
+            noPlatform: spec.noPlatform,
+            noGit: spec.noGit,
+            pathHint: spec.pathHint,
+            saveExpected: spec.saveExpected,
+        }));
+    }
+    catch {
+        return [];
+    }
+}
+function filterVerifiableSpecs(specs) {
+    return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
+}
+function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDirectory, noPlatform) {
+    if (!entriesString.trim()) {
+        return verifySaveTags.map((tag) => ({
+            tag,
+            noPlatform: true,
+            noGit: true,
+        }));
+    }
+    const entrySpecs = (0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false })
         .map((entry) => ({
         tag: entry.tag,
         noPlatform,
@@ -58,15 +92,22 @@ function resolveGenericEntryVerificationTags(entriesString, workingDirectory, no
         pathHint: entry.savePath,
         saveExpected: true,
     }));
-    return (0, utils_1.resolveVerificationTags)(specs, workingDirectory);
-}
-function filterVerifiableGenericTags(entriesString, verifyTags, workingDirectory, noPlatform) {
-    if (!entriesString.trim() || verifyTags.length === 0) {
-        return verifyTags;
-    }
-    const existingGenericTags = new Set(resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, true));
-    const declaredGenericTags = new Set(resolveGenericEntryVerificationTags(entriesString, workingDirectory, noPlatform, false));
-    return verifyTags.filter((tag) => !declaredGenericTags.has(tag) || existingGenericTags.has(tag));
+    const resolvedEntryTags = (0, utils_1.resolveVerificationTags)(entrySpecs, workingDirectory);
+    const pathHintsByResolvedTag = new Map();
+    resolvedEntryTags.forEach((resolvedTag, index) => {
+        var _a;
+        const pathHint = (_a = entrySpecs[index]) === null || _a === void 0 ? void 0 : _a.pathHint;
+        if (pathHint) {
+            pathHintsByResolvedTag.set(resolvedTag, pathHint);
+        }
+    });
+    return verifySaveTags.map((tag) => ({
+        tag,
+        noPlatform: true,
+        noGit: true,
+        pathHint: pathHintsByResolvedTag.get(tag),
+        saveExpected: true,
+    }));
 }
 function resolvePostSaveVerifyMode(verifyMode) {
     return verifyMode === 'check' ? 'wait' : verifyMode;
@@ -124,6 +165,7 @@ async function run() {
             .split(',')
             .map((tag) => tag.trim())
             .filter(Boolean);
+        let verifySaveSpecs = parseSavedVerificationSpecs(core.getState('verify-save-specs'));
         if (cliVersion.toLowerCase() !== 'skip') {
             await (0, utils_1.ensureBoringCache)({ version: cliVersion, platform: cliPlatform });
         }
@@ -146,6 +188,9 @@ async function run() {
             enableCrossOsArchive = inputs.enableCrossOsArchive;
             force = inputs.force;
             verbose = inputs.verbose;
+        }
+        if (verifySaveSpecs.length === 0 && verifySaveTags.length > 0) {
+            verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags, genericEntries || '', workingDirectory || process.cwd(), enableCrossOsArchive || noPlatform);
         }
         if (workingDirectory) {
             process.chdir(workingDirectory);
@@ -184,8 +229,8 @@ async function run() {
             await (0, mode_handlers_1.runModeSave)(resolvedMode);
         }
         if (!genericEntries || !genericWorkspace) {
-            if (verifyMode !== 'none' && verifySaveTags.length > 0 && genericWorkspace) {
-                await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifySaveTags, {
+            if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {
+                await (0, utils_1.verifyVerificationSpecs)(genericWorkspace, verifySaveSpecs, {
                     mode: postSaveVerifyMode,
                     timeoutSeconds: postSaveVerifyTimeoutSeconds,
                     requireServerSignature: verifyRequireServerSignature,
@@ -212,9 +257,9 @@ async function run() {
             args.push('--fail-on-cache-error');
         }
         await (0, utils_1.execBoringCache)(args);
-        const verifiableSaveTags = filterVerifiableGenericTags(genericEntries, verifySaveTags, workingDirectory || process.cwd(), enableCrossOsArchive || noPlatform);
-        if (verifyMode !== 'none' && verifiableSaveTags.length > 0) {
-            await (0, utils_1.verifyResolvedTags)(genericWorkspace, verifiableSaveTags, {
+        const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
+        if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
+            await (0, utils_1.verifyVerificationSpecs)(genericWorkspace, verifiableSaveSpecs, {
                 mode: postSaveVerifyMode,
                 timeoutSeconds: postSaveVerifyTimeoutSeconds,
                 requireServerSignature: verifyRequireServerSignature,

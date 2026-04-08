@@ -94,7 +94,7 @@ describe('save action', () => {
     expect(chdirSpy).toHaveBeenLastCalledWith(expect.any(String));
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
-      ['save', 'my-org/my-project', 'deps:node_modules', '--force', '--no-platform', '--verbose', '--exclude', '*.log'],
+      ['save', 'my-org/my-project', 'deps:node_modules', '--force', '--no-platform', '--verbose', '--exclude', '*.log', '--fail-on-cache-error'],
       undefined,
     );
     chdirSpy.mockRestore();
@@ -270,7 +270,7 @@ describe('save action', () => {
     expect(actionCoreMocks.ensureBoringCache).not.toHaveBeenCalled();
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
-      ['save', 'my-org/my-project', 'deps:node_modules', '--no-platform'],
+      ['save', 'my-org/my-project', 'deps:node_modules', '--no-platform', '--fail-on-cache-error'],
       undefined,
     );
   });

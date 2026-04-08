@@ -59,11 +59,11 @@ inputs:
     required: false
   verify:
     description: 'Optional internal verification for resolved tags: none, check, or wait. Save-capable tags verify in the post step after save completes.'
-    default: 'none'
+    default: 'wait'
     required: false
   verify-timeout-seconds:
     description: 'Timeout in seconds for verify=wait.'
-    default: '60'
+    default: '180'
     required: false
   verify-require-server-signature:
     description: 'Require signed cache hits during verification.'

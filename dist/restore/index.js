@@ -43365,11 +43365,16 @@ function validateRegistryRefTag(refTag) {
 function resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagInput) {
     const rawRegistryTag = registryTagInput.trim();
     const rawRegistryRefTag = registryRefTagInput.trim();
+    const normalizedRegistryRefTag = rawRegistryRefTag
+        ? validateRegistryRefTag(rawRegistryRefTag)
+        : '';
+    const hasExplicitNonDefaultRefTag = Boolean(normalizedRegistryRefTag
+        && normalizedRegistryRefTag !== DEFAULT_REGISTRY_CACHE_REF_TAG);
     if (rawRegistryTag.includes('@')) {
         throw new Error(`Unsupported registry-tag "${registryTagInput}". Use a repo-style cache root, not a digest reference.`);
     }
     if (rawRegistryTag.includes(':')) {
-        if (rawRegistryRefTag) {
+        if (hasExplicitNonDefaultRefTag) {
             throw new Error('registry-tag must not include a tag suffix when registry-ref-tag is also set. Use registry-tag for the cache root and registry-ref-tag for the OCI tag.');
         }
         const separator = rawRegistryTag.lastIndexOf(':');
@@ -43386,7 +43391,7 @@ function resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagIn
     }
     return {
         effectiveTag: getEffectiveRegistryTag(cacheTag, rawRegistryTag),
-        refTag: validateRegistryRefTag(rawRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG),
+        refTag: normalizedRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG,
     };
 }
 function getRegistryRef(port, cacheTag, host = '127.0.0.1', refTag = DEFAULT_REGISTRY_CACHE_REF_TAG) {
@@ -45159,12 +45164,13 @@ async function run() {
         ];
         const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
         const saveCapable = saveEnabled && (0, action_core_1.hasSaveToken)();
-        const deferredVerifyTags = saveCapable
-            ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => spec.saveExpected), plan.workingDirectory)
+        const deferredVerifySpecs = saveCapable
+            ? verificationSpecs.filter((spec) => spec.saveExpected)
             : [];
-        const immediateVerifyTags = saveCapable
-            ? (0, utils_1.resolveVerificationTags)(verificationSpecs.filter((spec) => !spec.saveExpected), plan.workingDirectory)
-            : resolvedTags;
+        const immediateVerifySpecs = saveCapable
+            ? verificationSpecs.filter((spec) => !spec.saveExpected)
+            : verificationSpecs;
+        const deferredVerifyTags = (0, utils_1.resolveVerificationTags)(deferredVerifySpecs, plan.workingDirectory);
         const overallHit = (_a = modeRestore.cacheHit) !== null && _a !== void 0 ? _a : (runtimeRestore.hit || archiveRestore.hit);
         const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
         core.setOutput('cache-hit', String(overallHit));
@@ -45192,14 +45198,15 @@ async function run() {
         core.saveState('diagnostics-level', diagnostics.level);
         core.saveState('diagnostics-log-lines', String(diagnostics.logLines));
         core.saveState('resolved-tags', resolvedTags.join(','));
+        core.saveState('verify-save-specs', JSON.stringify(deferredVerifySpecs));
         core.saveState('verify-save-tags', deferredVerifyTags.join(','));
         core.saveState('verify-mode', inputs.verify);
         core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
         core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
         core.saveState('save-configured', String(saveEnabled));
         core.saveState('save-allowed', String(saveAllowed));
-        if (inputs.verify !== 'none' && immediateVerifyTags.length > 0) {
-            await (0, utils_1.verifyResolvedTags)(plan.workspace, immediateVerifyTags, {
+        if (inputs.verify !== 'none' && immediateVerifySpecs.length > 0) {
+            await (0, utils_1.verifyVerificationSpecs)(plan.workspace, immediateVerifySpecs, {
                 mode: inputs.verify,
                 timeoutSeconds: inputs.verifyTimeoutSeconds,
                 requireServerSignature: inputs.verifyRequireServerSignature,
@@ -45293,6 +45300,7 @@ exports.resolveWorkspace = resolveWorkspace;
 exports.resolveVerificationTags = resolveVerificationTags;
 exports.buildGenericVerificationSpecs = buildGenericVerificationSpecs;
 exports.verifyResolvedTags = verifyResolvedTags;
+exports.verifyVerificationSpecs = verifyVerificationSpecs;
 exports.parseToolSpecs = parseToolSpecs;
 exports.resolveRuntimeTools = resolveRuntimeTools;
 exports.detectNodePackageManager = detectNodePackageManager;
@@ -45529,18 +45537,18 @@ function readLogTail(filePath, maxLines) {
     }
 }
 function normalizeVerifyMode(value) {
-    switch ((value || 'none').trim().toLowerCase()) {
+    switch ((value || 'wait').trim().toLowerCase()) {
         case 'none':
         case 'check':
         case 'wait':
-            return (value || 'none').trim().toLowerCase();
+            return (value || 'wait').trim().toLowerCase();
         default:
             throw new Error(`Unsupported verify mode "${value}". Expected none, check, or wait.`);
     }
 }
 function normalizeVerifyTimeoutSeconds(value) {
     if (!value || !value.trim()) {
-        return 60;
+        return 180;
     }
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed) || parsed < 1) {
@@ -45897,7 +45905,23 @@ function buildGenericVerificationSpecs(plan, inputs, includeRuntime) {
     appendVerificationSpecsFromEntries(specs, plan.archiveEntries, noPlatform, false);
     return specs;
 }
-async function runExactTagCheck(workspace, exactTags, options) {
+function groupVerificationSpecs(specs) {
+    const grouped = new Map();
+    for (const spec of specs) {
+        const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}`;
+        const batch = grouped.get(key) || {
+            tags: [],
+            noPlatform: spec.noPlatform,
+            noGit: spec.noGit,
+        };
+        if (!batch.tags.includes(spec.tag)) {
+            batch.tags.push(spec.tag);
+        }
+        grouped.set(key, batch);
+    }
+    return Array.from(grouped.values());
+}
+async function runTagCheck(workspace, batch, options) {
     const args = [];
     if (options.verbose) {
         args.push('--verbose');
@@ -45905,7 +45929,14 @@ async function runExactTagCheck(workspace, exactTags, options) {
     if (options.requireServerSignature) {
         args.push('--require-server-signature');
     }
-    args.push('check', workspace, exactTags.join(','), '--no-platform', '--no-git', '--fail-on-miss');
+    args.push('check', workspace, batch.tags.join(','));
+    if (batch.noPlatform) {
+        args.push('--no-platform');
+    }
+    if (batch.noGit) {
+        args.push('--no-git');
+    }
+    args.push('--exact', '--fail-on-miss');
     let stdout = '';
     let stderr = '';
     const exitCode = await exec.exec('boringcache', args, {
@@ -45927,32 +45958,52 @@ function formatCheckFailure(result) {
     return details || `boringcache check exited with code ${result.exitCode}`;
 }
 async function verifyResolvedTags(workspace, exactTags, options) {
-    if (options.mode === 'none' || exactTags.length === 0) {
+    const specs = exactTags.map((tag) => ({
+        tag,
+        noPlatform: true,
+        noGit: true,
+    }));
+    return verifyVerificationSpecs(workspace, specs, options);
+}
+async function verifyVerificationSpecs(workspace, specs, options) {
+    const batches = groupVerificationSpecs(specs);
+    if (options.mode === 'none' || batches.length === 0) {
         return;
     }
     if (options.mode === 'check') {
-        const result = await runExactTagCheck(workspace, exactTags, options);
-        if (result.exitCode !== 0) {
-            throw new Error(`Verification failed for tags ${exactTags.join(', ')}: ${formatCheckFailure(result)}`);
+        for (const batch of batches) {
+            const result = await runTagCheck(workspace, batch, options);
+            if (result.exitCode !== 0) {
+                throw new Error(`Verification failed for tags ${batch.tags.join(', ')}: ${formatCheckFailure(result)}`);
+            }
         }
-        core.info(`Verified ${exactTags.length} tag${exactTags.length === 1 ? '' : 's'} in ${workspace}`);
+        const total = batches.reduce((sum, batch) => sum + batch.tags.length, 0);
+        core.info(`Verified ${total} tag${total === 1 ? '' : 's'} in ${workspace}`);
         return;
     }
     const deadline = Date.now() + options.timeoutSeconds * 1000;
     let attempt = 0;
     let lastFailure = '';
+    const total = batches.reduce((sum, batch) => sum + batch.tags.length, 0);
     while (Date.now() < deadline) {
         attempt += 1;
-        const result = await runExactTagCheck(workspace, exactTags, options);
-        if (result.exitCode === 0) {
-            core.info(`Verified ${exactTags.length} tag${exactTags.length === 1 ? '' : 's'} in ${workspace} after ${attempt} attempt${attempt === 1 ? '' : 's'}`);
+        let pendingBatch = null;
+        for (const batch of batches) {
+            const result = await runTagCheck(workspace, batch, options);
+            if (result.exitCode !== 0) {
+                pendingBatch = batch;
+                lastFailure = formatCheckFailure(result);
+                break;
+            }
+        }
+        if (!pendingBatch) {
+            core.info(`Verified ${total} tag${total === 1 ? '' : 's'} in ${workspace} after ${attempt} attempt${attempt === 1 ? '' : 's'}`);
             return;
         }
-        lastFailure = formatCheckFailure(result);
-        core.info(`Waiting for tags to become visible (${attempt}): ${exactTags.join(', ')}`);
+        core.info(`Waiting for tags to become visible (${attempt}): ${pendingBatch.tags.join(', ')}`);
         await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-    throw new Error(`Timed out waiting ${options.timeoutSeconds}s for tags ${exactTags.join(', ')} in ${workspace}: ${lastFailure}`);
+    throw new Error(`Timed out waiting ${options.timeoutSeconds}s for ${total} tag${total === 1 ? '' : 's'} in ${workspace}: ${lastFailure}`);
 }
 function parseToolSpecs(input) {
     return input

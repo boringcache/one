@@ -200,11 +200,16 @@ function validateRegistryRefTag(refTag) {
 function resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagInput) {
     const rawRegistryTag = registryTagInput.trim();
     const rawRegistryRefTag = registryRefTagInput.trim();
+    const normalizedRegistryRefTag = rawRegistryRefTag
+        ? validateRegistryRefTag(rawRegistryRefTag)
+        : '';
+    const hasExplicitNonDefaultRefTag = Boolean(normalizedRegistryRefTag
+        && normalizedRegistryRefTag !== DEFAULT_REGISTRY_CACHE_REF_TAG);
     if (rawRegistryTag.includes('@')) {
         throw new Error(`Unsupported registry-tag "${registryTagInput}". Use a repo-style cache root, not a digest reference.`);
     }
     if (rawRegistryTag.includes(':')) {
-        if (rawRegistryRefTag) {
+        if (hasExplicitNonDefaultRefTag) {
             throw new Error('registry-tag must not include a tag suffix when registry-ref-tag is also set. Use registry-tag for the cache root and registry-ref-tag for the OCI tag.');
         }
         const separator = rawRegistryTag.lastIndexOf(':');
@@ -221,7 +226,7 @@ function resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagIn
     }
     return {
         effectiveTag: getEffectiveRegistryTag(cacheTag, rawRegistryTag),
-        refTag: validateRegistryRefTag(rawRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG),
+        refTag: normalizedRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG,
     };
 }
 function getRegistryRef(port, cacheTag, host = '127.0.0.1', refTag = DEFAULT_REGISTRY_CACHE_REF_TAG) {

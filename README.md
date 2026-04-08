@@ -84,6 +84,7 @@ That keeps the step restore-only by configuration instead of emitting missing-sa
 - `cache-profiles` resolve repo-defined cache groups from `.boringcache.toml`
 - `mode` selects the primary adapter when you need Docker or a native remote-cache flow
 - `setup` defaults to `mise`
+- `verify` defaults to `wait` with a 180s timeout so tag visibility is checked automatically after restore/save
 
 In most workflows, set `workspace` and then one of:
 
