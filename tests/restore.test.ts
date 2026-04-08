@@ -34,7 +34,7 @@ describe('restore action', () => {
 
     await restoreRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.19' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.20' });
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
       ['restore', 'my-org/my-project', 'deps:node_modules,build:dist', '--no-platform'],
@@ -110,7 +110,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.19',
+      version: 'v1.12.20',
       platform: 'alpine-amd64',
     });
   });
@@ -124,7 +124,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.19',
+      version: 'v1.12.20',
       platform: 'linux-amd64',
     });
     expect(exec.exec).not.toHaveBeenCalledWith(
@@ -201,15 +201,7 @@ describe('restore action', () => {
     expect(actionCoreMocks.exportMiseEnv).toHaveBeenCalledWith(process.cwd());
   });
 
-  it('verifies exact tags immediately when no save-capable token is present', async () => {
-    const exactVerifyTag = resolveVerificationTags([{
-      tag: 'deps',
-      noPlatform: true,
-      noGit: false,
-      pathHint: 'node_modules',
-      saveExpected: true,
-    }], process.cwd())[0];
-
+  it('skips save-expected verification in restore step when no save-capable token is present', async () => {
     delete process.env.BORINGCACHE_SAVE_TOKEN;
     delete process.env.BORINGCACHE_API_TOKEN;
     process.env.BORINGCACHE_RESTORE_TOKEN = 'test-restore-token';
@@ -223,10 +215,12 @@ describe('restore action', () => {
 
     await restoreRun();
 
-    expect(exec.exec).toHaveBeenCalledWith(
-      'boringcache',
-      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--exact', '--fail-on-miss'],
-      expect.objectContaining({ ignoreReturnCode: true }),
+    const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+    );
+    expect(checkCalls).toHaveLength(0);
+    expect(core.info).toHaveBeenCalledWith(
+      'Skipping save-expected tag verification in restore step: no save-capable token is available.',
     );
   });
 
@@ -246,14 +240,6 @@ describe('restore action', () => {
   });
 
   it('treats pull_request save tokens as restore-only by default', async () => {
-    const exactVerifyTag = resolveVerificationTags([{
-      tag: 'deps',
-      noPlatform: true,
-      noGit: false,
-      pathHint: 'node_modules',
-      saveExpected: true,
-    }], process.cwd())[0];
-
     process.env.GITHUB_EVENT_NAME = 'pull_request';
     process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
     delete process.env.BORINGCACHE_RESTORE_TOKEN;
@@ -272,10 +258,12 @@ describe('restore action', () => {
       'pull_request detected: treating save-capable BoringCache tokens as restore-only. Set save-on-pull-request: true to allow writes.',
     );
     expect(core.saveState).toHaveBeenCalledWith('save-allowed', 'false');
-    expect(exec.exec).toHaveBeenCalledWith(
-      'boringcache',
-      ['check', 'my-org/my-project', exactVerifyTag, '--no-platform', '--exact', '--fail-on-miss'],
-      expect.objectContaining({ ignoreReturnCode: true }),
+    const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+    );
+    expect(checkCalls).toHaveLength(0);
+    expect(core.info).toHaveBeenCalledWith(
+      'Skipping save-expected tag verification in restore step: no save-capable token is available.',
     );
   });
 

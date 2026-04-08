@@ -203,12 +203,9 @@ export async function run(): Promise<void> {
     ];
     const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
     const saveCapable = saveEnabled && hasSaveToken();
-    const deferredVerifySpecs = saveCapable
-      ? verificationSpecs.filter((spec) => spec.saveExpected)
-      : [];
-    const immediateVerifySpecs = saveCapable
-      ? verificationSpecs.filter((spec) => !spec.saveExpected)
-      : verificationSpecs;
+    const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
+    const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
+    const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
     const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
 
     const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
@@ -247,6 +244,12 @@ export async function run(): Promise<void> {
     core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
     core.saveState('save-configured', String(saveEnabled));
     core.saveState('save-allowed', String(saveAllowed));
+
+    if (!saveCapable && inputs.verify !== 'none' && saveExpectedSpecs.length > 0) {
+      core.info(
+        'Skipping save-expected tag verification in restore step: no save-capable token is available.',
+      );
+    }
 
     if (inputs.verify !== 'none' && immediateVerifySpecs.length > 0) {
       await verifyVerificationSpecs(plan.workspace, immediateVerifySpecs, {

@@ -45164,12 +45164,9 @@ async function run() {
         ];
         const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
         const saveCapable = saveEnabled && (0, action_core_1.hasSaveToken)();
-        const deferredVerifySpecs = saveCapable
-            ? verificationSpecs.filter((spec) => spec.saveExpected)
-            : [];
-        const immediateVerifySpecs = saveCapable
-            ? verificationSpecs.filter((spec) => !spec.saveExpected)
-            : verificationSpecs;
+        const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
+        const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
+        const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = (0, utils_1.resolveVerificationTags)(deferredVerifySpecs, plan.workingDirectory);
         const overallHit = (_a = modeRestore.cacheHit) !== null && _a !== void 0 ? _a : (runtimeRestore.hit || archiveRestore.hit);
         const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
@@ -45205,6 +45202,9 @@ async function run() {
         core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
         core.saveState('save-configured', String(saveEnabled));
         core.saveState('save-allowed', String(saveAllowed));
+        if (!saveCapable && inputs.verify !== 'none' && saveExpectedSpecs.length > 0) {
+            core.info('Skipping save-expected tag verification in restore step: no save-capable token is available.');
+        }
         if (inputs.verify !== 'none' && immediateVerifySpecs.length > 0) {
             await (0, utils_1.verifyVerificationSpecs)(plan.workspace, immediateVerifySpecs, {
                 mode: inputs.verify,
@@ -45358,7 +45358,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.12.19',
+        cliVersion: core.getInput('cli-version') || 'v1.12.20',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),

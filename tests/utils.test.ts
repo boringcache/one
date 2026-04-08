@@ -9,12 +9,13 @@ import {
   buildPlan,
   buildRuntimeCacheTag,
   buildRuntimeCacheEntry,
+  getInputs,
   parseToolSpecs,
   resolveDiagnosticsConfig,
   resolveVerificationTags,
   type OneInputs,
 } from '../lib/utils';
-import { actionCoreMocks } from './setup';
+import { actionCoreMocks, mockGetBooleanInput, mockGetInput } from './setup';
 
 async function makeTempProject(files: Record<string, string>): Promise<string> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'boringcache-one-'));
@@ -78,6 +79,21 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
 }
 
 describe('one utils', () => {
+  it('keeps cli-version defaults aligned between action.yml and runtime fallback', async () => {
+    const actionYamlPath = path.join(__dirname, '..', 'action.yml');
+    const actionYaml = await fs.readFile(actionYamlPath, 'utf8');
+    const match = actionYaml.match(
+      /cli-version:[\s\S]*?default:\s*['"]([^'"]+)['"]/,
+    );
+    expect(match).not.toBeNull();
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+
+    const inputs = getInputs();
+    expect(inputs.cliVersion).toBe(match![1]);
+  });
+
   it('keeps diagnostics off by default when step debug is disabled', () => {
     expect(resolveDiagnosticsConfig('auto', 40)).toEqual({
       level: 'off',
