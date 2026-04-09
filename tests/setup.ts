@@ -17,6 +17,7 @@ const mockStartRegistryProxy = jest.fn();
 const mockWaitForProxy = jest.fn();
 const mockStopRegistryProxy = jest.fn();
 const mockFindAvailablePort = jest.fn();
+const mockWaitForRegistryProxyReady = jest.fn();
 
 jest.mock('@actions/core', () => ({
   getInput: jest.fn(),
@@ -76,6 +77,10 @@ jest.mock('@boringcache/action-core', () => {
   };
 });
 
+jest.mock('../lib/proxy-readiness', () => ({
+  waitForRegistryProxyReady: mockWaitForRegistryProxyReady,
+}));
+
 const originalEnv = process.env;
 
 beforeEach(() => {
@@ -121,6 +126,7 @@ beforeEach(() => {
   mockWaitForProxy.mockResolvedValue(undefined);
   mockStopRegistryProxy.mockResolvedValue(undefined);
   mockFindAvailablePort.mockResolvedValue(5001);
+  mockWaitForRegistryProxyReady.mockResolvedValue(undefined);
 
   (exec.exec as jest.Mock).mockResolvedValue(0);
 });
@@ -158,4 +164,5 @@ export const actionCoreMocks = {
   startRegistryProxy: mockStartRegistryProxy,
   stopRegistryProxy: mockStopRegistryProxy,
   waitForProxy: mockWaitForProxy,
+  waitForRegistryProxyReady: mockWaitForRegistryProxyReady,
 };

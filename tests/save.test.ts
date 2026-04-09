@@ -100,6 +100,32 @@ describe('save action', () => {
     chdirSpy.mockRestore();
   });
 
+  it('shuts down bazel before saving hybrid bazel state', async () => {
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'bazel',
+      'generic-cache-entries': 'bazel-local-state:/tmp/bazel-cache',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+    });
+
+    await saveRun();
+
+    expect(exec.exec).toHaveBeenNthCalledWith(
+      1,
+      'bazel',
+      ['shutdown'],
+      expect.objectContaining({ ignoreReturnCode: true, silent: true }),
+    );
+    expect(exec.exec).toHaveBeenNthCalledWith(
+      2,
+      'boringcache',
+      ['save', 'my-org/my-project', 'bazel-local-state:/tmp/bazel-cache', '--fail-on-cache-error'],
+      undefined,
+    );
+  });
+
   it('verifies deferred save tags after saving', async () => {
     mockGetInput({});
     mockGetBooleanInput({});

@@ -43207,6 +43207,7 @@ const os = __importStar(__nccwpck_require__(70857));
 const path = __importStar(__nccwpck_require__(16928));
 const action_core_1 = __nccwpck_require__(68701);
 const utils_1 = __nccwpck_require__(2219);
+const proxy_readiness_1 = __nccwpck_require__(83715);
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -43247,6 +43248,9 @@ async function runModeSave(mode) {
             await runBuildkitSave();
             return;
         case 'bazel':
+            await shutdownBazelServer();
+            await stopProxyFromState();
+            return;
         case 'gradle':
         case 'maven':
         case 'turbo-proxy':
@@ -43333,6 +43337,12 @@ function setProxyOutputs(port) {
 function saveProxyModeState(port) {
     saveModeState('proxy-port', String(port));
     saveModeState('proxy-log-path', registryProxyLogPath(port));
+}
+async function shutdownBazelServer() {
+    await exec.exec('bazel', ['shutdown'], {
+        ignoreReturnCode: true,
+        silent: true,
+    });
 }
 async function execBoringCache(args, options) {
     return (0, action_core_1.execBoringCache)(args, options);
@@ -44058,7 +44068,7 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false) {
         noGit: true,
         readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     return proxy;
 }
 function parseSccacheIntegerStat(output, label) {
@@ -44236,7 +44246,7 @@ async function runDockerRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: inputs.readOnly,
         });
-        await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+        await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         setProxyOutputs(proxy.port);
@@ -44404,7 +44414,7 @@ async function runBuildkitRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: inputs.readOnly,
         });
-        await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+        await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         setProxyOutputs(proxy.port);
@@ -44519,7 +44529,7 @@ async function runBazelRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: inputs.readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : inputs.readOnly, bazelrcLines);
@@ -44554,7 +44564,7 @@ async function runGradleRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: inputs.readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeGradleInitScript(gradleHome, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : inputs.readOnly);
@@ -44596,7 +44606,7 @@ async function runMavenRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: inputs.readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);
@@ -45040,6 +45050,149 @@ function assertImplementedMode(modeSpec) {
     }
     throw new Error(`mode=${modeSpec.resolved} is planned for boringcache/one but not implemented yet. ` +
         `Use the BoringCache CLI directly until this adapter lands.`);
+}
+
+
+/***/ }),
+
+/***/ 83715:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.waitForRegistryProxyReady = waitForRegistryProxyReady;
+const core = __importStar(__nccwpck_require__(37484));
+const fs = __importStar(__nccwpck_require__(79896));
+const http = __importStar(__nccwpck_require__(58611));
+const os = __importStar(__nccwpck_require__(70857));
+const path = __importStar(__nccwpck_require__(16928));
+const action_core_1 = __nccwpck_require__(68701);
+const PROXY_PREFETCH_STATE_HEADER = 'x-boringcache-prefetch-state';
+const PROXY_PREFETCH_STATE_READY = 'ready';
+const PROXY_PREFETCH_STATE_WARMING = 'warming';
+function isProcessAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function proxyLogPath(port) {
+    return path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
+}
+function readProxyLogs(port) {
+    try {
+        return fs.readFileSync(proxyLogPath(port), 'utf-8').trim();
+    }
+    catch {
+        return '';
+    }
+}
+async function probeProxyReadiness(port) {
+    try {
+        return await new Promise((resolve) => {
+            const req = http.get(`http://127.0.0.1:${port}/v2/`, (res) => {
+                var _a;
+                const header = res.headers[PROXY_PREFETCH_STATE_HEADER];
+                const state = Array.isArray(header) ? (_a = header[0]) !== null && _a !== void 0 ? _a : null : header !== null && header !== void 0 ? header : null;
+                res.resume();
+                if (res.statusCode === 401) {
+                    resolve({ ready: true, state: 'unauthorized' });
+                    return;
+                }
+                if (res.statusCode === 200) {
+                    if (!state) {
+                        resolve({ ready: true, state: null });
+                        return;
+                    }
+                    resolve({
+                        ready: state.toLowerCase() === PROXY_PREFETCH_STATE_READY,
+                        state,
+                    });
+                    return;
+                }
+                resolve({ ready: false, state });
+            });
+            req.on('error', () => resolve({ ready: false, state: null }));
+            req.setTimeout(1000, () => {
+                req.destroy();
+                resolve({ ready: false, state: null });
+            });
+        });
+    }
+    catch {
+        return { ready: false, state: null };
+    }
+}
+async function waitForRegistryProxyReady(port, timeoutMs = 300000, pid) {
+    const startedAt = Date.now();
+    await (0, action_core_1.waitForProxy)(port, timeoutMs, pid);
+    const remainingTimeoutMs = Math.max(0, timeoutMs - (Date.now() - startedAt));
+    if (remainingTimeoutMs === 0) {
+        return;
+    }
+    const interval = 500;
+    const headerWaitStartedAt = Date.now();
+    let lastLogAt = 0;
+    let lastState = null;
+    while (Date.now() - headerWaitStartedAt < remainingTimeoutMs) {
+        if (pid && pid > 0 && !isProcessAlive(pid)) {
+            const logs = readProxyLogs(port);
+            throw new Error(`Registry proxy exited before startup prefetch completed${logs ? `:\n${logs}` : ''}`);
+        }
+        const probe = await probeProxyReadiness(port);
+        lastState = probe.state;
+        if (probe.ready) {
+            return;
+        }
+        const elapsed = Date.now() - headerWaitStartedAt;
+        if (elapsed - lastLogAt >= 10000) {
+            const suffix = (lastState === null || lastState === void 0 ? void 0 : lastState.toLowerCase()) === PROXY_PREFETCH_STATE_WARMING
+                ? ', prefetch warming'
+                : '';
+            core.info(`Waiting for proxy startup prefetch... (${(elapsed / 1000).toFixed(0)}s${suffix})`);
+            lastLogAt = elapsed;
+        }
+        await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+    const logs = readProxyLogs(port);
+    throw new Error(`Registry proxy responded before startup prefetch was ready within ${remainingTimeoutMs}ms${logs ? `:\n${logs}` : ''}`);
 }
 
 
@@ -46834,6 +46987,9 @@ function scopeArchiveEntries(entries, cacheTag, tools, versionScope) {
         .join(',');
 }
 async function detectDefaultArchiveEntries(inputs) {
+    if (inputs.mode === 'bazel') {
+        return `bazel-local-state:${defaultBazelLocalStateDir()}`;
+    }
     if (inputs.mode === 'maven') {
         return `maven-repo:${inputs.mavenLocalRepo}`;
     }
@@ -46873,6 +47029,18 @@ function defaultBundlerPath(workingDirectory) {
     return path.isAbsolute(configured)
         ? configured
         : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
+}
+function defaultBazelLocalStateDir() {
+    var _a, _b, _c;
+    const configured = (_a = process.env.BAZEL_OUTPUT_USER_ROOT) === null || _a === void 0 ? void 0 : _a.trim();
+    if (configured) {
+        return configured;
+    }
+    const xdgCacheHome = (_b = process.env.XDG_CACHE_HOME) === null || _b === void 0 ? void 0 : _b.trim();
+    if (xdgCacheHome) {
+        return path.join(xdgCacheHome, 'bazel');
+    }
+    return path.join(((_c = process.env.HOME) === null || _c === void 0 ? void 0 : _c.trim()) || os.homedir(), '.cache', 'bazel');
 }
 function defaultUvCacheDir(workingDirectory) {
     var _a;

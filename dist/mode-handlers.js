@@ -42,6 +42,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const action_core_1 = require("@boringcache/action-core");
 const utils_1 = require("./utils");
+const proxy_readiness_1 = require("./proxy-readiness");
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -82,6 +83,9 @@ async function runModeSave(mode) {
             await runBuildkitSave();
             return;
         case 'bazel':
+            await shutdownBazelServer();
+            await stopProxyFromState();
+            return;
         case 'gradle':
         case 'maven':
         case 'turbo-proxy':
@@ -168,6 +172,12 @@ function setProxyOutputs(port) {
 function saveProxyModeState(port) {
     saveModeState('proxy-port', String(port));
     saveModeState('proxy-log-path', registryProxyLogPath(port));
+}
+async function shutdownBazelServer() {
+    await exec.exec('bazel', ['shutdown'], {
+        ignoreReturnCode: true,
+        silent: true,
+    });
 }
 async function execBoringCache(args, options) {
     return (0, action_core_1.execBoringCache)(args, options);
@@ -893,7 +903,7 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false) {
         noGit: true,
         readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     return proxy;
 }
 function parseSccacheIntegerStat(output, label) {
@@ -1071,7 +1081,7 @@ async function runDockerRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: inputs.readOnly,
         });
-        await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+        await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         setProxyOutputs(proxy.port);
@@ -1239,7 +1249,7 @@ async function runBuildkitRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: inputs.readOnly,
         });
-        await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+        await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         setProxyOutputs(proxy.port);
@@ -1354,7 +1364,7 @@ async function runBazelRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: inputs.readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : inputs.readOnly, bazelrcLines);
@@ -1389,7 +1399,7 @@ async function runGradleRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: inputs.readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeGradleInitScript(gradleHome, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : inputs.readOnly);
@@ -1431,7 +1441,7 @@ async function runMavenRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: inputs.readOnly,
     });
-    await (0, action_core_1.waitForProxy)(proxy.port, undefined, proxy.pid);
+    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);

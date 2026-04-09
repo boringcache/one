@@ -15,7 +15,6 @@ import {
   pathExists,
   startRegistryProxy,
   stopRegistryProxy,
-  waitForProxy,
 } from '@boringcache/action-core';
 import {
   detectNodePackageManager,
@@ -24,6 +23,7 @@ import {
   type TagVerificationSpec,
   type ToolSpec,
 } from './utils';
+import { waitForRegistryProxyReady } from './proxy-readiness';
 
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
@@ -141,6 +141,9 @@ export async function runModeSave(mode: ResolvedPlan['mode']): Promise<void> {
       await runBuildkitSave();
       return;
     case 'bazel':
+      await shutdownBazelServer();
+      await stopProxyFromState();
+      return;
     case 'gradle':
     case 'maven':
     case 'turbo-proxy':
@@ -243,6 +246,13 @@ function setProxyOutputs(port: number): void {
 function saveProxyModeState(port: number): void {
   saveModeState('proxy-port', String(port));
   saveModeState('proxy-log-path', registryProxyLogPath(port));
+}
+
+async function shutdownBazelServer(): Promise<void> {
+  await exec.exec('bazel', ['shutdown'], {
+    ignoreReturnCode: true,
+    silent: true,
+  });
 }
 
 async function execBoringCache(args: string[], options?: Parameters<typeof execBoringCacheCore>[1]): Promise<number> {
@@ -1101,7 +1111,7 @@ async function startPortableCacheProxy(workspace: string, port: number, tag: str
     noGit: true,
     readOnly,
   });
-  await waitForProxy(proxy.port, undefined, proxy.pid);
+  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   return proxy;
 }
 
@@ -1321,7 +1331,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       verbose: inputs.verbose,
       readOnly: inputs.readOnly,
     });
-    await waitForProxy(proxy.port, undefined, proxy.pid);
+    await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     setProxyOutputs(proxy.port);
@@ -1504,7 +1514,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       verbose: inputs.verbose,
       readOnly: inputs.readOnly,
     });
-    await waitForProxy(proxy.port, undefined, proxy.pid);
+    await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     setProxyOutputs(proxy.port);
@@ -1626,7 +1636,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     verbose: inputs.verbose,
     readOnly: inputs.readOnly,
   });
-  await waitForProxy(proxy.port, undefined, proxy.pid);
+  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1663,7 +1673,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     verbose: inputs.verbose,
     readOnly: inputs.readOnly,
   });
-  await waitForProxy(proxy.port, undefined, proxy.pid);
+  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1711,7 +1721,7 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     verbose: inputs.verbose,
     readOnly: inputs.readOnly,
   });
-  await waitForProxy(proxy.port, undefined, proxy.pid);
+  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 

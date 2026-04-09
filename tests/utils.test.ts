@@ -198,6 +198,30 @@ describe('one utils', () => {
     }
   });
 
+  it('adds default local bazel state archive entries for bazel mode', async () => {
+    const project = await makeTempProject({
+      '.bazelversion': '8.0.1\n',
+    });
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'boringcache-one-bazel-home-'));
+
+    try {
+      process.env.HOME = home;
+      const plan = await buildPlan(buildInputs({
+        mode: 'bazel',
+        workingDirectory: project,
+        entries: '',
+        cacheTag: 'grpc-bazel',
+      }));
+
+      expect(plan.archiveEntries).toBe(
+        `grpc-bazel-bazel-local-state-bazel-8.0.1:${path.join(home, '.cache', 'bazel')}`,
+      );
+    } finally {
+      await removeTempProject(home);
+      await removeTempProject(project);
+    }
+  });
+
   it('auto-detects project tools for archive mode from mise config', async () => {
     actionCoreMocks.readProjectMiseTools.mockResolvedValue([
       { name: 'ruby', version: '4.0.1' },
