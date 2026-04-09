@@ -64,6 +64,15 @@ function filterVerifiableSpecs(specs: TagVerificationSpec[]): TagVerificationSpe
   return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
 }
 
+function parseSavedTagList(raw: string): Set<string> {
+  return new Set(
+    raw
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+}
+
 function buildLegacyVerificationSpecs(
   verifySaveTags: string[],
   entriesString: string,
@@ -174,7 +183,7 @@ export async function run(): Promise<void> {
       core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
     const saveConfigured = readSavedSaveConfiguration(inputs, core.getState('save-configured'));
     const saveAllowed = readSavedSaveAllowance(inputs, core.getState('save-allowed'));
-    const verifySaveTags = core.getState('verify-save-tags')
+    let verifySaveTags = core.getState('verify-save-tags')
       .split(',')
       .map((tag) => tag.trim())
       .filter(Boolean);
@@ -274,6 +283,11 @@ export async function run(): Promise<void> {
 
     if (resolvedMode && resolvedMode !== 'archive') {
       await runModeSave(resolvedMode);
+      const skippedModeVerifyTags = parseSavedTagList(core.getState('mode-skipped-verify-tags'));
+      if (skippedModeVerifyTags.size > 0) {
+        verifySaveTags = verifySaveTags.filter((tag) => !skippedModeVerifyTags.has(tag));
+        verifySaveSpecs = verifySaveSpecs.filter((spec) => !skippedModeVerifyTags.has(spec.tag));
+      }
     }
 
     if (!genericEntries || !genericWorkspace) {

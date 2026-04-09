@@ -167,6 +167,125 @@ describe('save action', () => {
     }
   });
 
+  it('skips local sccache save verification when the action-managed cache was unused', async () => {
+    const sccacheTag = 'rust-1.94.1-bench-sccache-rust1.94';
+    const states: Record<string, string> = {
+      'resolved-mode': 'rust-sccache',
+      'cli-version': 'skip',
+      'generic-cache-workspace': 'my-org/my-project',
+      'verify-mode': 'check',
+      'verify-timeout-seconds': '60',
+      'verify-require-server-signature': 'false',
+      'verify-save-tags': sccacheTag,
+      'verify-save-specs': JSON.stringify([{
+        tag: sccacheTag,
+        noPlatform: false,
+        noGit: false,
+        pathHint: '/tmp/sccache',
+        saveExpected: true,
+      }]),
+      'mode-workspace': 'my-org/my-project',
+      'mode-use-sccache': 'true',
+      'mode-sccache-mode': 'local',
+      'mode-sccache-tag': sccacheTag,
+      'mode-sccache-preflight-hit': 'false',
+    };
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      if (command === 'sccache' && args?.[0] === '--show-stats') {
+        options?.listeners?.stdout?.(Buffer.from(
+          'Compile requests                      0\n' +
+          'Compile requests executed             0\n' +
+          'Cache hits                            0\n' +
+          'Cache misses                          0\n',
+        ));
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    (core.getState as jest.Mock).mockImplementation((name: string) => states[name] || '');
+    (core.saveState as jest.Mock).mockImplementation((name: string, value: string) => {
+      states[name] = value;
+    });
+
+    await saveRun();
+
+    expect(exec.exec).toHaveBeenCalledWith('sccache', ['--show-stats'], expect.objectContaining({ ignoreReturnCode: true }));
+    expect(exec.exec).toHaveBeenCalledWith('sccache', ['--stop-server'], expect.objectContaining({ ignoreReturnCode: true }));
+    expect(exec.exec).not.toHaveBeenCalledWith(
+      'boringcache',
+      expect.arrayContaining(['save', 'my-org/my-project', `${sccacheTag}:${path.join(os.homedir(), '.cache', 'sccache')}`]),
+      undefined,
+    );
+    const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+    );
+    expect(checkCalls).toHaveLength(0);
+    expect(core.info).toHaveBeenCalledWith(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
+  });
+
+  it('skips proxy sccache verification when the action-managed proxy was unused', async () => {
+    const sccacheTag = 'rust-1.94.1-bench-sccache-rust1.94';
+    const states: Record<string, string> = {
+      'resolved-mode': 'rust-sccache',
+      'cli-version': 'skip',
+      'generic-cache-workspace': 'my-org/my-project',
+      'verify-mode': 'check',
+      'verify-timeout-seconds': '60',
+      'verify-require-server-signature': 'false',
+      'verify-save-tags': sccacheTag,
+      'verify-save-specs': JSON.stringify([{
+        tag: sccacheTag,
+        noPlatform: true,
+        noGit: true,
+        pathHint: '/tmp/project',
+        saveExpected: true,
+      }]),
+      'mode-workspace': 'my-org/my-project',
+      'mode-use-sccache': 'true',
+      'mode-sccache-mode': 'proxy',
+      'mode-sccache-tag': sccacheTag,
+      'mode-sccache-preflight-hit': 'false',
+      'mode-proxy-pid': '4321',
+    };
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      if (command === 'sccache' && args?.[0] === '--show-stats') {
+        options?.listeners?.stdout?.(Buffer.from(
+          'Compile requests                      0\n' +
+          'Compile requests executed             0\n' +
+          'Cache hits                            0\n' +
+          'Cache misses                          0\n',
+        ));
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    (core.getState as jest.Mock).mockImplementation((name: string) => states[name] || '');
+    (core.saveState as jest.Mock).mockImplementation((name: string, value: string) => {
+      states[name] = value;
+    });
+
+    await saveRun();
+
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
+    const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+    );
+    expect(checkCalls).toHaveLength(0);
+    expect(core.info).toHaveBeenCalledWith(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
+  });
+
   it('extends post-save verification beyond the requested timeout floor', async () => {
     jest.useFakeTimers();
     let checkAttempts = 0;

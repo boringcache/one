@@ -43298,6 +43298,23 @@ function saveModeState(key, value) {
 function getModeState(key) {
     return core.getState(modeStateKey(key));
 }
+function appendModeStateListValue(key, value) {
+    if (!value) {
+        return;
+    }
+    const existing = getModeState(key)
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    if (existing.includes(value)) {
+        return;
+    }
+    existing.push(value);
+    saveModeState(key, existing.join(','));
+}
+function markModeVerifyTagSkipped(tag) {
+    appendModeStateListValue('skipped-verify-tags', tag);
+}
 function addLocalBinPaths() {
     const home = currentHomeDir();
     core.addPath(path.join(home, '.local', 'bin'));
@@ -44674,6 +44691,7 @@ async function runRustRestore(plan, inputs) {
     saveModeState('use-sccache', String(useSccache));
     saveModeState('sccache-mode', sccacheMode);
     saveModeState('verbose', String(inputs.verbose));
+    saveModeState('skipped-verify-tags', '');
     configureCargoEnv();
     const cargoHome = getCargoHome();
     const cargoRegistryTag = core.getInput('cargo-tag') || `${cacheTagPrefix}-cargo-registry`;
@@ -44735,6 +44753,7 @@ async function runRustRestore(plan, inputs) {
             sccacheRestored = wasRustCacheHit(sccacheResult);
             await startSccacheServer();
             saveModeState('sccache-tag', sccacheTag);
+            saveModeState('sccache-preflight-hit', String(sccacheRestored));
         }
     }
     if (!(plan.setup === 'mise' && toolEnabled(plan, 'rust'))) {
@@ -44875,6 +44894,16 @@ async function runRustSave() {
             const preflightHit = getModeState('sccache-preflight-hit') === 'true';
             const sccacheStats = await stopSccacheServer();
             await stopProxyFromState();
+            if (sccacheTag && (!sccacheStats || sccacheStats.compileRequests === 0)) {
+                markModeVerifyTagSkipped(sccacheTag);
+                if (preflightHit) {
+                    core.info(`Skipping sccache post-save verification for ${sccacheTag}: no compile requests were observed.`);
+                }
+                else {
+                    core.info(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
+                }
+                return;
+            }
             if (sccacheTag && sccacheStats && sccacheStats.compileRequests > 0) {
                 const postShutdownHit = await checkRustTagHit(workspace, sccacheTag, { noPlatform: true, noGit: true });
                 const rustHitRate = sccacheStats.rustHitRate || 'unknown';
@@ -44894,8 +44923,19 @@ async function runRustSave() {
         }
         else {
             const sccacheTag = getModeState('sccache-tag');
+            const preflightHit = getModeState('sccache-preflight-hit') === 'true';
             if (sccacheTag) {
-                await stopSccacheServer();
+                const sccacheStats = await stopSccacheServer();
+                if (!sccacheStats || sccacheStats.compileRequests === 0) {
+                    markModeVerifyTagSkipped(sccacheTag);
+                    if (preflightHit) {
+                        core.info(`Skipping sccache post-save verification for ${sccacheTag}: no compile requests were observed.`);
+                    }
+                    else {
+                        core.info(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
+                    }
+                    return;
+                }
                 const args = ['save', workspace, `${sccacheTag}:${getSccacheDir()}`];
                 if (verbose) {
                     args.push('--verbose');
@@ -45087,6 +45127,12 @@ function parseSavedVerificationSpecs(raw) {
 function filterVerifiableSpecs(specs) {
     return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
 }
+function parseSavedTagList(raw) {
+    return new Set(raw
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean));
+}
 function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDirectory, noPlatform) {
     if (!entriesString.trim()) {
         return verifySaveTags.map((tag) => ({
@@ -45172,7 +45218,7 @@ async function run() {
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
         const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
-        const verifySaveTags = core.getState('verify-save-tags')
+        let verifySaveTags = core.getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())
             .filter(Boolean);
@@ -45238,6 +45284,11 @@ async function run() {
         }
         if (resolvedMode && resolvedMode !== 'archive') {
             await (0, mode_handlers_1.runModeSave)(resolvedMode);
+            const skippedModeVerifyTags = parseSavedTagList(core.getState('mode-skipped-verify-tags'));
+            if (skippedModeVerifyTags.size > 0) {
+                verifySaveTags = verifySaveTags.filter((tag) => !skippedModeVerifyTags.has(tag));
+                verifySaveSpecs = verifySaveSpecs.filter((spec) => !skippedModeVerifyTags.has(spec.tag));
+            }
         }
         if (!genericEntries || !genericWorkspace) {
             if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {

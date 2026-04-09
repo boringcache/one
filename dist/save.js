@@ -76,6 +76,12 @@ function parseSavedVerificationSpecs(raw) {
 function filterVerifiableSpecs(specs) {
     return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
 }
+function parseSavedTagList(raw) {
+    return new Set(raw
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean));
+}
 function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDirectory, noPlatform) {
     if (!entriesString.trim()) {
         return verifySaveTags.map((tag) => ({
@@ -161,7 +167,7 @@ async function run() {
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
         const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
-        const verifySaveTags = core.getState('verify-save-tags')
+        let verifySaveTags = core.getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())
             .filter(Boolean);
@@ -227,6 +233,11 @@ async function run() {
         }
         if (resolvedMode && resolvedMode !== 'archive') {
             await (0, mode_handlers_1.runModeSave)(resolvedMode);
+            const skippedModeVerifyTags = parseSavedTagList(core.getState('mode-skipped-verify-tags'));
+            if (skippedModeVerifyTags.size > 0) {
+                verifySaveTags = verifySaveTags.filter((tag) => !skippedModeVerifyTags.has(tag));
+                verifySaveSpecs = verifySaveSpecs.filter((spec) => !skippedModeVerifyTags.has(spec.tag));
+            }
         }
         if (!genericEntries || !genericWorkspace) {
             if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {
