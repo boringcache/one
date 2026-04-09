@@ -340,6 +340,8 @@ describe('product modes', () => {
       const bazelrc = await fs.readFile(path.join(home, '.bazelrc'), 'utf8');
       expect(bazelrc).toContain('build --remote_cache=http://127.0.0.1:5000');
       expect(bazelrc).toContain('build --remote_cache_async=false');
+      expect(bazelrc).toContain('build --remote_download_minimal');
+      expect(bazelrc).toContain('build --remote_max_connections=64');
       expect(bazelrc).toContain('build --experimental_remote_cache_eviction_retries=5');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'bazel');
     } finally {

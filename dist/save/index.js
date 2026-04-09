@@ -43738,6 +43738,9 @@ function writeBazelrc(port, readOnly, extraLines = '') {
         '# BoringCache remote cache',
         `build --remote_cache=http://127.0.0.1:${port}`,
         `build --remote_upload_local_results=${!readOnly}`,
+        // Keep remote cache writes synchronous by default so seed/warm handoff
+        // remains deterministic across isolated CI runners.
+        'build --remote_cache_async=false',
         'build --remote_download_minimal',
         `build --remote_max_connections=${maxConnections}`,
     ];
