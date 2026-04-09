@@ -1367,7 +1367,9 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
       noGit: useRegistryProxy ? inputs.proxyNoGit : false,
       pathHint: plan.workingDirectory,
-      saveExpected: shouldBuild && !inputs.readOnly,
+      // docker-command=setup defers the build to later workflow steps, so treat
+      // this as save-expected in write-capable runs and verify after post-save.
+      saveExpected: !inputs.readOnly,
     }],
   };
 }

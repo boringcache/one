@@ -98,6 +98,14 @@ describe('product modes', () => {
         'cache-to',
         expect.stringContaining('/bench-registry:buildcache,mode=max,registry.insecure=true'),
       );
+      const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
+        ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+      );
+      expect(checkCalls).toHaveLength(0);
+      expect(core.saveState).toHaveBeenCalledWith(
+        'verify-save-specs',
+        expect.stringContaining('"tag":"bench-registry"'),
+      );
     } finally {
       await removeTempProject(project);
     }
