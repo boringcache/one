@@ -14,11 +14,11 @@ inputs:
     default: 'mise'
     required: false
   mode:
-    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.'
+    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy. Proxy/build modes are pure remote by default; add entries when you want explicit local archive caches too.'
     default: 'auto'
     required: false
   preset:
-    description: 'Workflow preset: none, rails, ruby, node, node-turbo, python-uv, go, or php-composer.'
+    description: 'Workflow preset for archive-oriented defaults and tool detection: none, rails, ruby, node, node-turbo, python-uv, go, or php-composer. Presets add archive caches; use mode for pure remote adapter flows.'
     default: 'none'
     required: false
   workspace:
@@ -300,7 +300,7 @@ inputs:
     description: 'Optional repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). These resolve through the CLI source of truth before any extra raw entries are appended.'
     required: false
   entries:
-    description: 'Optional extra archive entries. Accepts repo/built-in entry ids such as bundler or node_modules, or raw tag:path pairs (comma-separated or newline-separated). Semantic entries resolve through the CLI source of truth.'
+    description: 'Optional archive entries. Accepts repo/built-in entry ids such as bundler or node_modules, or raw tag:path pairs (comma-separated or newline-separated). Semantic entries resolve through the CLI source of truth. Use this to opt into hybrid local archive caches alongside proxy/build modes.'
     required: false
   path:
     description: 'A list of files, directories, and wildcard patterns to cache and restore (actions/cache compatible)'

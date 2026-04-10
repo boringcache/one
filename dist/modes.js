@@ -22,7 +22,7 @@ const MODE_SPECS = {
     bazel: {
         resolved: 'bazel',
         implemented: true,
-        description: 'Bazel remote cache proxy and archive integration.',
+        description: 'Bazel remote cache proxy integration.',
     },
     gradle: {
         resolved: 'gradle',
@@ -32,7 +32,7 @@ const MODE_SPECS = {
     maven: {
         resolved: 'maven',
         implemented: true,
-        description: 'Maven build cache proxy and archive integration.',
+        description: 'Maven build cache proxy integration.',
     },
     'rust-sccache': {
         resolved: 'rust-sccache',

@@ -1916,14 +1916,6 @@ function scopeArchiveEntries(
 }
 
 async function detectDefaultArchiveEntries(inputs: OneInputs): Promise<string> {
-  if (inputs.mode === 'bazel') {
-    return `bazel-local-state:${defaultBazelLocalStateDir()}`;
-  }
-
-  if (inputs.mode === 'maven') {
-    return `maven-repo:${inputs.mavenLocalRepo}`;
-  }
-
   if (inputs.preset === 'ruby') {
     return `bundler:${defaultBundlerPath(inputs.workingDirectory)}`;
   }
@@ -1935,7 +1927,7 @@ async function detectDefaultArchiveEntries(inputs: OneInputs): Promise<string> {
     );
   }
 
-  if (inputs.mode === 'turbo-proxy' || inputs.preset === 'node' || inputs.preset === 'node-turbo') {
+  if (inputs.preset === 'node' || inputs.preset === 'node-turbo') {
     return await detectNodeDefaultArchiveEntries(inputs.workingDirectory);
   }
 
@@ -1977,20 +1969,6 @@ function defaultBundlerPath(workingDirectory: string): string {
   return path.isAbsolute(configured)
     ? configured
     : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
-}
-
-function defaultBazelLocalStateDir(): string {
-  const configured = process.env.BAZEL_OUTPUT_USER_ROOT?.trim();
-  if (configured) {
-    return configured;
-  }
-
-  const xdgCacheHome = process.env.XDG_CACHE_HOME?.trim();
-  if (xdgCacheHome) {
-    return path.join(xdgCacheHome, 'bazel');
-  }
-
-  return path.join(process.env.HOME?.trim() || os.homedir(), '.cache', 'bazel');
 }
 
 function defaultUvCacheDir(workingDirectory: string): string {

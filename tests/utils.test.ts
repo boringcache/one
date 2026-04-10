@@ -235,14 +235,12 @@ describe('one utils', () => {
     }
   });
 
-  it('adds default local bazel state archive entries for bazel mode', async () => {
+  it('keeps bazel mode pure remote by default', async () => {
     const project = await makeTempProject({
       '.bazelversion': '8.0.1\n',
     });
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'boringcache-one-bazel-home-'));
 
     try {
-      process.env.HOME = home;
       const plan = await buildPlan(buildInputs({
         mode: 'bazel',
         workingDirectory: project,
@@ -250,11 +248,29 @@ describe('one utils', () => {
         cacheTag: 'grpc-bazel',
       }));
 
+      expect(plan.archiveEntries).toBe('');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('allows explicit local bazel state archive entries in bazel mode', async () => {
+    const project = await makeTempProject({
+      '.bazelversion': '8.0.1\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        mode: 'bazel',
+        workingDirectory: project,
+        entries: 'bazel-local-state:/tmp/boringcache-bazel-root',
+        cacheTag: 'grpc-bazel',
+      }));
+
       expect(plan.archiveEntries).toBe(
-        `grpc-bazel-bazel-local-state-bazel-8.0.1:${path.join(home, '.cache', 'bazel')}`,
+        'grpc-bazel-bazel-local-state-bazel-8.0.1:/tmp/boringcache-bazel-root',
       );
     } finally {
-      await removeTempProject(home);
       await removeTempProject(project);
     }
   });
@@ -351,7 +367,7 @@ describe('one utils', () => {
     }
   });
 
-  it('detects package-manager tools and default archive entries for turbo mode', async () => {
+  it('keeps turbo proxy mode pure remote by default', async () => {
     const project = await makeTempProject({
       '.node-version': '22.4.1\n',
       'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
@@ -370,6 +386,27 @@ describe('one utils', () => {
         { name: 'node', version: '22.4.1', label: 'Node.js', source: 'project' },
         { name: 'pnpm', version: '9.15.1', label: 'pnpm', source: 'project' },
       ]);
+      expect(plan.archiveEntries).toBe('');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('allows explicit archive entries alongside turbo proxy mode', async () => {
+    const project = await makeTempProject({
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        mode: 'turbo-proxy',
+        workingDirectory: project,
+        cacheTag: 'web',
+        entries: 'pnpm-store:.pnpm-store\nnode-modules:node_modules',
+      }));
+
       expect(plan.archiveEntries).toBe(
         'web-pnpm-store-node-22.4.1-pnpm-9.15.1:.pnpm-store,web-node-modules-node-22.4.1-pnpm-9.15.1:node_modules',
       );
@@ -542,12 +579,23 @@ describe('one utils', () => {
     }
   });
 
-  it('adds a default local repository archive entry for maven mode', async () => {
+  it('keeps maven mode pure remote by default', async () => {
     const plan = await buildPlan(buildInputs({
       setup: 'none',
       mode: 'maven',
       cacheTag: 'service',
       entries: '',
+    }));
+
+    expect(plan.archiveEntries).toBe('');
+  });
+
+  it('allows explicit local repository archive entries in maven mode', async () => {
+    const plan = await buildPlan(buildInputs({
+      setup: 'none',
+      mode: 'maven',
+      cacheTag: 'service',
+      entries: 'maven-repo:~/.m2/repository',
     }));
 
     expect(plan.archiveEntries).toBe('service-maven-repo:~/.m2/repository');

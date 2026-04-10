@@ -80,9 +80,10 @@ That keeps the step restore-only by configuration instead of emitting missing-sa
 ## Mental model
 
 - `workspace` is the shared cache boundary
-- `entries` add archive caches
+- `entries` add archive caches, including optional hybrid local-state caches alongside remote modes
 - `cache-profiles` resolve repo-defined cache groups from `.boringcache.toml`
-- `mode` selects the primary adapter when you need Docker or a native remote-cache flow
+- `preset` is for archive-oriented defaults plus tool detection
+- `mode` selects the primary adapter when you need Docker or a native remote-cache flow; proxy/build modes stay pure remote unless you also set `entries`
 - `setup` defaults to `mise`
 - `verify` defaults to `wait` with a 180s timeout so tag visibility is checked automatically after restore/save
 

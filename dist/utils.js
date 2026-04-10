@@ -1491,19 +1491,13 @@ function scopeArchiveEntries(entries, cacheTag, tools, versionScope) {
         .join(',');
 }
 async function detectDefaultArchiveEntries(inputs) {
-    if (inputs.mode === 'bazel') {
-        return `bazel-local-state:${defaultBazelLocalStateDir()}`;
-    }
-    if (inputs.mode === 'maven') {
-        return `maven-repo:${inputs.mavenLocalRepo}`;
-    }
     if (inputs.preset === 'ruby') {
         return `bundler:${defaultBundlerPath(inputs.workingDirectory)}`;
     }
     if (inputs.preset === 'rails') {
         return joinDefaultEntries(`bundler:${defaultBundlerPath(inputs.workingDirectory)}`, await detectNodeDefaultArchiveEntries(inputs.workingDirectory));
     }
-    if (inputs.mode === 'turbo-proxy' || inputs.preset === 'node' || inputs.preset === 'node-turbo') {
+    if (inputs.preset === 'node' || inputs.preset === 'node-turbo') {
         return await detectNodeDefaultArchiveEntries(inputs.workingDirectory);
     }
     if (inputs.preset === 'python-uv') {
@@ -1533,18 +1527,6 @@ function defaultBundlerPath(workingDirectory) {
     return path.isAbsolute(configured)
         ? configured
         : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
-}
-function defaultBazelLocalStateDir() {
-    var _a, _b, _c;
-    const configured = (_a = process.env.BAZEL_OUTPUT_USER_ROOT) === null || _a === void 0 ? void 0 : _a.trim();
-    if (configured) {
-        return configured;
-    }
-    const xdgCacheHome = (_b = process.env.XDG_CACHE_HOME) === null || _b === void 0 ? void 0 : _b.trim();
-    if (xdgCacheHome) {
-        return path.join(xdgCacheHome, 'bazel');
-    }
-    return path.join(((_c = process.env.HOME) === null || _c === void 0 ? void 0 : _c.trim()) || os.homedir(), '.cache', 'bazel');
 }
 function defaultUvCacheDir(workingDirectory) {
     var _a;
