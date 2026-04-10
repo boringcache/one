@@ -49,7 +49,7 @@ export {
 export type SetupMode = 'mise' | 'external' | 'none';
 export type Preset = 'none' | 'rails' | 'ruby' | 'node' | 'node-turbo' | 'python-uv' | 'go' | 'php-composer';
 export type SavePolicy = 'auto' | 'off';
-export type VerifyMode = 'none' | 'check' | 'wait';
+export type VerifyMode = 'none' | 'check' | 'wait' | 'warn';
 export type DiagnosticsInputMode = 'auto' | 'off' | 'summary' | 'verbose';
 export type DiagnosticsLevel = 'off' | 'summary' | 'verbose';
 
@@ -399,9 +399,10 @@ export function normalizeVerifyMode(value: string): VerifyMode {
     case 'none':
     case 'check':
     case 'wait':
+    case 'warn':
       return (value || 'wait').trim().toLowerCase() as VerifyMode;
     default:
-      throw new Error(`Unsupported verify mode "${value}". Expected none, check, or wait.`);
+      throw new Error(`Unsupported verify mode "${value}". Expected none, check, wait, or warn.`);
   }
 }
 
@@ -949,6 +950,7 @@ export async function verifyVerificationSpecs(
     return;
   }
 
+  const warnOnly = options.mode === 'warn';
   const deadline = Date.now() + options.timeoutSeconds * 1000;
   let attempt = 0;
   let lastFailure = '';
@@ -976,8 +978,16 @@ export async function verifyVerificationSpecs(
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
+  const failureMessage =
+    `Timed out waiting ${options.timeoutSeconds}s for ${total} tag${total === 1 ? '' : 's'} in ${workspace}: ${lastFailure}`;
+
+  if (warnOnly) {
+    core.warning(failureMessage);
+    return;
+  }
+
   throw new Error(
-    `Timed out waiting ${options.timeoutSeconds}s for ${total} tag${total === 1 ? '' : 's'} in ${workspace}: ${lastFailure}`,
+    failureMessage,
   );
 }
 

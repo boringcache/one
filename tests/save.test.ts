@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { run as saveRun } from '../lib/save';
+import * as utils from '../lib/utils';
 import { resolveVerificationTags, type TagVerificationSpec } from '../lib/utils';
 import { actionCoreMocks, mockGetBooleanInput, mockGetInput, mockGetState } from './setup';
 
@@ -190,6 +191,41 @@ describe('save action', () => {
       expect(core.info).toHaveBeenCalledWith('Waiting for tags to become visible (1): deps');
     } finally {
       jest.useRealTimers();
+    }
+  });
+
+  it('uses warn mode for deferred post-save verification without failing the save step', async () => {
+    const verifySpy = jest.spyOn(utils, 'verifyVerificationSpecs').mockResolvedValue(undefined);
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'archive',
+      'generic-cache-entries': 'deps:node_modules',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+      'verify-mode': 'warn',
+      'verify-timeout-seconds': '30',
+      'verify-require-server-signature': 'false',
+      'verify-save-tags': 'deps',
+    });
+
+    try {
+      await saveRun();
+
+      expect(verifySpy).toHaveBeenCalledWith(
+        'my-org/my-project',
+        expect.arrayContaining([
+          expect.objectContaining({ tag: 'deps', noPlatform: true, noGit: true }),
+        ]),
+        expect.objectContaining({
+          mode: 'warn',
+          timeoutSeconds: 180,
+          requireServerSignature: false,
+          verbose: false,
+        }),
+      );
+    } finally {
+      verifySpy.mockRestore();
     }
   });
 

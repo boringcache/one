@@ -10,6 +10,7 @@ import {
   buildRuntimeCacheTag,
   buildRuntimeCacheEntry,
   getInputs,
+  verifyVerificationSpecs,
   parseToolSpecs,
   resolveDiagnosticsConfig,
   resolveVerificationTags,
@@ -94,6 +95,14 @@ describe('one utils', () => {
     expect(inputs.cliVersion).toBe(match![1]);
   });
 
+  it('accepts verify=warn from action inputs', () => {
+    mockGetInput({ verify: 'warn' });
+    mockGetBooleanInput({});
+
+    const inputs = getInputs();
+    expect(inputs.verify).toBe('warn');
+  });
+
   it('keeps diagnostics off by default when step debug is disabled', () => {
     expect(resolveDiagnosticsConfig('auto', 40)).toEqual({
       level: 'off',
@@ -112,6 +121,34 @@ describe('one utils', () => {
       includeLogs: true,
       logLines: 80,
     });
+  });
+
+  it('downgrades verification timeout failures to warnings in warn mode', async () => {
+    jest.useFakeTimers();
+    (exec.exec as jest.Mock).mockResolvedValue(1);
+
+    try {
+      const verifyPromise = verifyVerificationSpecs(
+        'my-org/my-project',
+        [{ tag: 'deps', noPlatform: true, noGit: true }],
+        {
+          mode: 'warn',
+          timeoutSeconds: 1,
+          requireServerSignature: false,
+          verbose: false,
+        },
+      );
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(2000);
+      await verifyPromise;
+
+      expect(core.info).toHaveBeenCalledWith('Waiting for tags to become visible (1): deps');
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringContaining('Timed out waiting 1s for 1 tag in my-org/my-project:'),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('parses explicit tool specs and normalizes nodejs to node', () => {

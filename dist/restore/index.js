@@ -45739,9 +45739,10 @@ function normalizeVerifyMode(value) {
         case 'none':
         case 'check':
         case 'wait':
+        case 'warn':
             return (value || 'wait').trim().toLowerCase();
         default:
-            throw new Error(`Unsupported verify mode "${value}". Expected none, check, or wait.`);
+            throw new Error(`Unsupported verify mode "${value}". Expected none, check, wait, or warn.`);
     }
 }
 function normalizeVerifyTimeoutSeconds(value) {
@@ -46179,6 +46180,7 @@ async function verifyVerificationSpecs(workspace, specs, options) {
         core.info(`Verified ${total} tag${total === 1 ? '' : 's'} in ${workspace}`);
         return;
     }
+    const warnOnly = options.mode === 'warn';
     const deadline = Date.now() + options.timeoutSeconds * 1000;
     let attempt = 0;
     let lastFailure = '';
@@ -46201,7 +46203,12 @@ async function verifyVerificationSpecs(workspace, specs, options) {
         core.info(`Waiting for tags to become visible (${attempt}): ${pendingBatch.tags.join(', ')}`);
         await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-    throw new Error(`Timed out waiting ${options.timeoutSeconds}s for ${total} tag${total === 1 ? '' : 's'} in ${workspace}: ${lastFailure}`);
+    const failureMessage = `Timed out waiting ${options.timeoutSeconds}s for ${total} tag${total === 1 ? '' : 's'} in ${workspace}: ${lastFailure}`;
+    if (warnOnly) {
+        core.warning(failureMessage);
+        return;
+    }
+    throw new Error(failureMessage);
 }
 function parseToolSpecs(input) {
     return input
