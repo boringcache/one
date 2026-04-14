@@ -111,7 +111,6 @@ jobs:
     env:
       BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
       BORINGCACHE_SAVE_TOKEN: ''
-      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout
@@ -258,6 +257,7 @@ jobs:
     env:
       BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
       BORINGCACHE_SAVE_TOKEN: ''
+      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout
