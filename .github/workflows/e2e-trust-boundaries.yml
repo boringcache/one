@@ -98,6 +98,7 @@ jobs:
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
             marker:restore=>marker.txt
+          save-on-pull-request: true
           verify: wait
           verify-require-server-signature: true
           verbose: true
@@ -256,6 +257,7 @@ jobs:
     env:
       BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
       BORINGCACHE_SAVE_TOKEN: ''
+      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout
@@ -299,6 +301,7 @@ jobs:
           tools: ${{ matrix.tools }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           read-only: true
+          verify: none
           verbose: true
 
       - name: Verify read-only configuration

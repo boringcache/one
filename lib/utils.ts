@@ -145,6 +145,7 @@ export interface ResolvedPlan {
   runtimeEntry: string | null;
   envVars: Record<string, string>;
   archiveEntries: string;
+  archiveRestoreCandidates: ArchiveRestoreCandidate[];
   usesCacheFormat: boolean;
 }
 
@@ -173,7 +174,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 export function getInputs(): OneInputs {
   return {
-    cliVersion: core.getInput('cli-version') || 'v1.12.26',
+    cliVersion: core.getInput('cli-version') || 'v1.12.27',
     cliPlatform: core.getInput('cli-platform'),
     setup: normalizeSetup(core.getInput('setup')),
     mode: normalizeMode(core.getInput('mode')),
@@ -1626,25 +1627,6 @@ export function buildRuntimeCacheEntry(
   return `${runtimeTag}:${getMiseInstallsDir()}`;
 }
 
-function scopeTagToRuntimeTools(tag: string, tools: ToolSpec[], versionScope: MiseVersionScope): string {
-  const runtimeTag = buildMiseToolTag(tools, versionScope);
-  if (!runtimeTag || tag === runtimeTag || tag.endsWith(`-${runtimeTag}`)) {
-    return tag;
-  }
-  return `${tag}-${runtimeTag}`;
-}
-
-function prefixArchiveTag(tag: string, cacheTag: string): string {
-  const prefix = cacheTag.trim();
-  if (!prefix) {
-    return tag;
-  }
-  if (tag === prefix || tag.startsWith(`${prefix}-`)) {
-    return tag;
-  }
-  return `${prefix}-${tag}`;
-}
-
 function normalizeEntriesInput(entries: string): string {
   return entries
     .split(/\r?\n/)
@@ -1666,25 +1648,38 @@ interface CliDryRunPlan {
   repo_config_path?: string;
   tag_path_pairs: string[];
   archive_entries?: CliDryRunArchiveEntry[];
+  archive_restore_candidates?: CliDryRunArchiveRestoreCandidate[];
   env_vars: Record<string, string>;
 }
 
 interface CliDryRunArchiveEntry {
   requested: string;
-  request_source: 'profile' | 'entry' | 'command-inferred' | 'manual';
+  request_source: 'profile' | 'entry' | 'command-inferred' | 'archive-path' | 'manual';
   profile?: string;
   resolution_source: 'repo-config' | 'built-in' | 'manual';
+  resolved_tag?: string;
   tag: string;
   path?: string | null;
   tag_path_pair: string;
 }
 
+interface CliDryRunArchiveRestoreCandidate {
+  tag_prefix: string;
+  tag_path_pairs: string[];
+}
+
 interface ResolvedArchiveEntries {
   entries: string;
+  restoreCandidates: ArchiveRestoreCandidate[];
   usesCacheFormat: boolean;
   envVars: Record<string, string>;
   cacheTagPrefix?: string;
   workspace?: string;
+}
+
+export interface ArchiveRestoreCandidate {
+  tagPrefix: string;
+  entries: string;
 }
 
 const PROJECT_CONFIG_FILE_NAMES = ['.boringcache.toml', 'boringcache.toml'];
@@ -1710,22 +1705,65 @@ function findNearestRepoConfigPath(workingDirectory: string): string | null {
 
 async function runDryRunPlan(
   workingDirectory: string,
-  workspaceInput: string,
-  entryIds: string[],
-  profileNames: string[],
-  fallbackWorkspace?: string,
+  options: {
+    workspaceInput: string;
+    entryIds?: string[];
+    profileNames?: string[];
+    manualTagPathPairs?: string[];
+    archivePaths?: string[];
+    archiveTagPrefix?: string;
+    archiveRestorePrefixes?: string[];
+    cacheTag?: string;
+    toolTagSuffix?: string | null;
+    noPlatform?: boolean;
+    fallbackWorkspace?: string;
+  },
 ): Promise<CliDryRunPlan> {
+  const {
+    workspaceInput,
+    entryIds = [],
+    profileNames = [],
+    manualTagPathPairs = [],
+    archivePaths = [],
+    archiveTagPrefix = '',
+    archiveRestorePrefixes = [],
+    cacheTag = '',
+    toolTagSuffix = '',
+    noPlatform = false,
+    fallbackWorkspace,
+  } = options;
   const executePlan = async (candidateWorkspace: string): Promise<CliDryRunPlan> => {
     const args = ['run'];
     const trimmedWorkspace = candidateWorkspace.trim();
     if (trimmedWorkspace) {
       args.push(trimmedWorkspace);
     }
+    if (manualTagPathPairs.length > 0) {
+      args.push(manualTagPathPairs.join(','));
+    }
     for (const profileName of profileNames) {
       args.push('--profile', profileName);
     }
     for (const entryId of entryIds) {
       args.push('--entry', entryId);
+    }
+    for (const archivePath of archivePaths) {
+      args.push('--archive-path', archivePath);
+    }
+    if (archiveTagPrefix.trim()) {
+      args.push('--archive-tag-prefix', archiveTagPrefix.trim());
+    }
+    for (const archiveRestorePrefix of archiveRestorePrefixes) {
+      args.push('--archive-restore-prefix', archiveRestorePrefix);
+    }
+    if (cacheTag.trim()) {
+      args.push('--cache-tag', cacheTag.trim());
+    }
+    if (toolTagSuffix?.trim()) {
+      args.push('--tool-tag-suffix', toolTagSuffix.trim());
+    }
+    if (noPlatform) {
+      args.push('--no-platform');
     }
     args.push('--dry-run', '--json');
 
@@ -1781,16 +1819,36 @@ async function maybeResolveRawEntryViaCli(
   workingDirectory: string,
   workspaceInput: string,
   rawTag: string,
+  cacheTag: string,
+  toolTagSuffix: string | null,
   fallbackWorkspace?: string,
 ): Promise<CliDryRunPlan | null> {
   try {
-    return await runDryRunPlan(workingDirectory, workspaceInput, [rawTag], [], fallbackWorkspace);
+    return await runDryRunPlan(workingDirectory, {
+      workspaceInput,
+      entryIds: [rawTag],
+      cacheTag,
+      toolTagSuffix,
+      fallbackWorkspace,
+    });
   } catch (error) {
     if (isUnknownEntryResolutionError(error)) {
       return null;
     }
     throw error;
   }
+}
+
+async function maybeResolveWorkspaceViaCli(
+  workingDirectory: string,
+  workspaceInput: string,
+  fallbackWorkspace: string,
+): Promise<string | null> {
+  const plan = await runDryRunPlan(workingDirectory, {
+    workspaceInput,
+    fallbackWorkspace,
+  });
+  return plan.workspace?.trim() || null;
 }
 
 function cliPlanHasProvenance(plan: CliDryRunPlan): boolean {
@@ -1805,124 +1863,14 @@ function cliPlanUsesRepoConfigResolution(plan: CliDryRunPlan): boolean {
   return Boolean(plan.repo_config_path);
 }
 
-function scopeLiteralEntry(
-  entry: { tag: string; restorePath: string; savePath: string },
-  cacheTag: string,
-  tools: ToolSpec[],
-  versionScope: MiseVersionScope,
-): string {
-  const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
-  const scopedTag = tools.length > 0
-    ? scopeTagToRuntimeTools(prefixedTag, tools, versionScope)
-    : prefixedTag;
-  const pathSpec = entry.restorePath === entry.savePath
-    ? entry.restorePath
-    : `${entry.restorePath}=>${entry.savePath}`;
-  return `${scopedTag}:${pathSpec}`;
-}
-
-function normalizeCacheFormatPathSegment(segment: string): string {
-  if (segment === '~') {
-    return '';
-  }
-
-  const normalized = segment
-    .replace(/^\.+/, '')
-    .replace(/[^A-Za-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-
-  return normalized || 'path';
-}
-
-function buildCacheFormatPathTag(pathInput: string): string {
-  const segments = pathInput
-    .trim()
-    .replace(/\\/g, '/')
-    .split('/')
-    .map((segment) => segment.trim())
-    .filter((segment) => segment && segment !== '.')
-    .map(normalizeCacheFormatPathSegment);
-  const filteredSegments = segments.filter(Boolean);
-
-  if (filteredSegments.length === 0) {
-    return 'path';
-  }
-
-  return filteredSegments.slice(-3).join('-');
-}
-
-export function convertCacheFormatToEntries(
-  inputs: Pick<OneInputs, 'path' | 'key' | 'noPlatform' | 'enableCrossOsArchive' | 'workingDirectory'>,
-  _action: 'save' | 'restore',
-  keyOverride?: string,
-): string {
-  const pathInput = inputs.path?.trim() || '';
-  const keyInput = (keyOverride || inputs.key || '').trim();
-
-  if (!pathInput || !keyInput) {
-    throw new Error('actions/cache compatibility mode requires both path and key');
-  }
-
-  const suffix = getPlatformSuffix(inputs.noPlatform, inputs.enableCrossOsArchive);
-  const fullKey = suffix && !keyInput.endsWith(suffix)
-    ? `${keyInput}${suffix}`
-    : keyInput;
-  const seenTags = new Map<string, number>();
-
-  return pathInput
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const tagBase = `${fullKey}-${buildCacheFormatPathTag(entry)}`;
-      const seenCount = seenTags.get(tagBase) || 0;
-      seenTags.set(tagBase, seenCount + 1);
-      const tag = seenCount === 0 ? tagBase : `${tagBase}-${seenCount + 1}`;
-      return `${tag}:${resolvePath(entry, inputs.workingDirectory)}`;
-    })
-    .join(',');
-}
-
-function scopeArchiveEntries(
-  entries: string,
-  cacheTag: string,
-  tools: ToolSpec[],
-  versionScope: MiseVersionScope,
-): string {
-  const normalizedEntries = normalizeEntriesInput(entries);
-  if (!entries.trim() || tools.length === 0) {
-    return parseEntries(normalizedEntries, 'restore', { resolvePaths: false })
-      .map((entry) => {
-        const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
-        const pathSpec = entry.restorePath === entry.savePath
-          ? entry.restorePath
-          : `${entry.restorePath}=>${entry.savePath}`;
-        return `${prefixedTag}:${pathSpec}`;
-      })
-      .join(',');
-  }
-
-  return parseEntries(normalizedEntries, 'restore', { resolvePaths: false })
-    .map((entry) => {
-      const prefixedTag = prefixArchiveTag(entry.tag, cacheTag);
-      const scopedTag = scopeTagToRuntimeTools(prefixedTag, tools, versionScope);
-      const pathSpec = entry.restorePath === entry.savePath
-        ? entry.restorePath
-        : `${entry.restorePath}=>${entry.savePath}`;
-      return `${scopedTag}:${pathSpec}`;
-    })
-    .join(',');
-}
-
 async function detectDefaultArchiveEntries(inputs: OneInputs): Promise<string> {
   if (inputs.preset === 'ruby') {
-    return `bundler:${defaultBundlerPath(inputs.workingDirectory)}`;
+    return 'bundler';
   }
 
   if (inputs.preset === 'rails') {
     return joinDefaultEntries(
-      `bundler:${defaultBundlerPath(inputs.workingDirectory)}`,
+      'bundler',
       await detectNodeDefaultArchiveEntries(inputs.workingDirectory),
     );
   }
@@ -1932,20 +1880,20 @@ async function detectDefaultArchiveEntries(inputs: OneInputs): Promise<string> {
   }
 
   if (inputs.preset === 'python-uv') {
-    return `uv-cache:${defaultUvCacheDir(inputs.workingDirectory)}`;
+    return 'uv-cache';
   }
 
   if (inputs.preset === 'go') {
     return joinDefaultEntries(
-      `go-mod-cache:${defaultGoModCacheDir(inputs.workingDirectory)}`,
-      `go-build-cache:${defaultGoBuildCacheDir(inputs.workingDirectory)}`,
+      'go-mod-cache',
+      'go-build-cache',
     );
   }
 
   if (inputs.preset === 'php-composer') {
     return joinDefaultEntries(
-      `composer-cache:${await defaultComposerCacheDir(inputs.workingDirectory)}`,
-      `vendor:${await defaultComposerVendorDir(inputs.workingDirectory)}`,
+      'composer-cache',
+      'vendor',
     );
   }
 
@@ -1958,28 +1906,6 @@ function joinDefaultEntries(...groups: string[]): string {
     .map((entry) => entry.trim())
     .filter(Boolean)
     .join('\n');
-}
-
-function defaultBundlerPath(workingDirectory: string): string {
-  const configured = process.env.BUNDLE_PATH?.trim();
-  if (!configured) {
-    return 'vendor/bundle';
-  }
-
-  return path.isAbsolute(configured)
-    ? configured
-    : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
-}
-
-function defaultUvCacheDir(workingDirectory: string): string {
-  const configured = process.env.UV_CACHE_DIR?.trim();
-  if (!configured) {
-    return '.uv-cache';
-  }
-
-  return path.isAbsolute(configured)
-    ? configured
-    : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
 }
 
 function defaultGoModCacheDir(workingDirectory: string): string {
@@ -2059,11 +1985,11 @@ async function detectNodeDefaultArchiveEntries(workingDirectory: string): Promis
 
   switch (packageManager.name) {
     case 'pnpm':
-      return 'pnpm-store:.pnpm-store\nnode-modules:node_modules';
+      return 'pnpm-store\nnode-modules';
     case 'yarn':
-      return 'yarn-cache:.yarn-cache\nnode-modules:node_modules';
+      return 'yarn-cache\nnode-modules';
     case 'npm':
-      return 'npm-cache:.npm-cache\nnode-modules:node_modules';
+      return 'npm-cache\nnode-modules';
   }
 }
 
@@ -2072,6 +1998,7 @@ export async function buildArchiveEntries(
   runtimeTools: ToolSpec[],
 ): Promise<ResolvedArchiveEntries> {
   let archiveEntries: string[] = [];
+  let restoreCandidates: ArchiveRestoreCandidate[] = [];
   let usesCacheFormat = false;
   const envVars: Record<string, string> = {};
   let cacheTagPrefix: string | undefined;
@@ -2081,15 +2008,17 @@ export async function buildArchiveEntries(
   const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
   const fallbackWorkspace = resolveWorkspace(inputs.workspace);
   const cliWorkspaceInput = inputs.workspace.trim();
+  const cliToolTagSuffix = inputs.setup === 'mise'
+    ? buildMiseToolTag(runtimeTools, inputs.toolVersionScope)
+    : null;
 
   const mergeCliPlan = (plan: CliDryRunPlan): void => {
     archiveEntries.push(...plan.tag_path_pairs);
     if (!cacheTagPrefix) {
+      const firstEntry = plan.archive_entries?.[0];
       const firstPair = plan.tag_path_pairs[0];
-      const firstEntry = firstPair ? parseEntries(firstPair, 'restore', { resolvePaths: false })[0] : undefined;
-      if (firstEntry) {
-        cacheTagPrefix = firstEntry.tag;
-      }
+      cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
+        || (firstPair ? parseEntries(firstPair, 'restore', { resolvePaths: false })[0]?.tag : undefined);
     }
     Object.assign(envVars, plan.env_vars);
     if (!resolvedWorkspace && plan.workspace) {
@@ -2110,13 +2039,14 @@ export async function buildArchiveEntries(
     }
 
     if (cacheProfiles.length > 0 || semanticEntries.length > 0) {
-      mergeCliPlan(await runDryRunPlan(
-        inputs.workingDirectory,
-        cliWorkspaceInput,
-        semanticEntries,
-        cacheProfiles,
+      mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
+        workspaceInput: cliWorkspaceInput,
+        entryIds: semanticEntries,
+        profileNames: cacheProfiles,
+        cacheTag: inputs.cacheTag,
+        toolTagSuffix: cliToolTagSuffix,
         fallbackWorkspace,
-      ));
+      }));
     }
 
     for (const entryToken of rawEntries) {
@@ -2130,6 +2060,8 @@ export async function buildArchiveEntries(
           inputs.workingDirectory,
           cliWorkspaceInput,
           parsedEntry.tag,
+          inputs.cacheTag,
+          cliToolTagSuffix,
           fallbackWorkspace,
         );
         const shouldUpgrade = resolved
@@ -2144,70 +2076,61 @@ export async function buildArchiveEntries(
         }
       }
 
-      if (!cacheTagPrefix) {
-        cacheTagPrefix = prefixArchiveTag(parsedEntry.tag, inputs.cacheTag);
+      if (!inputs.cacheTag.trim() && !cliToolTagSuffix?.trim()) {
+        if (!cacheTagPrefix) {
+          cacheTagPrefix = parsedEntry.tag;
+        }
+        archiveEntries.push(entryToken);
+        continue;
       }
-      archiveEntries.push(scopeLiteralEntry(
-        parsedEntry,
-        inputs.cacheTag,
-        inputs.setup === 'mise' ? runtimeTools : [],
-        inputs.toolVersionScope,
-      ));
+
+      mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
+        workspaceInput: cliWorkspaceInput,
+        manualTagPathPairs: [entryToken],
+        cacheTag: inputs.cacheTag,
+        toolTagSuffix: cliToolTagSuffix,
+        fallbackWorkspace,
+      }));
     }
   } else if (inputs.path || inputs.key) {
     if (!inputs.path || !inputs.key) {
       throw new Error('actions/cache compatibility mode requires both path and key');
     }
-    archiveEntries = [convertCacheFormatToEntries({
-      path: inputs.path,
-      key: inputs.key,
-      noPlatform: inputs.noPlatform,
-      enableCrossOsArchive: inputs.enableCrossOsArchive,
-      workingDirectory: inputs.workingDirectory,
-    }, 'restore')];
+    const archivePathPlan = await runDryRunPlan(inputs.workingDirectory, {
+      workspaceInput: cliWorkspaceInput,
+      archivePaths: inputs.path
+        .split(/\r?\n/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+      archiveTagPrefix: inputs.key,
+      archiveRestorePrefixes: getRestoreKeyCandidates(inputs),
+      noPlatform: inputs.noPlatform || inputs.enableCrossOsArchive,
+      fallbackWorkspace,
+    });
+    archiveEntries = archivePathPlan.tag_path_pairs;
+    restoreCandidates = (archivePathPlan.archive_restore_candidates || []).map((candidate) => ({
+      tagPrefix: candidate.tag_prefix,
+      entries: candidate.tag_path_pairs.join(','),
+    }));
     usesCacheFormat = true;
     cacheTagPrefix = inputs.key.trim() || undefined;
   } else {
     sourceEntries = await detectDefaultArchiveEntries(inputs);
-    for (const entryToken of splitEntriesInput(sourceEntries)) {
-      const parsedEntry = parseEntries(entryToken, 'restore', { resolvePaths: false })[0];
-      if (!parsedEntry) {
-        continue;
-      }
-
-      if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
-        const resolved = await maybeResolveRawEntryViaCli(
-          inputs.workingDirectory,
-          cliWorkspaceInput,
-          parsedEntry.tag,
-          fallbackWorkspace,
-        );
-        const shouldUpgrade = resolved
-          && resolved.tag_path_pairs.length > 0
-          && (
-            cliPlanUsesRepoConfigResolution(resolved)
-            || (!cliPlanHasProvenance(resolved) && Boolean(repoConfigPath))
-          );
-        if (shouldUpgrade) {
-          mergeCliPlan(resolved);
-          continue;
-        }
-      }
-
-      if (!cacheTagPrefix) {
-        cacheTagPrefix = prefixArchiveTag(parsedEntry.tag, inputs.cacheTag);
-      }
-      archiveEntries.push(scopeLiteralEntry(
-        parsedEntry,
-        inputs.cacheTag,
-        inputs.setup === 'mise' ? runtimeTools : [],
-        inputs.toolVersionScope,
-      ));
+    const defaultEntryIds = splitEntriesInput(sourceEntries);
+    if (defaultEntryIds.length > 0) {
+      mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
+        workspaceInput: cliWorkspaceInput,
+        entryIds: defaultEntryIds,
+        cacheTag: inputs.cacheTag,
+        toolTagSuffix: cliToolTagSuffix,
+        fallbackWorkspace,
+      }));
     }
   }
 
   return {
     entries: archiveEntries.join(','),
+    restoreCandidates,
     usesCacheFormat,
     envVars,
     cacheTagPrefix,
@@ -2256,6 +2179,8 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
   const modeSpec = resolveModeSpec(inputs.mode);
   assertImplementedMode(modeSpec);
   const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
+  const fallbackWorkspace = resolveWorkspace(inputs.workspace);
+  const explicitWorkspace = inputs.workspace.trim();
 
   const runtimeTools = await resolveRuntimeTools(
     inputs.setup,
@@ -2280,9 +2205,13 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     });
   }
   const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
-  const workspace = !inputs.workspace.trim() && archiveEntries.workspace
-    ? archiveEntries.workspace
-    : resolveWorkspace(inputs.workspace);
+  const workspace = explicitWorkspace
+    ? fallbackWorkspace
+    : archiveEntries.workspace
+      || (!archiveEntries.usesCacheFormat
+        ? await maybeResolveWorkspaceViaCli(inputs.workingDirectory, explicitWorkspace, fallbackWorkspace)
+        : null)
+      || fallbackWorkspace;
   const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools, archiveEntries.cacheTagPrefix);
   const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
     ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
@@ -2305,6 +2234,7 @@ export async function buildPlan(inputs: OneInputs): Promise<ResolvedPlan> {
     runtimeEntry,
     envVars: archiveEntries.envVars,
     archiveEntries: archiveEntries.entries,
+    archiveRestoreCandidates: archiveEntries.restoreCandidates,
     usesCacheFormat: archiveEntries.usesCacheFormat,
   };
 }
@@ -2499,13 +2429,4 @@ export function getRestoreKeyCandidates(inputs: OneInputs): string[] {
     .split('\n')
     .map((value) => value.trim())
     .filter(Boolean);
-}
-
-export function getPlatformSuffix(noPlatform: boolean, enableCrossOsArchive: boolean): string {
-  if (noPlatform || enableCrossOsArchive) {
-    return '';
-  }
-  const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
-  const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-  return `-${platform}-${arch}`;
 }

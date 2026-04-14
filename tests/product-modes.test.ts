@@ -48,9 +48,9 @@ describe('product modes', () => {
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
         '--cache-from',
-        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,registry.insecure=true'),
         '--cache-to',
-        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,mode=max,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,mode=max,registry.insecure=true'),
       ]));
       const cacheTagCalls = (core.setOutput as jest.Mock).mock.calls.filter(([name]) => name === 'cache-tag');
       expect(cacheTagCalls.at(-1)).toEqual(['cache-tag', 'ghcr-io-boringcache-demo']);
@@ -89,14 +89,14 @@ describe('product modes', () => {
       );
       expect(core.setOutput).toHaveBeenCalledWith('buildx-name', expect.any(String));
       expect(core.setOutput).toHaveBeenCalledWith('proxy-port', '5000');
-      expect(core.setOutput).toHaveBeenCalledWith('registry-ref', expect.stringContaining('/bench-registry:buildcache'));
+      expect(core.setOutput).toHaveBeenCalledWith('registry-ref', expect.stringContaining('/cache:buildcache'));
       expect(core.setOutput).toHaveBeenCalledWith(
         'cache-from',
-        expect.stringContaining('/bench-registry:buildcache,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,registry.insecure=true'),
       );
       expect(core.setOutput).toHaveBeenCalledWith(
         'cache-to',
-        expect.stringContaining('/bench-registry:buildcache,mode=max,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,mode=max,registry.insecure=true'),
       );
       const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
         ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
@@ -133,9 +133,9 @@ describe('product modes', () => {
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
         '--cache-from',
-        expect.stringContaining('/bench-registry:buildcache,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,registry.insecure=true'),
         '--cache-to',
-        expect.stringContaining('/bench-registry:buildcache,mode=max,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,mode=max,registry.insecure=true'),
       ]));
     } finally {
       await removeTempProject(project);
@@ -165,9 +165,9 @@ describe('product modes', () => {
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
         '--cache-from',
-        expect.stringContaining('/bench-registry:cache-main,registry.insecure=true'),
+        expect.stringContaining('/cache:cache-main,registry.insecure=true'),
         '--cache-to',
-        expect.stringContaining('/bench-registry:cache-main,mode=max,registry.insecure=true'),
+        expect.stringContaining('/cache:cache-main,mode=max,registry.insecure=true'),
       ]));
     } finally {
       await removeTempProject(project);
@@ -196,12 +196,12 @@ describe('product modes', () => {
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
         '--cache-from',
-        expect.stringContaining('/bench-registry:cache-main,registry.insecure=true'),
+        expect.stringContaining('/cache:cache-main,registry.insecure=true'),
         '--cache-to',
-        expect.stringContaining('/bench-registry:cache-main,mode=max,registry.insecure=true'),
+        expect.stringContaining('/cache:cache-main,mode=max,registry.insecure=true'),
       ]));
       expect(core.warning).toHaveBeenCalledWith(
-        'registry-tag included a tag suffix; prefer registry-ref-tag for the OCI cache tag.',
+        '--tag included a ref-tag suffix; prefer --cache-ref-tag for the OCI cache tag.',
       );
     } finally {
       await removeTempProject(project);
@@ -231,12 +231,12 @@ describe('product modes', () => {
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
         '--cache-from',
-        expect.stringContaining('/bench-registry:cache-main,registry.insecure=true'),
+        expect.stringContaining('/cache:cache-main,registry.insecure=true'),
         '--cache-to',
-        expect.stringContaining('/bench-registry:cache-main,mode=max,registry.insecure=true'),
+        expect.stringContaining('/cache:cache-main,mode=max,registry.insecure=true'),
       ]));
       expect(core.warning).toHaveBeenCalledWith(
-        'registry-tag included a tag suffix; prefer registry-ref-tag for the OCI cache tag.',
+        '--tag included a ref-tag suffix; prefer --cache-ref-tag for the OCI cache tag.',
       );
     } finally {
       await removeTempProject(project);
@@ -308,9 +308,9 @@ describe('product modes', () => {
         'tcp://buildkit:1234',
         'build',
         '--import-cache',
-        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,registry.insecure=true'),
         '--export-cache',
-        expect.stringContaining('/ghcr-io-boringcache-demo:buildcache,mode=max,registry.insecure=true'),
+        expect.stringContaining('/cache:buildcache,mode=max,registry.insecure=true'),
       ]));
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'buildkit');
     } finally {
@@ -402,6 +402,84 @@ describe('product modes', () => {
     }
   });
 
+  it('uses the CLI bazel planner workspace and proxy settings from repo config', async () => {
+    const project = await makeTempProject({
+      '.boringcache.toml': [
+        'workspace = "config-org/config-workspace"',
+        '',
+        '[adapters.bazel]',
+        'tag = "bazel-main"',
+        'no-platform = true',
+        'no-git = true',
+        'read-only = true',
+        '',
+      ].join('\n'),
+    });
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'boringcache-one-bazel-home-'));
+
+    try {
+      process.env.HOME = home;
+      actionCoreMocks.startRegistryProxy.mockResolvedValueOnce({ pid: 4321, port: 5000 });
+      mockGetInput({
+        mode: 'bazel',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'cache-registry',
+        workspace: 'config-org/config-workspace',
+        tag: 'bazel-main',
+        noPlatform: true,
+        noGit: true,
+        readOnly: true,
+      }));
+      const bazelrc = await fs.readFile(path.join(home, '.bazelrc'), 'utf8');
+      expect(bazelrc).toContain('build --remote_upload_local_results=false');
+      expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'bazel-main');
+      expect(core.setOutput).toHaveBeenCalledWith('workspace', 'config-org/config-workspace');
+    } finally {
+      await removeTempProject(home);
+      await removeTempProject(project);
+    }
+  });
+
+  it('fails gradle mode when the CLI planner cannot resolve the plan', async () => {
+    const project = await makeTempProject({ '.java-version': '21\n' });
+
+    try {
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        void options;
+        if (command === 'boringcache' && args?.[0] === 'gradle' && args.includes('--dry-run') && args.includes('--json')) {
+          return 1;
+        }
+        return 0;
+      });
+
+      mockGetInput({
+        mode: 'gradle',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        'boringcache/one restore failed: boringcache gradle --dry-run --json exited with code 1',
+      );
+      expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('configures turbo proxy mode and exports turbo env', async () => {
     const project = await makeTempProject({
       '.node-version': '22.4.1\n',
@@ -455,6 +533,72 @@ describe('product modes', () => {
     }
   });
 
+  it('uses the CLI turbo planner tag from repo config', async () => {
+    const project = await makeTempProject({
+      '.boringcache.toml': 'workspace = "config-org/config-workspace"\n\n[adapters.turbo]\ntag = "turbo-main"\n',
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      mockGetInput({
+        mode: 'turbo-proxy',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'config-org/config-workspace',
+        tag: 'turbo-main',
+      }));
+      expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'turbo-main');
+      expect(core.setOutput).toHaveBeenCalledWith('workspace', 'config-org/config-workspace');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('fails turbo proxy mode when the CLI planner cannot resolve the plan', async () => {
+    const project = await makeTempProject({
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        void options;
+        if (command === 'boringcache' && args?.[0] === 'turbo' && args.includes('--dry-run') && args.includes('--json')) {
+          return 1;
+        }
+        return 0;
+      });
+
+      mockGetInput({
+        mode: 'turbo-proxy',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        'boringcache/one restore failed: boringcache turbo --dry-run --json exited with code 1',
+      );
+      expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('supports rust mode with mise-managed tooling and proxy sccache', async () => {
     const project = await makeTempProject({
       'Cargo.lock': '',
@@ -468,6 +612,7 @@ describe('product modes', () => {
       mockGetInput({
         mode: 'rust-sccache',
         'working-directory': project,
+        workspace: 'my-org/my-project',
         sccache: 'true',
         'sccache-mode': 'proxy',
       });
@@ -500,6 +645,7 @@ describe('product modes', () => {
       mockGetInput({
         mode: 'rust-sccache',
         'working-directory': project,
+        workspace: 'my-org/my-project',
         sccache: 'true',
         'sccache-mode': 'proxy',
         'cargo-tag': 'zed-cargo-registry',

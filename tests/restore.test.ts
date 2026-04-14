@@ -34,7 +34,7 @@ describe('restore action', () => {
 
     await restoreRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.26' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.27' });
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
       ['restore', 'my-org/my-project', 'deps:node_modules,build:dist', '--no-platform'],
@@ -54,9 +54,41 @@ describe('restore action', () => {
 
   it('falls back through restore keys in actions/cache compatibility mode', async () => {
     process.env.GITHUB_REPOSITORY = 'owner/repo';
-    (exec.exec as jest.Mock)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(0);
+    let restoreAttempt = 0;
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      if (command === 'boringcache' && args?.[0] === 'run' && args.includes('--dry-run') && args.includes('--json')) {
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          workspace: 'owner/repo',
+          workspace_source: 'configured-default',
+          tag_path_pairs: [`deps-primary-npm:${path.join(os.homedir(), '.npm')}`],
+          archive_entries: [{
+            requested: '~/.npm',
+            request_source: 'archive-path',
+            resolution_source: 'manual',
+            tag: 'deps-primary-npm',
+            path: path.join(os.homedir(), '.npm'),
+            tag_path_pair: `deps-primary-npm:${path.join(os.homedir(), '.npm')}`,
+          }],
+          archive_restore_candidates: [{
+            tag_prefix: 'deps-fallback',
+            tag_path_pairs: [`deps-fallback-npm:${path.join(os.homedir(), '.npm')}`],
+          }],
+          env_vars: {},
+        })));
+        return 0;
+      }
+
+      if (command === 'boringcache' && args?.[0] === 'restore') {
+        restoreAttempt += 1;
+        return restoreAttempt === 1 ? 1 : 0;
+      }
+
+      return 0;
+    });
 
     mockGetInput({
       path: '~/.npm',
@@ -110,7 +142,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.26',
+      version: 'v1.12.27',
       platform: 'alpine-amd64',
     });
   });
@@ -124,7 +156,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.26',
+      version: 'v1.12.27',
       platform: 'linux-amd64',
     });
     expect(exec.exec).not.toHaveBeenCalledWith(

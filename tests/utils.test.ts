@@ -534,6 +534,23 @@ describe('one utils', () => {
       expect(plan.archiveEntries).toBe(
         `deps-node-modules:${path.join(project, 'node_modules')},deps-npm-cache:${path.join(project, '.npm-cache')}`,
       );
+      expect(exec.exec).toHaveBeenCalledWith(
+        'boringcache',
+        [
+          'run',
+          'my-org/my-project',
+          '--archive-path',
+          'node_modules',
+          '--archive-path',
+          '.npm-cache',
+          '--archive-tag-prefix',
+          'deps',
+          '--no-platform',
+          '--dry-run',
+          '--json',
+        ],
+        expect.objectContaining({ cwd: project }),
+      );
     } finally {
       await removeTempProject(project);
     }
@@ -691,6 +708,11 @@ describe('one utils', () => {
 
     expect(plan.runtimeEntry).toBe(`bundler-mise-ruby-4.0.1:${getMiseInstallsDir()}`);
     expect(plan.archiveEntries).toBe('bundler-ruby-4.0.1:vendor/bundle');
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['run', 'my-org/my-project', 'bundler:vendor/bundle', '--tool-tag-suffix', 'ruby-4.0.1', '--dry-run', '--json'],
+      expect.any(Object),
+    );
   });
 
   it('supports deterministic version scoping for runtime and archive tags', async () => {
@@ -801,6 +823,32 @@ describe('one utils', () => {
     }
   });
 
+  it('resolves workspace through CLI dry-run for proxy-only plans', async () => {
+    const project = await makeTempProject({
+      '.boringcache.toml': 'workspace = "config-org/config-workspace"\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        setup: 'none',
+        mode: 'turbo-proxy',
+        workspace: '',
+        workingDirectory: project,
+        entries: '',
+      }));
+
+      expect(plan.workspace).toBe('config-org/config-workspace');
+      expect(plan.archiveEntries).toBe('');
+      expect(exec.exec).toHaveBeenCalledWith(
+        'boringcache',
+        ['run', '--dry-run', '--json'],
+        expect.objectContaining({ cwd: project }),
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('allows explicit runtime cache tags for local and CI reuse', async () => {
     const plan = await buildPlan(buildInputs({
       tools: 'ruby@4.0.1',
@@ -813,6 +861,11 @@ describe('one utils', () => {
     expect(buildRuntimeCacheTag('web', 'web-mise-ruby', plan.runtimeTools, 'patch')).toBe('web-mise-ruby');
     expect(plan.runtimeEntry).toBe(`web-mise-ruby:${getMiseInstallsDir()}`);
     expect(plan.archiveEntries).toBe('web-bundler-ruby-4.0.1:vendor/bundle');
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['run', 'my-org/my-project', 'bundler:vendor/bundle', '--cache-tag', 'web', '--tool-tag-suffix', 'ruby-4.0.1', '--dry-run', '--json'],
+      expect.any(Object),
+    );
   });
 
   it('prefixes archive entries with cache-tag for deterministic namespacing', async () => {
@@ -824,6 +877,11 @@ describe('one utils', () => {
 
     expect(plan.archiveEntries).toBe('archive-poison-123-marker:marker.txt');
     expect(plan.cacheTagPrefix).toBe('archive-poison-123');
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['run', 'my-org/my-project', 'marker:marker.txt', '--cache-tag', 'archive-poison-123', '--dry-run', '--json'],
+      expect.any(Object),
+    );
   });
 
   it('prefers BORINGCACHE_DEFAULT_WORKSPACE over the repository name', async () => {
