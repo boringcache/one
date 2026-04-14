@@ -211,6 +211,7 @@ jobs:
           path: ${{ matrix.path }}
           key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
           restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
+          save-on-pull-request: true
           verify: wait
           verbose: true
 
@@ -537,6 +538,7 @@ jobs:
           sccache: ${{ matrix.enable_sccache }}
           sccache-mode: ${{ matrix.sccache_mode }}
           cache-target: ${{ matrix.cache_target }}
+          save-on-pull-request: true
           verify: wait
           verbose: true
 

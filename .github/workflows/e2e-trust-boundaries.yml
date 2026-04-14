@@ -300,6 +300,7 @@ jobs:
           tools: ${{ matrix.tools }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           read-only: true
+          verify: none
           verbose: true
 
       - name: Verify read-only configuration
