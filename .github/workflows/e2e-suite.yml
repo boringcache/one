@@ -535,7 +535,7 @@ jobs:
           image: ${{ format('one-e2e-{0}', matrix.id) }}
           tags: ${{ format('run-{0}', github.run_id) }}
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
-          registry-ref-tag: ${{ matrix.output == 'dynamic' && format('buildcache-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
@@ -686,7 +686,7 @@ jobs:
           image: ${{ format('one-e2e-{0}', matrix.id) }}
           tags: ${{ format('run-{0}', github.run_id) }}
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
-          registry-ref-tag: ${{ matrix.output == 'dynamic' && format('buildcache-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
