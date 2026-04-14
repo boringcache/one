@@ -845,6 +845,7 @@ beforeEach(() => {
   delete process.env.BORINGCACHE_GIT_SHA;
   delete process.env.CI;
   delete process.env.GITHUB_ACTIONS;
+  delete process.env.GITHUB_EVENT_NAME;
   delete process.env.GITHUB_HEAD_REF;
   delete process.env.GITHUB_REF;
   delete process.env.GITHUB_REF_NAME;
