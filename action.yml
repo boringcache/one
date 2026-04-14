@@ -150,7 +150,7 @@ inputs:
     default: 'max'
     required: false
   registry-tag:
-    description: 'Optional human-readable registry cache root for proxy-backed Docker or BuildKit cache. Generated refs use this as <registry-tag>:buildcache.'
+    description: 'Optional human-readable proxy cache tag for Docker or BuildKit registry backends. Generated OCI refs use the canonical /cache:<registry-ref-tag> shape while this tag controls the proxy cache namespace.'
     required: false
   registry-ref-tag:
     description: 'Optional OCI tag suffix for proxy-backed Docker or BuildKit cache refs. Defaults to buildcache.'
@@ -370,7 +370,7 @@ outputs:
   proxy-log-path:
     description: 'Proxy log file path for proxy-backed modes'
   registry-ref:
-    description: 'Resolved registry cache ref for Docker or BuildKit registry backends (for example 127.0.0.1:5000/my-cache:buildcache)'
+    description: 'Resolved registry cache ref for Docker or BuildKit registry backends (for example 127.0.0.1:5000/cache:buildcache)'
   cache-from:
     description: 'Resolved Docker --cache-from or BuildKit --import-cache value for Docker or BuildKit modes'
   cache-to:

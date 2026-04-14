@@ -79,7 +79,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs, allowRestoreKeys = false) {
+async function restoreEntries(workspace, entriesString, flagArgs, restoreCandidates = []) {
     if (!entriesString.trim()) {
         return { hit: false, saveEntries: '' };
     }
@@ -90,36 +90,15 @@ async function restoreEntries(workspace, entriesString, flagArgs, allowRestoreKe
     const restoreEntriesArg = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`).join(',');
     const saveEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.savePath}`).join(',');
     let lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, restoreEntriesArg, ...flagArgs], { ignoreReturnCode: true });
-    if (lastExitCode !== 0 && allowRestoreKeys) {
-        const inputs = (0, utils_1.getInputs)();
-        const restoreKeys = (0, utils_1.getRestoreKeyCandidates)(inputs);
-        if (inputs.path && inputs.key) {
-            for (const restoreKey of restoreKeys) {
-                const fallbackEntries = (0, utils_1.convertCacheFormatToEntries)(inputs, 'restore', restoreKey);
-                lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
-                if (lastExitCode === 0) {
-                    core.info(`Cache hit with restore key ${restoreKey}`);
-                    break;
-                }
+    if (lastExitCode !== 0) {
+        for (const candidate of restoreCandidates) {
+            if (!candidate.entries.trim()) {
+                continue;
             }
-        }
-        else {
-            const suffix = (0, utils_1.getPlatformSuffix)(inputs.noPlatform, inputs.enableCrossOsArchive);
-            for (const restoreKey of restoreKeys) {
-                const candidateKey = suffix && !restoreKey.endsWith(suffix)
-                    ? `${restoreKey}${suffix}`
-                    : restoreKey;
-                const fallbackEntries = parsedEntries.map((entry) => {
-                    if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
-                        return `${candidateKey}:${entry.restorePath}`;
-                    }
-                    return `${entry.tag}:${entry.restorePath}`;
-                }).join(',');
-                lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, fallbackEntries, ...flagArgs], { ignoreReturnCode: true });
-                if (lastExitCode === 0) {
-                    core.info(`Cache hit with restore key ${candidateKey}`);
-                    break;
-                }
+            lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, candidate.entries, ...flagArgs], { ignoreReturnCode: true });
+            if (lastExitCode === 0) {
+                core.info(`Cache hit with restore key ${candidate.tagPrefix}`);
+                break;
             }
         }
     }
@@ -142,12 +121,12 @@ async function run() {
         const plan = await (0, utils_1.buildPlan)(inputs);
         process.chdir(plan.workingDirectory);
         await (0, utils_1.applyPresetCacheEnv)(plan);
-        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs), false);
+        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs));
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
             usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
         }
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, (0, utils_1.buildFlagArgs)(inputs), plan.usesCacheFormat);
+        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, (0, utils_1.buildFlagArgs)(inputs), plan.archiveRestoreCandidates);
         const modeRestore = await (0, mode_handlers_1.runModeRestore)(plan, inputs);
         const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)

@@ -98,6 +98,6 @@ In most workflows, set `workspace` and then one of:
 
 ## Learn more
 
-- [GitHub Actions docs](https://boringcache.com/docs#github-actions)
+- [GitHub Actions docs](https://boringcache.com/docs#one-action)
 - [GitHub Actions auth and trust model](https://boringcache.com/docs#actions-auth)
 - [CLI docs](https://github.com/boringcache/cli/tree/main/docs)

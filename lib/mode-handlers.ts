@@ -51,12 +51,21 @@ interface CacheFlags {
   exclude?: string;
 }
 
-interface RegistryCacheSpec {
-  effectiveTag: string;
-  refTag: string;
-  ref: string;
-  from: string;
-  to: string;
+interface CliAdapterDryRunPlan {
+  workspace: string;
+  tag: string;
+  proxy: {
+    port: number;
+    no_platform: boolean;
+    no_git: boolean;
+    read_only: boolean;
+  };
+  oci_cache?: {
+    registry_ref: string;
+    cache_from: string;
+    cache_to?: string;
+    ref_tag: string;
+  };
 }
 
 interface DockerBuildOptions {
@@ -259,6 +268,155 @@ async function execBoringCache(args: string[], options?: Parameters<typeof execB
   return execBoringCacheCore(args, options);
 }
 
+function emitCliPlannerWarnings(stderr: string): void {
+  for (const line of stderr.split('\n').map((value) => value.trim()).filter(Boolean)) {
+    if (line.startsWith('warning:')) {
+      core.warning(line.replace(/^warning:\s*/, ''));
+    }
+  }
+}
+
+async function resolveAdapterCliPlan(
+  adapter: 'bazel' | 'gradle' | 'maven' | 'turbo',
+  workspace: string,
+  workingDirectory: string,
+  inputCacheTag: string,
+  preferredPort: number,
+  noPlatform: boolean,
+  noGit: boolean,
+  readOnly: boolean,
+): Promise<CliAdapterDryRunPlan> {
+  const args = [adapter, '--workspace', workspace];
+  const trimmedCacheTag = inputCacheTag.trim();
+  if (trimmedCacheTag) {
+    args.push('--tag', trimmedCacheTag);
+  }
+  if (preferredPort > 0) {
+    args.push('--port', String(preferredPort));
+  }
+  if (noPlatform) {
+    args.push('--no-platform');
+  }
+  if (noGit) {
+    args.push('--no-git');
+  }
+  if (readOnly) {
+    args.push('--read-only');
+  }
+  args.push('--dry-run', '--json');
+
+  let stdout = '';
+  let stderr = '';
+  const exitCode = await exec.exec('boringcache', args, {
+    cwd: workingDirectory,
+    ignoreReturnCode: true,
+    silent: true,
+    listeners: {
+      stdout: (data: Buffer) => {
+        stdout += data.toString();
+      },
+      stderr: (data: Buffer) => {
+        stderr += data.toString();
+      },
+    },
+  });
+
+  if (exitCode !== 0) {
+    throw new Error(stderr.trim() || stdout.trim() || `boringcache ${adapter} --dry-run --json exited with code ${exitCode}`);
+  }
+  emitCliPlannerWarnings(stderr);
+
+  try {
+    return JSON.parse(stdout) as CliAdapterDryRunPlan;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+async function resolveDockerCliPlan(
+  workspace: string,
+  workingDirectory: string,
+  inputCacheTag: string,
+  preferredPort: number,
+  host: string,
+  endpointHost: string,
+  noPlatform: boolean,
+  noGit: boolean,
+  readOnly: boolean,
+  cacheMode: string,
+  cacheRefTag: string,
+): Promise<CliAdapterDryRunPlan> {
+  const args = ['docker', '--workspace', workspace];
+  const trimmedCacheTag = inputCacheTag.trim();
+  const trimmedCacheRefTag = cacheRefTag.trim();
+  if (trimmedCacheTag) {
+    args.push('--tag', trimmedCacheTag);
+  }
+  if (preferredPort > 0) {
+    args.push('--port', String(preferredPort));
+  }
+  if (host.trim()) {
+    args.push('--host', host.trim());
+  }
+  if (endpointHost.trim()) {
+    args.push('--endpoint-host', endpointHost.trim());
+  }
+  if (noPlatform) {
+    args.push('--no-platform');
+  }
+  if (noGit) {
+    args.push('--no-git');
+  }
+  if (readOnly) {
+    args.push('--read-only');
+  }
+  if (cacheMode.trim()) {
+    args.push('--cache-mode', cacheMode.trim());
+  }
+  if (trimmedCacheRefTag) {
+    args.push('--cache-ref-tag', trimmedCacheRefTag);
+  }
+  args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
+
+  let stdout = '';
+  let stderr = '';
+  const exitCode = await exec.exec('boringcache', args, {
+    cwd: workingDirectory,
+    ignoreReturnCode: true,
+    silent: true,
+    listeners: {
+      stdout: (data: Buffer) => {
+        stdout += data.toString();
+      },
+      stderr: (data: Buffer) => {
+        stderr += data.toString();
+      },
+    },
+  });
+
+  if (exitCode !== 0) {
+    throw new Error(stderr.trim() || stdout.trim() || `boringcache docker --dry-run --json exited with code ${exitCode}`);
+  }
+  emitCliPlannerWarnings(stderr);
+
+  let plan: CliAdapterDryRunPlan;
+  try {
+    plan = JSON.parse(stdout) as CliAdapterDryRunPlan;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse boringcache docker dry-run JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (!plan.oci_cache?.registry_ref || !plan.oci_cache.cache_from) {
+    throw new Error('boringcache docker dry-run JSON did not include OCI cache planning data');
+  }
+
+  return plan;
+}
+
 async function restoreSimpleCache(workspace: string, cacheKey: string, cacheDir: string, flags: CacheFlags = {}): Promise<void> {
   if (!hasRestoreToken()) {
     core.notice(`Skipping cache restore (${missingRestoreTokenMessage()})`);
@@ -299,80 +457,6 @@ function getEffectiveRegistryTag(cacheTag: string, registryTag: string): string 
   return registryTag || cacheTag;
 }
 
-function validateRegistryRefTag(refTag: string): string {
-  const trimmed = refTag.trim();
-  if (!trimmed) {
-    return DEFAULT_REGISTRY_CACHE_REF_TAG;
-  }
-
-  if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(trimmed)) {
-    throw new Error(
-      `Unsupported registry-ref-tag "${refTag}". Expected an OCI tag such as "buildcache" or "cache-main".`,
-    );
-  }
-
-  return trimmed;
-}
-
-function resolveRegistryCacheTarget(
-  cacheTag: string,
-  registryTagInput: string,
-  registryRefTagInput: string,
-): { effectiveTag: string; refTag: string } {
-  const rawRegistryTag = registryTagInput.trim();
-  const rawRegistryRefTag = registryRefTagInput.trim();
-  const normalizedRegistryRefTag = rawRegistryRefTag
-    ? validateRegistryRefTag(rawRegistryRefTag)
-    : '';
-  const hasExplicitNonDefaultRefTag = Boolean(
-    normalizedRegistryRefTag
-    && normalizedRegistryRefTag !== DEFAULT_REGISTRY_CACHE_REF_TAG,
-  );
-
-  if (rawRegistryTag.includes('@')) {
-    throw new Error(
-      `Unsupported registry-tag "${registryTagInput}". Use a repo-style cache root, not a digest reference.`,
-    );
-  }
-
-  if (rawRegistryTag.includes(':')) {
-    if (hasExplicitNonDefaultRefTag) {
-      throw new Error(
-        'registry-tag must not include a tag suffix when registry-ref-tag is also set. Use registry-tag for the cache root and registry-ref-tag for the OCI tag.',
-      );
-    }
-
-    const separator = rawRegistryTag.lastIndexOf(':');
-    const effectiveTag = rawRegistryTag.slice(0, separator).trim();
-    const embeddedRefTag = rawRegistryTag.slice(separator + 1).trim();
-    if (!effectiveTag || !embeddedRefTag) {
-      throw new Error(
-        `Unsupported registry-tag "${registryTagInput}". Expected a cache root or root:tag.`,
-      );
-    }
-
-    core.warning('registry-tag included a tag suffix; prefer registry-ref-tag for the OCI cache tag.');
-    return {
-      effectiveTag,
-      refTag: validateRegistryRefTag(embeddedRefTag),
-    };
-  }
-
-  return {
-    effectiveTag: getEffectiveRegistryTag(cacheTag, rawRegistryTag),
-    refTag: normalizedRegistryRefTag || DEFAULT_REGISTRY_CACHE_REF_TAG,
-  };
-}
-
-function getRegistryRef(
-  port: number,
-  cacheTag: string,
-  host = '127.0.0.1',
-  refTag = DEFAULT_REGISTRY_CACHE_REF_TAG,
-): string {
-  return `${host}:${port}/${cacheTag}:${refTag}`;
-}
-
 function getRegistryCacheFlags(ref: string, cacheMode: string): { from: string; to: string } {
   return {
     from: `type=registry,ref=${ref},registry.insecure=true`,
@@ -380,21 +464,10 @@ function getRegistryCacheFlags(ref: string, cacheMode: string): { from: string; 
   };
 }
 
-function buildRegistryCacheSpec(
-  port: number,
-  registryTarget: { effectiveTag: string; refTag: string },
-  cacheMode: string,
-  host = '127.0.0.1',
-): RegistryCacheSpec {
-  const ref = getRegistryRef(port, registryTarget.effectiveTag, host, registryTarget.refTag);
-  const { from, to } = getRegistryCacheFlags(ref, cacheMode);
-  return { effectiveTag: registryTarget.effectiveTag, refTag: registryTarget.refTag, ref, from, to };
-}
-
-function setRegistryCacheOutputs(spec: RegistryCacheSpec): void {
+function setRegistryCacheOutputs(spec: { ref: string; from: string; to?: string }): void {
   core.setOutput('registry-ref', spec.ref);
   core.setOutput('cache-from', spec.from);
-  core.setOutput('cache-to', spec.to);
+  core.setOutput('cache-to', spec.to || '');
   core.setOutput('cache-dir', '');
   core.setOutput('save-cache-dir', '');
 }
@@ -583,7 +656,9 @@ async function buildDockerImage(opts: DockerBuildOptions): Promise<void> {
 
   if (opts.cacheFrom) {
     args.push('--cache-from', opts.cacheFrom);
-    args.push('--cache-to', opts.cacheTo || opts.cacheFrom);
+    if (opts.cacheTo) {
+      args.push('--cache-to', opts.cacheTo);
+    }
   } else if (opts.cacheDirFrom) {
     args.push('--cache-from', `type=local,src=${opts.cacheDirFrom}`);
     args.push('--cache-to', `type=local,dest=${opts.cacheDirTo},mode=${opts.cacheMode}`);
@@ -726,7 +801,9 @@ async function buildWithBuildctl(opts: BuildctlOptions): Promise<void> {
 
   if (opts.importCache) {
     args.push('--import-cache', opts.importCache);
-    args.push('--export-cache', opts.exportCache || opts.importCache);
+    if (opts.exportCache) {
+      args.push('--export-cache', opts.exportCache);
+    }
   } else if (opts.cacheDirFrom) {
     args.push('--import-cache', `type=local,src=${opts.cacheDirFrom}`);
     args.push('--export-cache', `type=local,dest=${opts.cacheDirTo},mode=${opts.cacheMode}`);
@@ -1290,13 +1367,15 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   const cacheBackend = core.getInput('cache-backend') || 'registry';
   const registryTagInput = core.getInput('registry-tag') || '';
   const registryRefTagInput = core.getInput('registry-ref-tag') || '';
-  const cacheTag = inputs.cacheTag || slugify(image);
-  const registryTarget = resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagInput);
+  const localCacheTag = inputs.cacheTag || slugify(image);
   const cacheFlags: CacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
   const useRegistryProxy = cacheBackend !== 'local';
+  let registryVerification: { noPlatform: boolean; noGit: boolean; saveExpected: boolean } | null = null;
+  let resolvedWorkspace = plan.workspace;
+  let resolvedCacheTag = localCacheTag;
 
   saveModeState('workspace', plan.workspace);
-  saveModeState('cache-tag', cacheTag);
+  saveModeState('cache-tag', localCacheTag);
   saveModeState('verbose', String(inputs.verbose));
   saveModeState('exclude', inputs.exclude);
 
@@ -1320,24 +1399,52 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     }
 
     const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
+    const dockerPlan = await resolveDockerCliPlan(
+      plan.workspace,
+      plan.workingDirectory,
+      getEffectiveRegistryTag(localCacheTag, registryTagInput),
+      requestedPort,
+      proxyBindHost,
+      refHost,
+      inputs.proxyNoPlatform,
+      inputs.proxyNoGit,
+      inputs.readOnly,
+      cacheMode,
+      registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG,
+    );
+    const cacheTag = dockerPlan.tag;
     const proxy = await startRegistryProxy({
       command: 'docker-registry',
-      workspace: plan.workspace,
-      tag: registryTarget.effectiveTag,
+      workspace: dockerPlan.workspace,
+      tag: cacheTag,
       host: proxyBindHost,
-      port: requestedPort,
-      noGit: inputs.proxyNoGit,
-      noPlatform: inputs.proxyNoPlatform,
+      port: dockerPlan.proxy.port,
+      noGit: dockerPlan.proxy.no_git,
+      noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
-      readOnly: inputs.readOnly,
+      readOnly: dockerPlan.proxy.read_only,
     });
     await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
+    saveModeState('workspace', dockerPlan.workspace);
+    saveModeState('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
+    resolvedWorkspace = dockerPlan.workspace;
+    resolvedCacheTag = cacheTag;
+    registryVerification = {
+      noPlatform: dockerPlan.proxy.no_platform,
+      noGit: dockerPlan.proxy.no_git,
+      saveExpected: !dockerPlan.proxy.read_only,
+    };
 
-    const registryCache = buildRegistryCacheSpec(proxy.port, registryTarget, cacheMode, refHost);
-    setRegistryCacheOutputs(registryCache);
+    setRegistryCacheOutputs({
+      ref: dockerPlan.oci_cache!.registry_ref,
+      from: `${dockerPlan.oci_cache!.cache_from},registry.insecure=true`,
+      to: dockerPlan.oci_cache!.cache_to
+        ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
+        : undefined,
+    });
 
     if (shouldBuild) {
       await buildDockerImage({
@@ -1354,15 +1461,17 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
         noCache,
         builder: builderName,
         cacheMode,
-        cacheFrom: registryCache.from,
-        cacheTo: registryCache.to,
+        cacheFrom: `${dockerPlan.oci_cache!.cache_from},registry.insecure=true`,
+        cacheTo: dockerPlan.oci_cache!.cache_to
+          ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
+          : undefined,
       });
     }
   } else {
     ensureDir(DOCKER_CACHE_DIR_FROM);
     ensureDir(DOCKER_CACHE_DIR_TO);
     saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
-    await restoreSimpleCache(plan.workspace, cacheTag, DOCKER_CACHE_DIR_FROM, cacheFlags);
+    await restoreSimpleCache(plan.workspace, localCacheTag, DOCKER_CACHE_DIR_FROM, cacheFlags);
     setLocalCacheOutputs(DOCKER_CACHE_DIR_FROM, DOCKER_CACHE_DIR_TO, cacheMode);
 
     if (shouldBuild) {
@@ -1391,18 +1500,18 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     core.setOutput('image-id', imageId);
     core.setOutput('digest', digest);
   }
-  core.setOutput('workspace', plan.workspace);
-  core.setOutput('cache-tag', cacheTag);
+  core.setOutput('workspace', resolvedWorkspace);
+  core.setOutput('cache-tag', resolvedCacheTag);
   return {
-    cacheTag,
+    cacheTag: resolvedCacheTag,
     verificationSpecs: [{
-      tag: useRegistryProxy ? registryTarget.effectiveTag : cacheTag,
-      noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
-      noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+      tag: resolvedCacheTag,
+      noPlatform: registryVerification?.noPlatform || false,
+      noGit: registryVerification?.noGit || false,
       pathHint: plan.workingDirectory,
       // docker-command=setup defers the build to later workflow steps, so treat
       // this as save-expected in write-capable runs and verify after post-save.
-      saveExpected: !inputs.readOnly,
+      saveExpected: registryVerification?.saveExpected ?? !inputs.readOnly,
     }],
   };
 }
@@ -1470,13 +1579,15 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
   const cacheBackend = core.getInput('cache-backend') || 'registry';
   const registryTagInput = core.getInput('registry-tag') || '';
   const registryRefTagInput = core.getInput('registry-ref-tag') || '';
-  const cacheTag = inputs.cacheTag || slugify(image);
-  const registryTarget = resolveRegistryCacheTarget(cacheTag, registryTagInput, registryRefTagInput);
+  const localCacheTag = inputs.cacheTag || slugify(image);
   const cacheFlags: CacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
   const useRegistryProxy = cacheBackend !== 'local';
+  let registryVerification: { noPlatform: boolean; noGit: boolean; saveExpected: boolean } | null = null;
+  let resolvedWorkspace = plan.workspace;
+  let resolvedCacheTag = localCacheTag;
 
   saveModeState('workspace', plan.workspace);
-  saveModeState('cache-tag', cacheTag);
+  saveModeState('cache-tag', localCacheTag);
   saveModeState('verbose', String(inputs.verbose));
   saveModeState('exclude', inputs.exclude);
 
@@ -1503,24 +1614,51 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     }
 
     const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
+    const dockerPlan = await resolveDockerCliPlan(
+      plan.workspace,
+      plan.workingDirectory,
+      getEffectiveRegistryTag(localCacheTag, registryTagInput),
+      requestedPort,
+      proxyBindHost,
+      refHost,
+      inputs.proxyNoPlatform,
+      inputs.proxyNoGit,
+      inputs.readOnly,
+      cacheMode,
+      registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG,
+    );
+    const cacheTag = dockerPlan.tag;
     const proxy = await startRegistryProxy({
       command: 'docker-registry',
-      workspace: plan.workspace,
-      tag: registryTarget.effectiveTag,
+      workspace: dockerPlan.workspace,
+      tag: cacheTag,
       host: proxyBindHost,
-      port: requestedPort,
-      noGit: inputs.proxyNoGit,
-      noPlatform: inputs.proxyNoPlatform,
+      port: dockerPlan.proxy.port,
+      noGit: dockerPlan.proxy.no_git,
+      noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
-      readOnly: inputs.readOnly,
+      readOnly: dockerPlan.proxy.read_only,
     });
     await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
+    saveModeState('workspace', dockerPlan.workspace);
+    saveModeState('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-
-    const registryCache = buildRegistryCacheSpec(proxy.port, registryTarget, cacheMode, refHost);
-    setRegistryCacheOutputs(registryCache);
+    resolvedWorkspace = dockerPlan.workspace;
+    resolvedCacheTag = cacheTag;
+    registryVerification = {
+      noPlatform: dockerPlan.proxy.no_platform,
+      noGit: dockerPlan.proxy.no_git,
+      saveExpected: !dockerPlan.proxy.read_only,
+    };
+    setRegistryCacheOutputs({
+      ref: dockerPlan.oci_cache!.registry_ref,
+      from: `${dockerPlan.oci_cache!.cache_from},registry.insecure=true`,
+      to: dockerPlan.oci_cache!.cache_to
+        ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
+        : undefined,
+    });
     await buildWithBuildctl({
       addr: buildkitHost,
       tlsCa,
@@ -1536,8 +1674,10 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       target,
       platforms,
       cacheMode,
-      importCache: registryCache.from,
-      exportCache: registryCache.to,
+      importCache: `${dockerPlan.oci_cache!.cache_from},registry.insecure=true`,
+      exportCache: dockerPlan.oci_cache!.cache_to
+        ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
+        : undefined,
       output,
       imageTags,
       push,
@@ -1548,7 +1688,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     ensureDir(BUILDKIT_CACHE_DIR_FROM);
     ensureDir(BUILDKIT_CACHE_DIR_TO);
     saveModeState('cache-dir', BUILDKIT_CACHE_DIR_TO);
-    await restoreSimpleCache(plan.workspace, cacheTag, BUILDKIT_CACHE_DIR_FROM, cacheFlags);
+    await restoreSimpleCache(plan.workspace, localCacheTag, BUILDKIT_CACHE_DIR_FROM, cacheFlags);
     setLocalCacheOutputs(BUILDKIT_CACHE_DIR_FROM, BUILDKIT_CACHE_DIR_TO, cacheMode);
 
     await buildWithBuildctl({
@@ -1577,16 +1717,16 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
   }
 
   core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
-  core.setOutput('workspace', plan.workspace);
-  core.setOutput('cache-tag', cacheTag);
+  core.setOutput('workspace', resolvedWorkspace);
+  core.setOutput('cache-tag', resolvedCacheTag);
   return {
-    cacheTag,
+    cacheTag: resolvedCacheTag,
     verificationSpecs: [{
-      tag: useRegistryProxy ? registryTarget.effectiveTag : cacheTag,
-      noPlatform: useRegistryProxy ? inputs.proxyNoPlatform : false,
-      noGit: useRegistryProxy ? inputs.proxyNoGit : false,
+      tag: resolvedCacheTag,
+      noPlatform: registryVerification?.noPlatform || false,
+      noGit: registryVerification?.noGit || false,
       pathHint: plan.workingDirectory,
-      saveExpected: !inputs.readOnly,
+      saveExpected: registryVerification?.saveExpected ?? !inputs.readOnly,
     }],
   };
 }
@@ -1617,8 +1757,19 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   const bazelrcLines = core.getInput('bazelrc-lines') || '';
   const runtimeVersion = plan.runtimeTools.find((tool) => tool.name === 'bazel')?.version || '';
   const bazelVersion = inputVersion || runtimeVersion;
-  const cacheTag = inputs.cacheTag || getModeCacheTag('', 'bazel');
-  const proxyPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+  const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+  const proxyPlan = await resolveAdapterCliPlan(
+    'bazel',
+    plan.workspace,
+    plan.workingDirectory,
+    inputs.cacheTag,
+    requestedPort,
+    inputs.proxyNoPlatform,
+    inputs.proxyNoGit,
+    inputs.readOnly,
+  );
+  const workspace = proxyPlan.workspace;
+  const cacheTag = proxyPlan.tag;
 
   saveModeState('proxy-pid', '');
   if (bazelVersion) {
@@ -1627,79 +1778,101 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
 
   const proxy = await startRegistryProxy({
     command: 'cache-registry',
-    workspace: plan.workspace,
+    workspace,
     tag: cacheTag,
     host: '127.0.0.1',
-    port: proxyPort,
-    noGit: inputs.proxyNoGit,
-    noPlatform: inputs.proxyNoPlatform,
+    port: proxyPlan.proxy.port,
+    noGit: proxyPlan.proxy.no_git,
+    noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
-    readOnly: inputs.readOnly,
+    readOnly: proxyPlan.proxy.read_only,
   });
   await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
-  writeBazelrc(proxy.port, proxy.readOnly ?? inputs.readOnly, bazelrcLines);
+  writeBazelrc(proxy.port, proxy.readOnly ?? proxyPlan.proxy.read_only, bazelrcLines);
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
-  core.setOutput('workspace', plan.workspace);
+  core.setOutput('workspace', workspace);
   return {
     cacheTag,
     verificationSpecs: [{
       tag: cacheTag,
-      noPlatform: inputs.proxyNoPlatform,
-      noGit: inputs.proxyNoGit,
+      noPlatform: proxyPlan.proxy.no_platform,
+      noGit: proxyPlan.proxy.no_git,
       pathHint: plan.workingDirectory,
-      saveExpected: !inputs.readOnly,
+      saveExpected: !proxyPlan.proxy.read_only,
     }],
   };
 }
 
 async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
-  const cacheTag = inputs.cacheTag || getModeCacheTag('', 'gradle');
-  const proxyPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+  const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+  const proxyPlan = await resolveAdapterCliPlan(
+    'gradle',
+    plan.workspace,
+    plan.workingDirectory,
+    inputs.cacheTag,
+    requestedPort,
+    inputs.proxyNoPlatform,
+    inputs.proxyNoGit,
+    inputs.readOnly,
+  );
+  const workspace = proxyPlan.workspace;
+  const cacheTag = proxyPlan.tag;
   const gradleHome = resolveGradleHome(core.getInput('gradle-home') || '');
   const enableBuildCache = parseBoolean(core.getInput('enable-build-cache'), true);
 
   const proxy = await startRegistryProxy({
     command: 'cache-registry',
-    workspace: plan.workspace,
+    workspace,
     tag: cacheTag,
     host: '127.0.0.1',
-    port: proxyPort,
-    noGit: inputs.proxyNoGit,
-    noPlatform: inputs.proxyNoPlatform,
+    port: proxyPlan.proxy.port,
+    noGit: proxyPlan.proxy.no_git,
+    noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
-    readOnly: inputs.readOnly,
+    readOnly: proxyPlan.proxy.read_only,
   });
   await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
-  writeGradleInitScript(gradleHome, proxy.port, proxy.readOnly ?? inputs.readOnly);
+  writeGradleInitScript(gradleHome, proxy.port, proxy.readOnly ?? proxyPlan.proxy.read_only);
   if (enableBuildCache) {
     enableGradleBuildCache(gradleHome);
   }
 
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
-  core.setOutput('workspace', plan.workspace);
+  core.setOutput('workspace', workspace);
   return {
     cacheTag,
     verificationSpecs: [{
       tag: cacheTag,
-      noPlatform: inputs.proxyNoPlatform,
-      noGit: inputs.proxyNoGit,
+      noPlatform: proxyPlan.proxy.no_platform,
+      noGit: proxyPlan.proxy.no_git,
       pathHint: plan.workingDirectory,
-      saveExpected: !inputs.readOnly,
+      saveExpected: !proxyPlan.proxy.read_only,
     }],
   };
 }
 
 async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
-  const cacheTag = inputs.cacheTag || getModeCacheTag('', 'maven');
-  const proxyPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+  const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+  const proxyPlan = await resolveAdapterCliPlan(
+    'maven',
+    plan.workspace,
+    plan.workingDirectory,
+    inputs.cacheTag,
+    requestedPort,
+    inputs.proxyNoPlatform,
+    inputs.proxyNoGit,
+    inputs.readOnly,
+  );
+  const workspace = proxyPlan.workspace;
+  const cacheTag = proxyPlan.tag;
   const workingDirectory = plan.workingDirectory;
   const extensionsPath = resolveUserPath(core.getInput('maven-extensions-path') || '.mvn/extensions.xml', workingDirectory);
   const buildCacheConfigPath = resolveUserPath(
@@ -1712,46 +1885,57 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
 
   const proxy = await startRegistryProxy({
     command: 'cache-registry',
-    workspace: plan.workspace,
+    workspace,
     tag: cacheTag,
     host: '127.0.0.1',
-    port: proxyPort,
-    noGit: inputs.proxyNoGit,
-    noPlatform: inputs.proxyNoPlatform,
+    port: proxyPlan.proxy.port,
+    noGit: proxyPlan.proxy.no_git,
+    noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
-    readOnly: inputs.readOnly,
+    readOnly: proxyPlan.proxy.read_only,
   });
   await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
   ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);
-  writeMavenBuildCacheConfig(buildCacheConfigPath, proxy.port, proxy.readOnly ?? inputs.readOnly, cacheId);
+  writeMavenBuildCacheConfig(buildCacheConfigPath, proxy.port, proxy.readOnly ?? proxyPlan.proxy.read_only, cacheId);
   ensureDir(localRepo);
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
   core.setOutput('maven-extensions-path', extensionsPath);
   core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
   core.setOutput('maven-local-repo', localRepo);
-  core.setOutput('workspace', plan.workspace);
+  core.setOutput('workspace', workspace);
   return {
     cacheTag,
     verificationSpecs: [{
       tag: cacheTag,
-      noPlatform: inputs.proxyNoPlatform,
-      noGit: inputs.proxyNoGit,
+      noPlatform: proxyPlan.proxy.no_platform,
+      noGit: proxyPlan.proxy.no_git,
       pathHint: plan.workingDirectory,
-      saveExpected: !inputs.readOnly,
+      saveExpected: !proxyPlan.proxy.read_only,
     }],
   };
 }
 
 async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
-  const cacheTag = inputs.cacheTag || getModeCacheTag('', 'turbo');
   const turboApiUrl = core.getInput('turbo-api-url') || '';
   const turboToken = core.getInput('turbo-token') || 'boringcache';
   const turboTeam = core.getInput('turbo-team') || '';
   const preferredPort = parseInt(core.getInput('turbo-port') || inputs.proxyPort || '4227', 10);
+  const turboPlan = await resolveAdapterCliPlan(
+    'turbo',
+    plan.workspace,
+    plan.workingDirectory,
+    inputs.cacheTag,
+    preferredPort,
+    false,
+    false,
+    inputs.readOnly,
+  );
+  const workspace = turboPlan.workspace;
+  const cacheTag = turboPlan.tag;
   const packageManager = await detectNodePackageManager(plan.workingDirectory);
 
   const packageManagerCacheDir = configureNodePackageManagerEnv(packageManager);
@@ -1763,16 +1947,26 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
 
   if (turboApiUrl) {
     configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
-    core.setOutput('workspace', plan.workspace);
+    core.setOutput('workspace', workspace);
     core.setOutput('cache-tag', cacheTag);
     return { cacheTag, verificationSpecs: [] };
   }
 
   let proxy;
   try {
-    proxy = await startPortableCacheProxy(plan.workspace, preferredPort, cacheTag, inputs.readOnly);
+    proxy = await startPortableCacheProxy(
+      workspace,
+      turboPlan.proxy.port || preferredPort,
+      cacheTag,
+      turboPlan.proxy.read_only,
+    );
   } catch {
-    proxy = await startPortableCacheProxy(plan.workspace, await findAvailablePort(), cacheTag, inputs.readOnly);
+    proxy = await startPortableCacheProxy(
+      workspace,
+      await findAvailablePort(),
+      cacheTag,
+      turboPlan.proxy.read_only,
+    );
   }
 
   saveModeState('proxy-pid', String(proxy.pid));
@@ -1780,7 +1974,7 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
   configureTurboRemoteEnv(`http://127.0.0.1:${proxy.port}`, turboToken, turboTeam);
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
-  core.setOutput('workspace', plan.workspace);
+  core.setOutput('workspace', workspace);
   return {
     cacheTag,
     verificationSpecs: [{

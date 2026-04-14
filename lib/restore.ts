@@ -4,18 +4,16 @@ import {
   applySaveTokenPolicy,
   applyPresetCacheEnv,
   applyMiseSetup,
+  type ArchiveRestoreCandidate,
   buildGenericVerificationSpecs,
   buildFlagArgs,
   buildPlan,
-  convertCacheFormatToEntries,
   ensureBoringCache,
   execBoringCache,
   getInputs,
   isPullRequestEvent,
   saveConfigured,
   loadDiagnosticsConfig,
-  getPlatformSuffix,
-  getRestoreKeyCandidates,
   parseEntries,
   readLogTail,
   resolveVerificationTags,
@@ -91,7 +89,7 @@ async function restoreEntries(
   workspace: string,
   entriesString: string,
   flagArgs: string[],
-  allowRestoreKeys = false,
+  restoreCandidates: ArchiveRestoreCandidate[] = [],
 ): Promise<RestoreResult> {
   if (!entriesString.trim()) {
     return { hit: false, saveEntries: '' };
@@ -110,43 +108,19 @@ async function restoreEntries(
     { ignoreReturnCode: true },
   );
 
-  if (lastExitCode !== 0 && allowRestoreKeys) {
-    const inputs = getInputs();
-    const restoreKeys = getRestoreKeyCandidates(inputs);
-    if (inputs.path && inputs.key) {
-      for (const restoreKey of restoreKeys) {
-        const fallbackEntries = convertCacheFormatToEntries(inputs, 'restore', restoreKey);
-        lastExitCode = await execBoringCache(
-          ['restore', workspace, fallbackEntries, ...flagArgs],
-          { ignoreReturnCode: true },
-        );
-        if (lastExitCode === 0) {
-          core.info(`Cache hit with restore key ${restoreKey}`);
-          break;
-        }
+  if (lastExitCode !== 0) {
+    for (const candidate of restoreCandidates) {
+      if (!candidate.entries.trim()) {
+        continue;
       }
-    } else {
-      const suffix = getPlatformSuffix(inputs.noPlatform, inputs.enableCrossOsArchive);
 
-      for (const restoreKey of restoreKeys) {
-        const candidateKey = suffix && !restoreKey.endsWith(suffix)
-          ? `${restoreKey}${suffix}`
-          : restoreKey;
-        const fallbackEntries = parsedEntries.map((entry) => {
-          if (inputs.key && entry.tag === `${inputs.key}${suffix}`) {
-            return `${candidateKey}:${entry.restorePath}`;
-          }
-          return `${entry.tag}:${entry.restorePath}`;
-        }).join(',');
-
-        lastExitCode = await execBoringCache(
-          ['restore', workspace, fallbackEntries, ...flagArgs],
-          { ignoreReturnCode: true },
-        );
-        if (lastExitCode === 0) {
-          core.info(`Cache hit with restore key ${candidateKey}`);
-          break;
-        }
+      lastExitCode = await execBoringCache(
+        ['restore', workspace, candidate.entries, ...flagArgs],
+        { ignoreReturnCode: true },
+      );
+      if (lastExitCode === 0) {
+        core.info(`Cache hit with restore key ${candidate.tagPrefix}`);
+        break;
       }
     }
   }
@@ -178,7 +152,6 @@ export async function run(): Promise<void> {
       plan.workspace,
       plan.runtimeEntry || '',
       buildRuntimeRestoreFlagArgs(inputs),
-      false,
     );
 
     let usedMiseRuntime = false;
@@ -190,7 +163,7 @@ export async function run(): Promise<void> {
       plan.workspace,
       plan.archiveEntries,
       buildFlagArgs(inputs),
-      plan.usesCacheFormat,
+      plan.archiveRestoreCandidates,
     );
 
     const modeRestore = await runModeRestore(plan, inputs);
