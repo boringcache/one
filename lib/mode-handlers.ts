@@ -6,7 +6,6 @@ import * as path from 'path';
 import {
   execBoringCache as execBoringCacheCore,
   findAvailablePort,
-  getCacheTagPrefix as getDefaultCacheTagPrefix,
   hasToolVersionOnPath,
   hasRestoreToken,
   hasSaveToken,
@@ -19,6 +18,8 @@ import {
 import {
   detectNodePackageManager,
   type OneInputs,
+  resolveCliArchiveEntries,
+  type ResolvedCliArchiveEntry,
   type ResolvedPlan,
   type TagVerificationSpec,
   type ToolSpec,
@@ -276,7 +277,7 @@ function emitCliPlannerWarnings(stderr: string): void {
 }
 
 async function resolveAdapterCliPlan(
-  adapter: 'bazel' | 'gradle' | 'maven' | 'turbo',
+  adapter: 'bazel' | 'gradle' | 'maven' | 'sccache' | 'turbo',
   workspace: string,
   workingDirectory: string,
   inputCacheTag: string,
@@ -1333,8 +1334,64 @@ function configureSccacheProxyEnv(port: number): void {
   core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
 }
 
-function getModeCacheTag(inputCacheTag: string, defaultPrefix: string): string {
-  return getDefaultCacheTagPrefix(inputCacheTag, defaultPrefix);
+function overrideRustArchiveEntry(entry: ResolvedCliArchiveEntry, inputName: string): ResolvedCliArchiveEntry {
+  const overrideTag = core.getInput(inputName).trim();
+  if (!overrideTag) {
+    return entry;
+  }
+  return {
+    ...entry,
+    tag: overrideTag,
+    tagPathPair: `${overrideTag}:${entry.path}`,
+  };
+}
+
+function getRustArchiveEntry(
+  entries: Map<string, ResolvedCliArchiveEntry>,
+  requested: string,
+  description: string,
+): ResolvedCliArchiveEntry {
+  const entry = entries.get(requested);
+  if (!entry?.path?.trim()) {
+    throw new Error(`CLI dry-run did not resolve a ${description} path for ${requested}.`);
+  }
+  return entry;
+}
+
+function saveRustArchiveEntryState(key: string, entry: ResolvedCliArchiveEntry): void {
+  saveModeState(`${key}-tag`, entry.tag);
+  saveModeState(`${key}-path`, entry.path);
+}
+
+function readRustArchiveEntryState(key: string): ResolvedCliArchiveEntry | null {
+  const tag = getModeState(`${key}-tag`);
+  const entryPath = getModeState(`${key}-path`);
+  if (!tag || !entryPath) {
+    return null;
+  }
+  return {
+    requested: key,
+    tag,
+    path: entryPath,
+    tagPathPair: `${tag}:${entryPath}`,
+  };
+}
+
+function buildRustCacheArgs(
+  action: 'restore' | 'save',
+  workspace: string,
+  entry: ResolvedCliArchiveEntry,
+  verbose: boolean,
+  exclude = '',
+): string[] {
+  const args = [action, workspace, entry.tagPathPair];
+  if (verbose) {
+    args.push('--verbose');
+  }
+  if (action === 'save' && exclude) {
+    args.push('--exclude', exclude);
+  }
+  return args;
 }
 
 function toolEnabled(plan: ResolvedPlan, toolName: string): boolean {
@@ -1981,7 +2038,7 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
 }
 
 async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
-  const cacheTagPrefix = inputs.cacheTag || getModeCacheTag('', 'rust');
+  const cacheTagPrefix = (inputs.cacheTag || plan.cacheTagPrefix || '').trim();
   const inputVersion = core.getInput('rust-version') || core.getInput('toolchain');
   const workingDir = plan.workingDirectory;
   const cacheCargo = core.getInput('cache-cargo') !== 'false';
@@ -1996,11 +2053,73 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
   const profile = core.getInput('profile') || 'minimal';
   const rustVersion = await detectRustVersion(workingDir, inputVersion);
 
-  core.setOutput('workspace', plan.workspace);
+  configureCargoEnv();
+  const rustMajorMinor = rustVersion.match(/^(\d+\.\d+)/)?.[1] || rustVersion;
+  const rustToolTagSuffix = `rust${rustMajorMinor}`;
+  const lockPath = path.join(workingDir, 'Cargo.lock');
+  const hasGitDeps = cacheCargo && await hasGitDependencies(lockPath);
+
+  if (useSccache && sccacheMode !== 'proxy') {
+    configureSccacheEnv(sccacheCacheSize);
+  }
+
+  const rustEntryIds: string[] = [];
+  if (cacheCargo) {
+    rustEntryIds.push('cargo-registry');
+    if (hasGitDeps) {
+      rustEntryIds.push('cargo-git');
+    }
+  }
+  if (cacheCargoBin) {
+    rustEntryIds.push('cargo-bin');
+  }
+  if (cacheTarget) {
+    rustEntryIds.push('target');
+  }
+  if (useSccache) {
+    rustEntryIds.push('sccache-dir');
+  }
+
+  const rustEntriesPlan = rustEntryIds.length > 0
+    ? await resolveCliArchiveEntries(workingDir, {
+      workspaceInput: inputs.workspace.trim(),
+      entryIds: rustEntryIds,
+      cacheTag: cacheTagPrefix,
+      toolTagSuffix: rustToolTagSuffix,
+      fallbackWorkspace: plan.workspace,
+    })
+    : { workspace: plan.workspace, entries: [], envVars: {} };
+  for (const [key, value] of Object.entries(rustEntriesPlan.envVars)) {
+    core.exportVariable(key, value);
+  }
+  const rustEntries = new Map(rustEntriesPlan.entries.map((entry) => [entry.requested, entry]));
+  const workspace = rustEntriesPlan.workspace || plan.workspace;
+  const cargoRegistryEntry = cacheCargo
+    ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-registry', 'cargo registry cache'), 'cargo-tag')
+    : null;
+  const cargoGitEntry = cacheCargo && hasGitDeps
+    ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-git', 'cargo git cache'), 'cargo-git-tag')
+    : null;
+  const cargoBinEntry = cacheCargoBin
+    ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-bin', 'cargo bin cache'), 'cargo-bin-tag')
+    : null;
+  const targetEntry = cacheTarget
+    ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'target', 'Rust target cache'), 'target-tag')
+    : null;
+  const sccacheEntry = useSccache
+    ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'sccache-dir', 'sccache cache'), 'sccache-tag')
+    : null;
+
+  core.setOutput('workspace', workspace);
   core.setOutput('rust-version', rustVersion);
   core.setOutput('cache-tag', cacheTagPrefix);
+  core.setOutput('cargo-tag', cargoRegistryEntry?.tag || '');
+  core.setOutput('cargo-git-tag', cargoGitEntry?.tag || '');
+  core.setOutput('cargo-bin-tag', cargoBinEntry?.tag || '');
+  core.setOutput('target-tag', targetEntry?.tag || '');
+  core.setOutput('sccache-tag', sccacheEntry?.tag || '');
 
-  saveModeState('workspace', plan.workspace);
+  saveModeState('workspace', workspace);
   saveModeState('cache-tag-prefix', cacheTagPrefix);
   saveModeState('rust-version', rustVersion);
   saveModeState('working-dir', workingDir);
@@ -2012,76 +2131,82 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
   saveModeState('verbose', String(inputs.verbose));
   saveModeState('skipped-verify-tags', '');
 
-  configureCargoEnv();
-  const cargoHome = getCargoHome();
-  const cargoRegistryTag = core.getInput('cargo-tag') || `${cacheTagPrefix}-cargo-registry`;
-  const cargoGitTag = core.getInput('cargo-git-tag') || `${cacheTagPrefix}-cargo-git`;
-  const cargoBinTag = core.getInput('cargo-bin-tag') || `${cacheTagPrefix}-cargo-bin`;
-  const rustMajorMinor = rustVersion.match(/^(\d+\.\d+)/)?.[1] || rustVersion;
-  const targetTag = core.getInput('target-tag') || `${cacheTagPrefix}-target-rust${rustMajorMinor}`;
-  const sccacheTag = core.getInput('sccache-tag') || `${cacheTagPrefix}-sccache-rust${rustMajorMinor}`;
-
-  core.setOutput('cargo-tag', cargoRegistryTag);
-  core.setOutput('cargo-bin-tag', cargoBinTag);
-  core.setOutput('target-tag', targetTag);
-  core.setOutput('sccache-tag', sccacheTag);
-
   let registryRestored = false;
+  let cargoGitRestored = false;
   let cargoBinRestored = false;
   let targetRestored = false;
   let sccacheRestored = false;
 
-  if (cacheCargo) {
-    const cargoRegistryDir = `${cargoHome}/registry`;
-    const cargoGitDir = `${cargoHome}/git`;
-
-    const registryResult = await execRustBoringCache(['restore', plan.workspace, `${cargoRegistryTag}:${cargoRegistryDir}`, ...(inputs.verbose ? ['--verbose'] : [])]);
+  if (cargoRegistryEntry) {
+    const registryResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoRegistryEntry, inputs.verbose));
     registryRestored = wasRustCacheHit(registryResult);
-
-    const lockPath = path.join(workingDir, 'Cargo.lock');
-    const hasGitDeps = await hasGitDependencies(lockPath);
-    if (hasGitDeps) {
-      await execRustBoringCache(['restore', plan.workspace, `${cargoGitTag}:${cargoGitDir}`, ...(inputs.verbose ? ['--verbose'] : [])]);
-    }
-
-    saveModeState('cargo-registry-tag', cargoRegistryTag);
-    saveModeState('cargo-git-tag', cargoGitTag);
+    saveRustArchiveEntryState('cargo-registry', cargoRegistryEntry);
   }
 
-  if (cacheCargoBin) {
-    const cargoBinDir = `${cargoHome}/bin`;
-    const binResult = await execRustBoringCache(['restore', plan.workspace, `${cargoBinTag}:${cargoBinDir}`, ...(inputs.verbose ? ['--verbose'] : [])]);
+  if (cargoGitEntry) {
+    const cargoGitResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoGitEntry, inputs.verbose));
+    cargoGitRestored = wasRustCacheHit(cargoGitResult);
+    saveRustArchiveEntryState('cargo-git', cargoGitEntry);
+  }
+
+  if (cargoBinEntry) {
+    const binResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoBinEntry, inputs.verbose));
     cargoBinRestored = wasRustCacheHit(binResult);
-    saveModeState('cargo-bin-tag', cargoBinTag);
+    saveRustArchiveEntryState('cargo-bin', cargoBinEntry);
   }
 
-  if (cacheTarget) {
-    const targetDir = path.join(workingDir, 'target');
-    const targetResult = await execRustBoringCache(['restore', plan.workspace, `${targetTag}:${targetDir}`, ...(inputs.verbose ? ['--verbose'] : [])]);
+  if (targetEntry) {
+    const targetResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, targetEntry, inputs.verbose));
     targetRestored = wasRustCacheHit(targetResult);
-    saveModeState('target-tag', targetTag);
+    saveRustArchiveEntryState('target', targetEntry);
   }
 
-  if (useSccache) {
+  if (useSccache && sccacheEntry) {
     await installSccache(sccacheVersion);
 
     if (sccacheMode === 'proxy') {
-      sccacheRestored = await checkRustTagHit(plan.workspace, sccacheTag, { noPlatform: true, noGit: true });
-      const proxy = await startPortableCacheProxy(plan.workspace, await findAvailablePort(), sccacheTag, inputs.readOnly);
+      const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+      const proxyPlan = await resolveAdapterCliPlan(
+        'sccache',
+        workspace,
+        workingDir,
+        sccacheEntry.tag,
+        requestedPort,
+        true,
+        true,
+        inputs.readOnly,
+      );
+      sccacheRestored = await checkRustTagHit(proxyPlan.workspace, proxyPlan.tag, {
+        noPlatform: proxyPlan.proxy.no_platform,
+        noGit: proxyPlan.proxy.no_git,
+      });
+      const proxy = await startRegistryProxy({
+        command: 'cache-registry',
+        workspace: proxyPlan.workspace,
+        tag: proxyPlan.tag,
+        host: '127.0.0.1',
+        port: proxyPlan.proxy.port,
+        noGit: proxyPlan.proxy.no_git,
+        noPlatform: proxyPlan.proxy.no_platform,
+        verbose: inputs.verbose,
+        readOnly: proxyPlan.proxy.read_only,
+      });
       configureSccacheProxyEnv(proxy.port);
       await startSccacheServer();
       saveModeState('proxy-pid', String(proxy.pid));
       saveProxyModeState(proxy.port);
-      saveModeState('sccache-tag', sccacheTag);
+      saveRustArchiveEntryState('sccache', {
+        ...sccacheEntry,
+        tag: proxyPlan.tag,
+        tagPathPair: `${proxyPlan.tag}:${sccacheEntry.path}`,
+      });
       saveModeState('sccache-preflight-hit', String(sccacheRestored));
       setProxyOutputs(proxy.port);
     } else {
-      configureSccacheEnv(sccacheCacheSize);
-      const sccacheDir = getSccacheDir();
-      const sccacheResult = await execRustBoringCache(['restore', plan.workspace, `${sccacheTag}:${sccacheDir}`, ...(inputs.verbose ? ['--verbose'] : [])]);
+      const sccacheResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, sccacheEntry, inputs.verbose));
       sccacheRestored = wasRustCacheHit(sccacheResult);
       await startSccacheServer();
-      saveModeState('sccache-tag', sccacheTag);
+      saveRustArchiveEntryState('sccache', sccacheEntry);
       saveModeState('sccache-preflight-hit', String(sccacheRestored));
     }
   }
@@ -2090,58 +2215,57 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
     await setupRustToolchain(rustVersion, { profile, targets, components });
   }
 
-  const cacheHit = registryRestored || cargoBinRestored || targetRestored || sccacheRestored;
+  const cacheHit = registryRestored || cargoGitRestored || cargoBinRestored || targetRestored || sccacheRestored;
   core.setOutput('cache-hit', String(cacheHit));
   core.setOutput('sccache-hit', String(sccacheRestored));
   const verificationSpecs: TagVerificationSpec[] = [];
 
-  if (cacheCargo) {
+  if (cargoRegistryEntry) {
     verificationSpecs.push({
-      tag: cargoRegistryTag,
+      tag: cargoRegistryEntry.tag,
       noPlatform: false,
       noGit: false,
-      pathHint: path.join(cargoHome, 'registry'),
-      saveExpected: true,
-    });
-
-    const lockPath = path.join(workingDir, 'Cargo.lock');
-    if (await hasGitDependencies(lockPath)) {
-      verificationSpecs.push({
-        tag: cargoGitTag,
-        noPlatform: false,
-        noGit: false,
-        pathHint: path.join(cargoHome, 'git'),
-        saveExpected: true,
-      });
-    }
-  }
-
-  if (cacheCargoBin) {
-    verificationSpecs.push({
-      tag: cargoBinTag,
-      noPlatform: false,
-      noGit: false,
-      pathHint: path.join(cargoHome, 'bin'),
+      pathHint: cargoRegistryEntry.path,
       saveExpected: true,
     });
   }
 
-  if (cacheTarget) {
+  if (cargoGitEntry) {
     verificationSpecs.push({
-      tag: targetTag,
+      tag: cargoGitEntry.tag,
       noPlatform: false,
       noGit: false,
-      pathHint: path.join(workingDir, 'target'),
+      pathHint: cargoGitEntry.path,
       saveExpected: true,
     });
   }
 
-  if (useSccache) {
+  if (cargoBinEntry) {
     verificationSpecs.push({
-      tag: sccacheTag,
+      tag: cargoBinEntry.tag,
+      noPlatform: false,
+      noGit: false,
+      pathHint: cargoBinEntry.path,
+      saveExpected: true,
+    });
+  }
+
+  if (targetEntry) {
+    verificationSpecs.push({
+      tag: targetEntry.tag,
+      noPlatform: false,
+      noGit: false,
+      pathHint: targetEntry.path,
+      saveExpected: true,
+    });
+  }
+
+  if (sccacheEntry) {
+    verificationSpecs.push({
+      tag: readRustArchiveEntryState('sccache')?.tag || sccacheEntry.tag,
       noPlatform: sccacheMode === 'proxy',
       noGit: sccacheMode === 'proxy',
-      pathHint: sccacheMode === 'proxy' ? workingDir : getSccacheDir(),
+      pathHint: sccacheMode === 'proxy' ? workingDir : sccacheEntry.path,
       saveExpected: sccacheMode !== 'proxy' || !inputs.readOnly,
     });
   }
@@ -2151,7 +2275,6 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
 
 async function runRustSave(): Promise<void> {
   const workspace = getModeState('workspace');
-  const workingDir = getModeState('working-dir') || process.cwd();
   const cacheCargo = getModeState('cache-cargo') === 'true';
   const cacheCargoBin = getModeState('cache-cargo-bin') === 'true';
   const cacheTarget = getModeState('cache-target') === 'true';
@@ -2173,65 +2296,30 @@ async function runRustSave(): Promise<void> {
     return;
   }
 
-  const cargoHome = getCargoHome();
-
   if (cacheCargo) {
-    const cargoRegistryTag = getModeState('cargo-registry-tag');
-    const cargoGitTag = getModeState('cargo-git-tag');
-    const cargoRegistryDir = `${cargoHome}/registry`;
-    const cargoGitDir = `${cargoHome}/git`;
+    const cargoRegistryEntry = readRustArchiveEntryState('cargo-registry');
+    const cargoGitEntry = readRustArchiveEntryState('cargo-git');
 
-    if (cargoRegistryTag) {
-      const args = ['save', workspace, `${cargoRegistryTag}:${cargoRegistryDir}`];
-      if (verbose) {
-        args.push('--verbose');
-      }
-      if (exclude) {
-        args.push('--exclude', exclude);
-      }
-      await execRustBoringCache(args);
+    if (cargoRegistryEntry) {
+      await execRustBoringCache(buildRustCacheArgs('save', workspace, cargoRegistryEntry, verbose, exclude));
     }
 
-    if (cargoGitTag) {
-      const lockPath = path.join(workingDir, 'Cargo.lock');
-      if (await hasGitDependencies(lockPath)) {
-        const args = ['save', workspace, `${cargoGitTag}:${cargoGitDir}`];
-        if (verbose) {
-          args.push('--verbose');
-        }
-        if (exclude) {
-          args.push('--exclude', exclude);
-        }
-        await execRustBoringCache(args);
-      }
+    if (cargoGitEntry) {
+      await execRustBoringCache(buildRustCacheArgs('save', workspace, cargoGitEntry, verbose, exclude));
     }
   }
 
   if (cacheCargoBin) {
-    const cargoBinTag = getModeState('cargo-bin-tag');
-    if (cargoBinTag) {
-      const args = ['save', workspace, `${cargoBinTag}:${path.join(cargoHome, 'bin')}`];
-      if (verbose) {
-        args.push('--verbose');
-      }
-      if (exclude) {
-        args.push('--exclude', exclude);
-      }
-      await execRustBoringCache(args);
+    const cargoBinEntry = readRustArchiveEntryState('cargo-bin');
+    if (cargoBinEntry) {
+      await execRustBoringCache(buildRustCacheArgs('save', workspace, cargoBinEntry, verbose, exclude));
     }
   }
 
   if (cacheTarget) {
-    const targetTag = getModeState('target-tag');
-    if (targetTag) {
-      const args = ['save', workspace, `${targetTag}:${path.join(workingDir, 'target')}`];
-      if (verbose) {
-        args.push('--verbose');
-      }
-      if (exclude) {
-        args.push('--exclude', exclude);
-      }
-      await execRustBoringCache(args);
+    const targetEntry = readRustArchiveEntryState('target');
+    if (targetEntry) {
+      await execRustBoringCache(buildRustCacheArgs('save', workspace, targetEntry, verbose, exclude));
     }
   }
 
@@ -2274,9 +2362,10 @@ async function runRustSave(): Promise<void> {
         }
       }
     } else {
-      const sccacheTag = getModeState('sccache-tag');
+      const sccacheEntry = readRustArchiveEntryState('sccache');
+      const sccacheTag = sccacheEntry?.tag || '';
       const preflightHit = getModeState('sccache-preflight-hit') === 'true';
-      if (sccacheTag) {
+      if (sccacheEntry) {
         const sccacheStats = await stopSccacheServer();
         if (!sccacheStats || sccacheStats.compileRequests === 0) {
           markModeVerifyTagSkipped(sccacheTag);
@@ -2287,14 +2376,7 @@ async function runRustSave(): Promise<void> {
           }
           return;
         }
-        const args = ['save', workspace, `${sccacheTag}:${getSccacheDir()}`];
-        if (verbose) {
-          args.push('--verbose');
-        }
-        if (exclude) {
-          args.push('--exclude', exclude);
-        }
-        await execRustBoringCache(args);
+        await execRustBoringCache(buildRustCacheArgs('save', workspace, sccacheEntry, verbose, exclude));
       }
     }
   }

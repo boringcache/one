@@ -607,7 +607,6 @@ describe('product modes', () => {
 
     try {
       actionCoreMocks.hasToolVersionOnPath.mockImplementation(async (toolName: string) => toolName === 'sccache');
-      (exec.exec as jest.Mock).mockResolvedValue(0);
 
       mockGetInput({
         mode: 'rust-sccache',
@@ -625,6 +624,26 @@ describe('product modes', () => {
       expect(exec.exec).not.toHaveBeenCalledWith('rustup', expect.anything(), expect.anything());
       expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
       expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');
+      expect(exec.exec).toHaveBeenCalledWith(
+        'boringcache',
+        expect.arrayContaining([
+          'run',
+          'my-org/my-project',
+          '--entry',
+          'cargo-registry',
+          '--entry',
+          'target',
+          '--entry',
+          'sccache-dir',
+          '--cache-tag',
+          'rust',
+          '--tool-tag-suffix',
+          'rust1.89',
+          '--dry-run',
+          '--json',
+        ]),
+        expect.objectContaining({ cwd: project }),
+      );
       expect(core.setOutput).toHaveBeenCalledWith('sccache-hit', 'true');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'rust-sccache');
     } finally {
@@ -634,13 +653,12 @@ describe('product modes', () => {
 
   it('supports custom rust subcache tags', async () => {
     const project = await makeTempProject({
-      'Cargo.lock': '',
+      'Cargo.lock': '[[package]]\nname = "git-dep"\nversion = "0.1.0"\nsource = "git+https://github.com/example/repo?rev=123456#123456"\n',
       'rust-toolchain.toml': '[toolchain]\nchannel = "1.89.0"\n',
     });
 
     try {
       actionCoreMocks.hasToolVersionOnPath.mockImplementation(async (toolName: string) => toolName === 'sccache');
-      (exec.exec as jest.Mock).mockResolvedValue(0);
 
       mockGetInput({
         mode: 'rust-sccache',
@@ -662,8 +680,56 @@ describe('product modes', () => {
         tag: 'zed-sccache-rust1.89-r123-a1',
       }));
       expect(core.setOutput).toHaveBeenCalledWith('cargo-tag', 'zed-cargo-registry');
+      expect(core.setOutput).toHaveBeenCalledWith('cargo-git-tag', 'zed-cargo-git');
       expect(core.setOutput).toHaveBeenCalledWith('target-tag', 'zed-target-rust1.89');
       expect(core.setOutput).toHaveBeenCalledWith('sccache-tag', 'zed-sccache-rust1.89-r123-a1');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('treats a cargo-git restore hit as a mode cache hit', async () => {
+    const project = await makeTempProject({
+      'Cargo.lock': '[[package]]\nname = "git-dep"\nversion = "0.1.0"\nsource = "git+https://github.com/example/repo?rev=123456#123456"\n',
+      'rust-toolchain.toml': '[toolchain]\nchannel = "1.89.0"\n',
+    });
+
+    try {
+      const defaultExecImpl = (exec.exec as jest.Mock).getMockImplementation();
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void; stderr?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'restore') {
+          const entry = args[2] || '';
+          if (entry.startsWith('rust-cargo-registry-rust1.89:')) {
+            return 1;
+          }
+          if (entry.startsWith('rust-cargo-git-rust1.89:')) {
+            return 0;
+          }
+          if (entry.startsWith('rust-target-rust1.89:')) {
+            return 1;
+          }
+        }
+        if (defaultExecImpl) {
+          return defaultExecImpl(command, args, options);
+        }
+        return 0;
+      });
+
+      mockGetInput({
+        mode: 'rust-sccache',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.setOutput).toHaveBeenCalledWith('cargo-git-tag', 'rust-cargo-git-rust1.89');
+      expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
     } finally {
       await removeTempProject(project);
     }

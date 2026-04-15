@@ -4,10 +4,10 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.12.28'
+    default: 'v1.12.29'
     required: false
   cli-platform:
-    description: 'Optional CLI asset/platform override for cases like Docker benchmark binary copy (for example alpine-amd64 or debian-bookworm-amd64).'
+    description: 'Optional CLI target/platform override for Docker benchmark binary copy and similar cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
     required: false
   setup:
     description: 'Runtime setup owner: mise, external, or none. mise auto-detects project tools from mise.toml, .tool-versions, and common version files.'
@@ -22,7 +22,7 @@ inputs:
     default: 'none'
     required: false
   workspace:
-    description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses repo config workspace, BORINGCACHE_DEFAULT_WORKSPACE, or the repository name.'
+    description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses repo config workspace or BORINGCACHE_DEFAULT_WORKSPACE/CLI defaults.'
     required: false
   cache-tag:
     description: 'Human-readable cache tag or prefix. Generated archive entries, runtime caches, and proxy tags derive deterministic names from this when you do not set exact overrides.'
@@ -391,6 +391,8 @@ outputs:
     description: 'Resolved Rust version'
   cargo-tag:
     description: 'Resolved cargo registry cache tag'
+  cargo-git-tag:
+    description: 'Resolved cargo git cache tag'
   target-tag:
     description: 'Resolved Rust target cache tag'
   cargo-bin-tag:

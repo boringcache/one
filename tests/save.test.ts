@@ -81,7 +81,7 @@ describe('save action', () => {
       'generic-cache-entries': 'deps:node_modules',
       'generic-cache-workspace': 'my-org/my-project',
       'generic-cache-exclude': '*.log',
-      'cli-version': 'v1.12.28',
+      'cli-version': 'v1.12.29',
       'no-platform': 'true',
       'enableCrossOsArchive': 'false',
       'force': 'true',
@@ -90,7 +90,7 @@ describe('save action', () => {
 
     await saveRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.28' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.29' });
     expect(chdirSpy).toHaveBeenNthCalledWith(1, '/tmp/project');
     expect(chdirSpy).toHaveBeenLastCalledWith(expect.any(String));
     expect(exec.exec).toHaveBeenCalledWith(
@@ -250,6 +250,7 @@ describe('save action', () => {
       'mode-use-sccache': 'true',
       'mode-sccache-mode': 'local',
       'mode-sccache-tag': sccacheTag,
+      'mode-sccache-path': '/tmp/sccache',
       'mode-sccache-preflight-hit': 'false',
     };
     (exec.exec as jest.Mock).mockImplementation(async (

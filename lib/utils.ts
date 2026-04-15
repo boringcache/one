@@ -174,7 +174,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 export function getInputs(): OneInputs {
   return {
-    cliVersion: core.getInput('cli-version') || 'v1.12.28',
+    cliVersion: core.getInput('cli-version') || 'v1.12.29',
     cliPlatform: core.getInput('cli-platform'),
     setup: normalizeSetup(core.getInput('setup')),
     mode: normalizeMode(core.getInput('mode')),
@@ -1668,6 +1668,19 @@ interface CliDryRunArchiveRestoreCandidate {
   tag_path_pairs: string[];
 }
 
+export interface ResolvedCliArchiveEntry {
+  requested: string;
+  tag: string;
+  path: string;
+  tagPathPair: string;
+}
+
+export interface ResolvedCliArchiveEntriesPlan {
+  workspace: string;
+  entries: ResolvedCliArchiveEntry[];
+  envVars: Record<string, string>;
+}
+
 interface ResolvedArchiveEntries {
   entries: string;
   restoreCandidates: ArchiveRestoreCandidate[];
@@ -1809,6 +1822,42 @@ async function runDryRunPlan(
     }
     throw error;
   }
+}
+
+export async function resolveCliArchiveEntries(
+  workingDirectory: string,
+  options: {
+    workspaceInput: string;
+    entryIds: string[];
+    cacheTag?: string;
+    toolTagSuffix?: string | null;
+    fallbackWorkspace?: string;
+  },
+): Promise<ResolvedCliArchiveEntriesPlan> {
+  const plan = await runDryRunPlan(workingDirectory, {
+    workspaceInput: options.workspaceInput,
+    entryIds: options.entryIds,
+    cacheTag: options.cacheTag,
+    toolTagSuffix: options.toolTagSuffix,
+    fallbackWorkspace: options.fallbackWorkspace,
+  });
+
+  const workspace = plan.workspace?.trim()
+    || options.fallbackWorkspace?.trim()
+    || resolveWorkspace(options.workspaceInput);
+
+  return {
+    workspace,
+    envVars: plan.env_vars,
+    entries: (plan.archive_entries || [])
+      .filter((entry): entry is CliDryRunArchiveEntry & { path: string } => Boolean(entry.path))
+      .map((entry) => ({
+        requested: entry.requested,
+        tag: entry.tag,
+        path: entry.path,
+        tagPathPair: entry.tag_path_pair,
+      })),
+  };
 }
 
 function isUnknownEntryResolutionError(error: unknown): boolean {

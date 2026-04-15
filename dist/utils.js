@@ -65,6 +65,7 @@ exports.resolveRuntimeTools = resolveRuntimeTools;
 exports.detectNodePackageManager = detectNodePackageManager;
 exports.buildRuntimeCacheTag = buildRuntimeCacheTag;
 exports.buildRuntimeCacheEntry = buildRuntimeCacheEntry;
+exports.resolveCliArchiveEntries = resolveCliArchiveEntries;
 exports.buildArchiveEntries = buildArchiveEntries;
 exports.validateOneInputs = validateOneInputs;
 exports.buildPlan = buildPlan;
@@ -115,7 +116,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.12.28',
+        cliVersion: core.getInput('cli-version') || 'v1.12.29',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),
@@ -1383,6 +1384,31 @@ async function runDryRunPlan(workingDirectory, options) {
         }
         throw error;
     }
+}
+async function resolveCliArchiveEntries(workingDirectory, options) {
+    var _a, _b;
+    const plan = await runDryRunPlan(workingDirectory, {
+        workspaceInput: options.workspaceInput,
+        entryIds: options.entryIds,
+        cacheTag: options.cacheTag,
+        toolTagSuffix: options.toolTagSuffix,
+        fallbackWorkspace: options.fallbackWorkspace,
+    });
+    const workspace = ((_a = plan.workspace) === null || _a === void 0 ? void 0 : _a.trim())
+        || ((_b = options.fallbackWorkspace) === null || _b === void 0 ? void 0 : _b.trim())
+        || resolveWorkspace(options.workspaceInput);
+    return {
+        workspace,
+        envVars: plan.env_vars,
+        entries: (plan.archive_entries || [])
+            .filter((entry) => Boolean(entry.path))
+            .map((entry) => ({
+            requested: entry.requested,
+            tag: entry.tag,
+            path: entry.path,
+            tagPathPair: entry.tag_path_pair,
+        })),
+    };
 }
 function isUnknownEntryResolutionError(error) {
     return error instanceof Error && /Unknown cache entry/i.test(error.message);

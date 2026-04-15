@@ -361,6 +361,45 @@ function cliBuiltInEntry(workingDirectory: string, requested: string): BuiltInCl
         envVars: { COMPOSER_VENDOR_DIR: vendorPath },
       };
     }
+    case 'cargo-registry': {
+      const cargoHome = process.env.CARGO_HOME || path.join(process.env.HOME || '/home/test', '.cargo');
+      return {
+        tag: 'cargo-registry',
+        path: path.join(cargoHome, 'registry'),
+        envVars: {},
+      };
+    }
+    case 'cargo-git': {
+      const cargoHome = process.env.CARGO_HOME || path.join(process.env.HOME || '/home/test', '.cargo');
+      return {
+        tag: 'cargo-git',
+        path: path.join(cargoHome, 'git'),
+        envVars: {},
+      };
+    }
+    case 'cargo-bin': {
+      const cargoHome = process.env.CARGO_HOME || path.join(process.env.HOME || '/home/test', '.cargo');
+      return {
+        tag: 'cargo-bin',
+        path: path.join(cargoHome, 'bin'),
+        envVars: {},
+      };
+    }
+    case 'target':
+      return {
+        tag: 'target',
+        path: path.join(workingDirectory, 'target'),
+        envVars: {},
+      };
+    case 'sccache':
+    case 'sccache-dir': {
+      const cachePath = process.env.SCCACHE_DIR || path.join(process.env.HOME || '/home/test', '.cache', 'sccache');
+      return {
+        tag: 'sccache',
+        path: cachePath,
+        envVars: { SCCACHE_DIR: cachePath },
+      };
+    }
     default:
       throw new Error(`Unexpected CLI dry-run entry request in test: ${requested}`);
   }
@@ -788,6 +827,13 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
         TURBO_TOKEN: 'boringcache',
         TURBO_TEAM: 'boringcache',
       };
+  } else if (adapterName === 'sccache') {
+    envVars = {
+      BORINGCACHE_PROXY_PORT: String(resolvedPort),
+      BORINGCACHE_CACHE_REF: '{CACHE_REF}',
+      RUSTC_WRAPPER: 'sccache',
+      SCCACHE_WEBDAV_ENDPOINT: `http://127.0.0.1:${resolvedPort}/`,
+    };
   }
 
   let finalTag = resolvedTag;
@@ -886,7 +932,7 @@ beforeEach(() => {
     if (
       command === 'boringcache'
       && args
-      && ['bazel', 'docker', 'gradle', 'maven', 'turbo'].includes(args[0])
+      && ['bazel', 'docker', 'gradle', 'maven', 'sccache', 'turbo'].includes(args[0])
       && args.includes('--dry-run')
       && args.includes('--json')
     ) {

@@ -34,7 +34,7 @@ describe('restore action', () => {
 
     await restoreRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.28' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.29' });
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
       ['restore', 'my-org/my-project', 'deps:node_modules,build:dist', '--no-platform'],
@@ -53,7 +53,6 @@ describe('restore action', () => {
   });
 
   it('falls back through restore keys in actions/cache compatibility mode', async () => {
-    process.env.GITHUB_REPOSITORY = 'owner/repo';
     let restoreAttempt = 0;
     (exec.exec as jest.Mock).mockImplementation(async (
       command: string,
@@ -62,7 +61,7 @@ describe('restore action', () => {
     ) => {
       if (command === 'boringcache' && args?.[0] === 'run' && args.includes('--dry-run') && args.includes('--json')) {
         options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
-          workspace: 'owner/repo',
+          workspace: 'default/default',
           workspace_source: 'configured-default',
           tag_path_pairs: [`deps-primary-npm:${path.join(os.homedir(), '.npm')}`],
           archive_entries: [{
@@ -104,7 +103,7 @@ describe('restore action', () => {
     );
 
     expect(restoreCalls).toHaveLength(2);
-    expect(restoreCalls[0][1][1]).toBe('owner/repo');
+    expect(restoreCalls[0][1][1]).toBe('default/default');
     expect(restoreCalls[0][1][2]).toMatch(/deps-primary-npm:.*\.npm/);
     expect(restoreCalls[1][1][2]).toMatch(/deps-fallback-npm:.*\.npm/);
     expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
@@ -142,7 +141,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.28',
+      version: 'v1.12.29',
       platform: 'alpine-amd64',
     });
   });
@@ -156,7 +155,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.28',
+      version: 'v1.12.29',
       platform: 'linux-amd64',
     });
     expect(exec.exec).not.toHaveBeenCalledWith(
