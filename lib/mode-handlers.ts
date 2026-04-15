@@ -23,7 +23,6 @@ import {
   type TagVerificationSpec,
   type ToolSpec,
 } from './utils';
-import { waitForRegistryProxyReady } from './proxy-readiness';
 
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
@@ -1188,7 +1187,6 @@ async function startPortableCacheProxy(workspace: string, port: number, tag: str
     noGit: true,
     readOnly,
   });
-  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   return proxy;
 }
 
@@ -1414,7 +1412,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     );
     const cacheTag = dockerPlan.tag;
     const proxy = await startRegistryProxy({
-      command: 'docker-registry',
+      command: 'cache-registry',
       workspace: dockerPlan.workspace,
       tag: cacheTag,
       host: proxyBindHost,
@@ -1424,7 +1422,6 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
     });
-    await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     saveModeState('workspace', dockerPlan.workspace);
@@ -1629,7 +1626,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     );
     const cacheTag = dockerPlan.tag;
     const proxy = await startRegistryProxy({
-      command: 'docker-registry',
+      command: 'cache-registry',
       workspace: dockerPlan.workspace,
       tag: cacheTag,
       host: proxyBindHost,
@@ -1639,7 +1636,6 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
     });
-    await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     saveModeState('workspace', dockerPlan.workspace);
@@ -1787,7 +1783,6 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
   });
-  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1835,7 +1830,6 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
   });
-  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1894,7 +1888,6 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
   });
-  await waitForRegistryProxyReady(proxy.port, undefined, proxy.pid);
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 

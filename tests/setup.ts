@@ -16,10 +16,8 @@ const mockReadProjectMiseTools = jest.fn();
 const mockReadMiseTomlVersion = jest.fn();
 const mockReadToolVersionsValue = jest.fn();
 const mockStartRegistryProxy = jest.fn();
-const mockWaitForProxy = jest.fn();
 const mockStopRegistryProxy = jest.fn();
 const mockFindAvailablePort = jest.fn();
-const mockWaitForRegistryProxyReady = jest.fn();
 
 jest.mock('@actions/core', () => ({
   getInput: jest.fn(),
@@ -73,15 +71,10 @@ jest.mock('@boringcache/action-core', () => {
     readMiseTomlVersion: mockReadMiseTomlVersion,
     readToolVersionsValue: mockReadToolVersionsValue,
     startRegistryProxy: mockStartRegistryProxy,
-    waitForProxy: mockWaitForProxy,
     stopRegistryProxy: mockStopRegistryProxy,
     findAvailablePort: mockFindAvailablePort,
   };
 });
-
-jest.mock('../lib/proxy-readiness', () => ({
-  waitForRegistryProxyReady: mockWaitForRegistryProxyReady,
-}));
 
 const originalEnv = process.env;
 
@@ -877,10 +870,8 @@ beforeEach(() => {
   mockReadMiseTomlVersion.mockResolvedValue(null);
   mockReadToolVersionsValue.mockResolvedValue(null);
   mockStartRegistryProxy.mockResolvedValue({ pid: 4321, port: 5000, readOnly: false });
-  mockWaitForProxy.mockResolvedValue(undefined);
   mockStopRegistryProxy.mockResolvedValue(undefined);
   mockFindAvailablePort.mockResolvedValue(5001);
-  mockWaitForRegistryProxyReady.mockResolvedValue(undefined);
 
   (exec.exec as jest.Mock).mockImplementation(async (
     command: string,
@@ -950,6 +941,4 @@ export const actionCoreMocks = {
   readToolVersionsValue: mockReadToolVersionsValue,
   startRegistryProxy: mockStartRegistryProxy,
   stopRegistryProxy: mockStopRegistryProxy,
-  waitForProxy: mockWaitForProxy,
-  waitForRegistryProxyReady: mockWaitForRegistryProxyReady,
 };

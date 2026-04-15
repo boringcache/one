@@ -42,7 +42,6 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const action_core_1 = require("@boringcache/action-core");
 const utils_1 = require("./utils");
-const proxy_readiness_1 = require("./proxy-readiness");
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -973,7 +972,6 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false) {
         noGit: true,
         readOnly,
     });
-    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     return proxy;
 }
 function parseSccacheIntegerStat(output, label) {
@@ -1146,7 +1144,7 @@ async function runDockerRestore(plan, inputs) {
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, action_core_1.startRegistryProxy)({
-            command: 'docker-registry',
+            command: 'cache-registry',
             workspace: dockerPlan.workspace,
             tag: cacheTag,
             host: proxyBindHost,
@@ -1156,7 +1154,6 @@ async function runDockerRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
         });
-        await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('workspace', dockerPlan.workspace);
@@ -1335,7 +1332,7 @@ async function runBuildkitRestore(plan, inputs) {
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, action_core_1.startRegistryProxy)({
-            command: 'docker-registry',
+            command: 'cache-registry',
             workspace: dockerPlan.workspace,
             tag: cacheTag,
             host: proxyBindHost,
@@ -1345,7 +1342,6 @@ async function runBuildkitRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
         });
-        await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('workspace', dockerPlan.workspace);
@@ -1478,7 +1474,6 @@ async function runBazelRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     });
-    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : proxyPlan.proxy.read_only, bazelrcLines);
@@ -1515,7 +1510,6 @@ async function runGradleRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     });
-    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeGradleInitScript(gradleHome, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : proxyPlan.proxy.read_only);
@@ -1559,7 +1553,6 @@ async function runMavenRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     });
-    await (0, proxy_readiness_1.waitForRegistryProxyReady)(proxy.port, undefined, proxy.pid);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);

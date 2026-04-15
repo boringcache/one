@@ -39,7 +39,7 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
-        command: 'docker-registry',
+        command: 'cache-registry',
         workspace: 'boringcache/test-workspace',
       }));
       const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
@@ -78,7 +78,7 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
-        command: 'docker-registry',
+        command: 'cache-registry',
         workspace: 'boringcache/test-workspace',
         tag: 'bench-registry',
       }));
@@ -297,7 +297,7 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
-        command: 'docker-registry',
+        command: 'cache-registry',
       }));
       const buildctlCall = (exec.exec as jest.Mock).mock.calls.find(
         ([command, args]) => command === 'buildctl' && Array.isArray(args) && args.includes('build'),
