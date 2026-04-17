@@ -32,6 +32,7 @@ const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
+const ACTION_PROXY_ON_DEMAND = true;
 
 interface ModeRestoreResult {
   cacheHit?: boolean;
@@ -49,6 +50,15 @@ interface SccacheStatsSummary {
 interface CacheFlags {
   verbose?: boolean;
   exclude?: string;
+}
+
+type RegistryProxyOptions = Parameters<typeof startRegistryProxy>[0];
+
+function actionProxyOptions<T extends RegistryProxyOptions>(options: T): T & { onDemand: true } {
+  return {
+    ...options,
+    onDemand: ACTION_PROXY_ON_DEMAND,
+  };
 }
 
 interface CliAdapterDryRunPlan {
@@ -1178,7 +1188,7 @@ async function stopSccacheServer(): Promise<SccacheStatsSummary | null> {
 }
 
 async function startPortableCacheProxy(workspace: string, port: number, tag: string, readOnly = false): Promise<{ pid: number; port: number }> {
-  const proxy = await startRegistryProxy({
+  const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
     workspace,
     tag,
@@ -1187,7 +1197,7 @@ async function startPortableCacheProxy(workspace: string, port: number, tag: str
     noPlatform: true,
     noGit: true,
     readOnly,
-  });
+  }));
   return proxy;
 }
 
@@ -1468,7 +1478,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG,
     );
     const cacheTag = dockerPlan.tag;
-    const proxy = await startRegistryProxy({
+    const proxy = await startRegistryProxy(actionProxyOptions({
       command: 'cache-registry',
       workspace: dockerPlan.workspace,
       tag: cacheTag,
@@ -1478,7 +1488,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
-    });
+    }));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     saveModeState('workspace', dockerPlan.workspace);
@@ -1682,7 +1692,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG,
     );
     const cacheTag = dockerPlan.tag;
-    const proxy = await startRegistryProxy({
+    const proxy = await startRegistryProxy(actionProxyOptions({
       command: 'cache-registry',
       workspace: dockerPlan.workspace,
       tag: cacheTag,
@@ -1692,7 +1702,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
-    });
+    }));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     saveModeState('workspace', dockerPlan.workspace);
@@ -1829,7 +1839,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     core.exportVariable('USE_BAZEL_VERSION', bazelVersion);
   }
 
-  const proxy = await startRegistryProxy({
+  const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
     workspace,
     tag: cacheTag,
@@ -1839,7 +1849,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
-  });
+  }));
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1876,7 +1886,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   const gradleHome = resolveGradleHome(core.getInput('gradle-home') || '');
   const enableBuildCache = parseBoolean(core.getInput('enable-build-cache'), true);
 
-  const proxy = await startRegistryProxy({
+  const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
     workspace,
     tag: cacheTag,
@@ -1886,7 +1896,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
-  });
+  }));
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1934,7 +1944,7 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   const extensionVersion = core.getInput('maven-build-cache-extension-version') || '1.2.2';
   const cacheId = core.getInput('maven-build-cache-id') || 'boringcache';
 
-  const proxy = await startRegistryProxy({
+  const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
     workspace,
     tag: cacheTag,
@@ -1944,7 +1954,7 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
-  });
+  }));
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -2180,7 +2190,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
       });
-      const proxy = await startRegistryProxy({
+      const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace: proxyPlan.workspace,
         tag: proxyPlan.tag,
@@ -2190,7 +2200,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-      });
+      }));
       configureSccacheProxyEnv(proxy.port);
       await startSccacheServer();
       saveModeState('proxy-pid', String(proxy.pid));
