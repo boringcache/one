@@ -32,7 +32,6 @@ const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
-const ACTION_PROXY_ON_DEMAND = true;
 
 interface ModeRestoreResult {
   cacheHit?: boolean;
@@ -52,24 +51,39 @@ interface CacheFlags {
   exclude?: string;
 }
 
-type RegistryProxyOptions = Parameters<typeof startRegistryProxy>[0];
+type RegistryProxyOptions = Parameters<typeof startRegistryProxy>[0] & {
+  ociPrefetchRefs?: string[];
+  metadataHints?: Record<string, string>;
+};
 
-function actionProxyOptions<T extends RegistryProxyOptions>(options: T): T & { onDemand: true } {
+interface CliProxyDryRunPlan {
+  host: string;
+  endpoint_host: string;
+  port: number;
+  no_platform: boolean;
+  no_git: boolean;
+  read_only: boolean;
+  startup_mode?: string;
+  oci_prefetch_refs?: string[];
+  metadata_hints?: Record<string, string>;
+}
+
+function actionProxyOptions<T extends RegistryProxyOptions>(
+  options: T,
+  proxyPlan?: CliProxyDryRunPlan,
+): T {
   return {
     ...options,
-    onDemand: ACTION_PROXY_ON_DEMAND,
+    onDemand: proxyPlan?.startup_mode === 'on-demand',
+    ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
+    metadataHints: proxyPlan?.metadata_hints || {},
   };
 }
 
 interface CliAdapterDryRunPlan {
   workspace: string;
   tag: string;
-  proxy: {
-    port: number;
-    no_platform: boolean;
-    no_git: boolean;
-    read_only: boolean;
-  };
+  proxy: CliProxyDryRunPlan;
   oci_cache?: {
     registry_ref: string;
     cache_from: string;
@@ -1187,7 +1201,13 @@ async function stopSccacheServer(): Promise<SccacheStatsSummary | null> {
   return summarizeSccacheStats(output);
 }
 
-async function startPortableCacheProxy(workspace: string, port: number, tag: string, readOnly = false): Promise<{ pid: number; port: number }> {
+async function startPortableCacheProxy(
+  workspace: string,
+  port: number,
+  tag: string,
+  readOnly = false,
+  proxyPlan?: CliProxyDryRunPlan,
+): Promise<{ pid: number; port: number }> {
   const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
     workspace,
@@ -1197,7 +1217,7 @@ async function startPortableCacheProxy(workspace: string, port: number, tag: str
     noPlatform: true,
     noGit: true,
     readOnly,
-  }));
+  }, proxyPlan));
   return proxy;
 }
 
@@ -1488,7 +1508,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
-    }));
+    }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     saveModeState('workspace', dockerPlan.workspace);
@@ -1702,7 +1722,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
-    }));
+    }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     saveModeState('workspace', dockerPlan.workspace);
@@ -1849,7 +1869,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
-  }));
+  }, proxyPlan.proxy));
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1896,7 +1916,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
-  }));
+  }, proxyPlan.proxy));
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -1954,7 +1974,7 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     noPlatform: proxyPlan.proxy.no_platform,
     verbose: inputs.verbose,
     readOnly: proxyPlan.proxy.read_only,
-  }));
+  }, proxyPlan.proxy));
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
@@ -2019,6 +2039,7 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
       turboPlan.proxy.port || preferredPort,
       cacheTag,
       turboPlan.proxy.read_only,
+      turboPlan.proxy,
     );
   } catch {
     proxy = await startPortableCacheProxy(
@@ -2026,6 +2047,7 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
       await findAvailablePort(),
       cacheTag,
       turboPlan.proxy.read_only,
+      turboPlan.proxy,
     );
   }
 
@@ -2200,7 +2222,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-      }));
+      }, proxyPlan.proxy));
       configureSccacheProxyEnv(proxy.port);
       await startSccacheServer();
       saveModeState('proxy-pid', String(proxy.pid));

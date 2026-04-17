@@ -99,7 +99,8 @@ describe('product modes', () => {
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
         workspace: 'boringcache/test-workspace',
-        onDemand: true,
+        onDemand: false,
+        ociPrefetchRefs: ['cache@buildcache'],
       }));
       const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
         ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
@@ -140,7 +141,8 @@ describe('product modes', () => {
         command: 'cache-registry',
         workspace: 'boringcache/test-workspace',
         tag: 'bench-registry',
-        onDemand: true,
+        onDemand: false,
+        ociPrefetchRefs: ['cache@buildcache'],
       }));
       expect(exec.exec).not.toHaveBeenCalledWith(
         'docker',
@@ -358,7 +360,8 @@ describe('product modes', () => {
 
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
-        onDemand: true,
+        onDemand: false,
+        ociPrefetchRefs: ['cache@buildcache'],
       }));
       const buildctlCall = (exec.exec as jest.Mock).mock.calls.find(
         ([command, args]) => command === 'buildctl' && Array.isArray(args) && args.includes('build'),
@@ -397,7 +400,7 @@ describe('product modes', () => {
       expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('bazel', '8.0.1', { label: 'Bazel' });
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
-        onDemand: true,
+        onDemand: false,
       }));
       const bazelrc = await fs.readFile(path.join(home, '.bazelrc'), 'utf8');
       expect(bazelrc).toContain('build --remote_cache=http://127.0.0.1:5000');
@@ -427,7 +430,7 @@ describe('product modes', () => {
       expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('java', '21', { label: 'Java' });
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
-        onDemand: true,
+        onDemand: false,
       }));
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'gradle');
     } finally {
@@ -454,7 +457,7 @@ describe('product modes', () => {
       expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('maven', '3.9.9', { label: 'Maven' });
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
-        onDemand: true,
+        onDemand: false,
       }));
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'maven');
       expect(core.setOutput).toHaveBeenCalledWith(
@@ -499,7 +502,7 @@ describe('product modes', () => {
         noPlatform: true,
         noGit: true,
         readOnly: true,
-        onDemand: true,
+        onDemand: false,
       }));
       const bazelrc = await fs.readFile(path.join(home, '.bazelrc'), 'utf8');
       expect(bazelrc).toContain('build --remote_upload_local_results=false');
@@ -618,7 +621,7 @@ describe('product modes', () => {
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         workspace: 'config-org/config-workspace',
         tag: 'turbo-main',
-        onDemand: true,
+        onDemand: false,
       }));
       expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'turbo-main');
       expect(core.setOutput).toHaveBeenCalledWith('workspace', 'config-org/config-workspace');
@@ -744,7 +747,7 @@ describe('product modes', () => {
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
         tag: 'zed-sccache-rust1.89-r123-a1',
-        onDemand: true,
+        onDemand: false,
       }));
       expect(core.setOutput).toHaveBeenCalledWith('cargo-tag', 'zed-cargo-registry');
       expect(core.setOutput).toHaveBeenCalledWith('cargo-git-tag', 'zed-cargo-git');

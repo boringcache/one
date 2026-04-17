@@ -126,6 +126,8 @@ interface CliAdapterDryRunPlan {
     no_platform: boolean;
     no_git: boolean;
     read_only: boolean;
+    startup_mode?: string;
+    oci_prefetch_refs?: string[];
     metadata_hints: Record<string, string>;
   };
   oci_cache?: {
@@ -817,6 +819,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   const resolvedCacheMode = cacheMode || repoSettings.cacheMode || 'max';
   const resolvedCacheRefTag = cacheRefTag || repoSettings.cacheRefTag || 'buildcache';
   let ociCache: CliAdapterDryRunPlan['oci_cache'];
+  let ociPrefetchRefs: string[] = [];
   let envVars: Record<string, string> = {};
 
   if (adapterName === 'turbo') {
@@ -847,6 +850,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       cache_to: resolvedReadOnly ? undefined : `type=registry,ref=${registryRef},mode=${resolvedCacheMode}`,
       ref_tag: dockerTarget.refTag,
     };
+    ociPrefetchRefs = [`cache@${dockerTarget.refTag}`];
     envVars = {
       BORINGCACHE_PROXY_PORT: String(resolvedPort),
       BORINGCACHE_CACHE_REF: registryRef,
@@ -869,6 +873,8 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       no_platform: resolvedNoPlatform,
       no_git: resolvedNoGit,
       read_only: resolvedReadOnly,
+      startup_mode: 'warm',
+      oci_prefetch_refs: ociPrefetchRefs,
       metadata_hints: {},
     },
     oci_cache: ociCache,
