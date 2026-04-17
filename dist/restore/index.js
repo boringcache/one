@@ -45396,6 +45396,9 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
             }
         }
     }
+    if (lastExitCode !== 0 && flagArgs.includes('--fail-on-cache-miss')) {
+        throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
+    }
     return {
         hit: lastExitCode === 0,
         saveEntries,

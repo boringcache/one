@@ -23,6 +23,64 @@ async function removeTempProject(directory: string): Promise<void> {
 }
 
 describe('product modes', () => {
+  it('fails archive restore when fail-on-cache-miss is enabled', async () => {
+    const project = await makeTempProject({ 'cache-dir/.keep': '' });
+
+    try {
+      mockGetInput({
+        mode: 'archive',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        path: path.join(project, 'cache-dir'),
+        key: 'archive-restore-miss',
+      });
+      mockGetBooleanInput({
+        'fail-on-cache-miss': true,
+        'no-platform': true,
+      });
+
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { cwd?: string; listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'run' && args.includes('--dry-run') && args.includes('--json')) {
+          const entry = `archive-restore-miss-cache-dir:${path.join(project, 'cache-dir')}`;
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag_path_pairs: [entry],
+            archive_entries: [{
+              requested: path.join(project, 'cache-dir'),
+              request_source: 'archive-path',
+              resolution_source: 'manual',
+              resolved_tag: 'archive-restore-miss-cache-dir',
+              tag: 'archive-restore-miss-cache-dir',
+              path: path.join(project, 'cache-dir'),
+              tag_path_pair: entry,
+            }],
+            archive_restore_candidates: [],
+            env_vars: {},
+          })));
+          return 0;
+        }
+        if (command === 'boringcache' && args?.[0] === 'restore') {
+          return 1;
+        }
+        return 0;
+      });
+
+      await restoreRun();
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        expect.stringContaining('boringcache/one restore failed: Cache restore failed for archive-restore-miss-cache-dir:'),
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('runs docker mode through the registry proxy adapter', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 
