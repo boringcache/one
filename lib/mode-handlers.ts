@@ -138,6 +138,16 @@ interface BuildctlOptions {
   metadataFile: string;
 }
 
+type DockerInternalCacheMode = 'off' | 'on' | 'manual';
+
+interface DockerInternalCacheConfig {
+  mode: DockerInternalCacheMode;
+  helperPath: string;
+  buildArgs: string[];
+  restoreEnabled: string;
+  saveEnabled: string;
+}
+
 let rustLastOutput = '';
 
 function currentHomeDir(): string {
@@ -209,6 +219,152 @@ function parseMultiline(input: string): string[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function normalizeDockerInternalCacheMode(input: string): DockerInternalCacheMode {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized || normalized === 'off' || normalized === 'false' || normalized === 'disabled') {
+    return 'off';
+  }
+  if (normalized === 'on' || normalized === 'true' || normalized === 'enabled') {
+    return 'on';
+  }
+  if (normalized === 'manual' || normalized === 'passthrough' || normalized === 'pass-through') {
+    return 'manual';
+  }
+  throw new Error('docker-internal-cache must be off, on, or manual');
+}
+
+function buildArgName(buildArg: string): string {
+  const separator = buildArg.indexOf('=');
+  return (separator >= 0 ? buildArg.slice(0, separator) : buildArg).trim();
+}
+
+function appendBuildArgIfMissing(buildArgs: string[], name: string, value: string): string[] {
+  if (buildArgs.some((buildArg) => buildArgName(buildArg) === name)) {
+    return buildArgs;
+  }
+  return [...buildArgs, `${name}=${value}`];
+}
+
+function resolveDockerHelperPath(contextPath: string, helperPathInput: string): string {
+  const trimmed = helperPathInput.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const resolved = path.resolve(contextPath, trimmed);
+  const relative = path.relative(contextPath, resolved);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('docker-helper-path must resolve inside the Docker or BuildKit context');
+  }
+  return resolved;
+}
+
+function findBoringCacheBinary(): string {
+  const executable = process.platform === 'win32' ? 'boringcache.exe' : 'boringcache';
+  const home = currentHomeDir();
+  const candidates = [
+    path.join(home, '.boringcache', 'bin', executable),
+    path.join(home, '.local', 'bin', executable),
+    ...((process.env.PATH || '')
+      .split(path.delimiter)
+      .filter(Boolean)
+      .map((dir) => path.join(dir, executable))),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error('docker-internal-cache=on with docker-helper-path requires a boringcache binary on PATH or under ~/.boringcache/bin');
+}
+
+function writeDockerHelper(config: DockerInternalCacheConfig): void {
+  if (!config.helperPath) {
+    return;
+  }
+  if (config.mode === 'manual') {
+    throw new Error('docker-helper-path requires docker-internal-cache to be off or on');
+  }
+
+  fs.mkdirSync(path.dirname(config.helperPath), { recursive: true });
+
+  if (config.mode === 'off') {
+    fs.writeFileSync(
+      config.helperPath,
+      [
+        '#!/usr/bin/env sh',
+        '# Stable no-op helper written by boringcache/one for registry-layer Docker caching.',
+        'exit 0',
+        '',
+      ].join('\n'),
+    );
+  } else {
+    const source = findBoringCacheBinary();
+    if (path.resolve(source) !== path.resolve(config.helperPath)) {
+      fs.copyFileSync(source, config.helperPath);
+    }
+  }
+
+  fs.chmodSync(config.helperPath, 0o755);
+}
+
+function warnIfUnmanagedDockerHelperExists(contextPath: string, config: DockerInternalCacheConfig): void {
+  if (config.mode !== 'off' || config.helperPath) {
+    return;
+  }
+
+  const defaultHelperPath = path.join(contextPath, 'boringcache-bin');
+  if (!fs.existsSync(defaultHelperPath)) {
+    return;
+  }
+
+  core.warning(
+    'Found boringcache-bin in the Docker context while docker-internal-cache=off; if your Dockerfile bind-mounts it, set docker-helper-path: boringcache-bin so boringcache/one replaces it with a stable no-op helper.',
+  );
+}
+
+function resolveDockerInternalCacheConfig(
+  contextPath: string,
+  buildArgs: string[],
+): DockerInternalCacheConfig {
+  const mode = normalizeDockerInternalCacheMode(core.getInput('docker-internal-cache') || '');
+  const helperPath = resolveDockerHelperPath(contextPath, core.getInput('docker-helper-path') || '');
+  const enabledValue = mode === 'on' ? '1' : mode === 'off' ? '0' : '';
+  let resolvedBuildArgs = [...buildArgs];
+
+  if (mode !== 'manual') {
+    resolvedBuildArgs = appendBuildArgIfMissing(
+      resolvedBuildArgs,
+      'BORINGCACHE_INTERNAL_RESTORE_ENABLED',
+      enabledValue,
+    );
+    resolvedBuildArgs = appendBuildArgIfMissing(
+      resolvedBuildArgs,
+      'BORINGCACHE_INTERNAL_SAVE_ENABLED',
+      enabledValue,
+    );
+  }
+
+  const config = {
+    mode,
+    helperPath,
+    buildArgs: resolvedBuildArgs,
+    restoreEnabled: enabledValue,
+    saveEnabled: enabledValue,
+  };
+  if (mode === 'on') {
+    core.warning(
+      'docker-internal-cache=on makes the boringcache helper binary a Docker build input; the first run after a CLI binary change is a cache reseed.',
+    );
+  }
+  writeDockerHelper(config);
+  warnIfUnmanagedDockerHelperExists(contextPath, config);
+  setDockerInternalCacheOutputs(config);
+  return config;
 }
 
 function slugify(value: string): string {
@@ -502,6 +658,21 @@ function setLocalCacheOutputs(cacheDirFrom: string, cacheDirTo: string, cacheMod
   core.setOutput('cache-to', `type=local,dest=${cacheDirTo},mode=${cacheMode}`);
   core.setOutput('cache-dir', cacheDirFrom);
   core.setOutput('save-cache-dir', cacheDirTo);
+}
+
+function setDockerInternalCacheOutputs(config: DockerInternalCacheConfig): void {
+  const internalBuildArgs = config.mode === 'manual'
+    ? ''
+    : [
+      `BORINGCACHE_INTERNAL_RESTORE_ENABLED=${config.restoreEnabled}`,
+      `BORINGCACHE_INTERNAL_SAVE_ENABLED=${config.saveEnabled}`,
+    ].join('\n');
+
+  core.setOutput('docker-internal-cache', config.mode);
+  core.setOutput('docker-internal-restore-enabled', config.restoreEnabled);
+  core.setOutput('docker-internal-save-enabled', config.saveEnabled);
+  core.setOutput('docker-internal-build-args', internalBuildArgs);
+  core.setOutput('docker-helper-path', config.helperPath);
 }
 
 async function inspectDockerTemplate(containerName: string, template: string): Promise<string | null> {
@@ -1438,7 +1609,11 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     ? core.getInput('image', { required: true })
     : (imageInput || 'boringcache/docker-setup');
   const tags = parseList(core.getInput('tags') || 'latest');
-  const buildArgs = parseMultiline(core.getInput('build-args') || '');
+  const dockerInternalCache = resolveDockerInternalCacheConfig(
+    context,
+    parseMultiline(core.getInput('build-args') || ''),
+  );
+  const buildArgs = dockerInternalCache.buildArgs;
   const secrets = parseMultiline(core.getInput('secrets') || '');
   const target = core.getInput('target') || '';
   const platforms = core.getInput('platforms') || '';
@@ -1648,7 +1823,11 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
   const imageTags = tags.length > 0 ? tags.map((tag) => `${image}:${tag}`) : [`${image}:latest`];
   const push = parseBoolean(core.getInput('push'), false);
   const output = core.getInput('output') || '';
-  const buildArgs = parseMultiline(core.getInput('build-args') || '');
+  const dockerInternalCache = resolveDockerInternalCacheConfig(
+    contextPath,
+    parseMultiline(core.getInput('build-args') || ''),
+  );
+  const buildArgs = dockerInternalCache.buildArgs;
   const secrets = parseMultiline(core.getInput('secrets') || '');
   const sshSpecs = parseMultiline(core.getInput('ssh') || '');
   const target = core.getInput('target') || '';
