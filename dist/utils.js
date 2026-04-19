@@ -46,6 +46,7 @@ exports.readSavedSaveConfiguration = readSavedSaveConfiguration;
 exports.normalizeSavePolicy = normalizeSavePolicy;
 exports.normalizeDiagnosticsMode = normalizeDiagnosticsMode;
 exports.normalizeDiagnosticsLogLines = normalizeDiagnosticsLogLines;
+exports.normalizeOciHydrationPolicy = normalizeOciHydrationPolicy;
 exports.resolveDiagnosticsConfig = resolveDiagnosticsConfig;
 exports.loadDiagnosticsConfig = loadDiagnosticsConfig;
 exports.runDiagnosticsGroup = runDiagnosticsGroup;
@@ -143,6 +144,7 @@ function getInputs() {
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
+        ociHydration: normalizeOciHydrationPolicy(core.getInput('oci-hydration')),
         cacheProfiles: core.getInput('cache-profiles'),
         entries: core.getInput('entries'),
         path: core.getInput('path'),
@@ -241,6 +243,16 @@ function normalizeDiagnosticsLogLines(value) {
         throw new Error(`Unsupported diagnostics-log-lines "${value}". Expected a positive integer.`);
     }
     return parsed;
+}
+function normalizeOciHydrationPolicy(value) {
+    switch ((value || 'metadata-only').trim().toLowerCase()) {
+        case 'metadata-only':
+        case 'bodies-before-ready':
+        case 'bodies-background':
+            return (value || 'metadata-only').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only, bodies-before-ready, or bodies-background.`);
+    }
 }
 function resolveDiagnosticsConfig(mode, logLines) {
     let level;

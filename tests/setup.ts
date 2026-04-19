@@ -128,6 +128,7 @@ interface CliAdapterDryRunPlan {
     read_only: boolean;
     startup_mode?: string;
     oci_prefetch_refs?: string[];
+    oci_hydration?: string;
     metadata_hints: Record<string, string>;
   };
   oci_cache?: {
@@ -746,6 +747,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   let readOnly = false;
   let cacheMode = '';
   let cacheRefTag = '';
+  let ociHydration = 'metadata-only';
   const { workspace: repoWorkspace, repoConfigPath } = readRepoConfigWorkspace(workingDirectory);
   const repoSettings = readRepoAdapterSettings(workingDirectory, adapterName);
 
@@ -787,6 +789,11 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     }
     if (arg === '--cache-ref-tag') {
       cacheRefTag = args[index + 1] || cacheRefTag;
+      index += 1;
+      continue;
+    }
+    if (arg === '--oci-hydration') {
+      ociHydration = args[index + 1] || ociHydration;
       index += 1;
       continue;
     }
@@ -875,6 +882,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       read_only: resolvedReadOnly,
       startup_mode: 'warm',
       oci_prefetch_refs: ociPrefetchRefs,
+      oci_hydration: ociHydration,
       metadata_hints: {},
     },
     oci_cache: ociCache,

@@ -198,6 +198,10 @@ async function startRegistryProxy(options) {
             args.push('--oci-prefetch-ref', trimmed);
         }
     }
+    const ociHydration = (options.ociHydration || 'metadata-only').trim();
+    if (ociHydration && ociHydration !== 'metadata-only') {
+        args.push('--oci-hydration', ociHydration);
+    }
     for (const [key, value] of Object.entries(options.metadataHints || {})) {
         args.push('--metadata-hint', `${key}=${value}`);
     }
@@ -218,6 +222,9 @@ async function startRegistryProxy(options) {
     core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
     if ((_a = options.ociPrefetchRefs) === null || _a === void 0 ? void 0 : _a.length) {
         core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
+    }
+    if (ociHydration !== 'metadata-only') {
+        core.info(`Registry proxy OCI hydration: ${ociHydration}`);
     }
     const logFile = proxyLogPath(options.port);
     const logFd = fs.openSync(logFile, 'w');

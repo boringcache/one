@@ -163,6 +163,10 @@ inputs:
     description: 'Optional OCI tag suffix for proxy-backed Docker or BuildKit cache refs. Defaults to buildcache.'
     default: 'buildcache'
     required: false
+  oci-hydration:
+    description: 'Docker or BuildKit registry proxy hydration policy: metadata-only, bodies-before-ready, or bodies-background.'
+    default: 'metadata-only'
+    required: false
   buildkit-host:
     description: 'BuildKit address for buildctl mode, for example tcp://host:1234 or unix:///run/buildkit/buildkitd.sock.'
     required: false

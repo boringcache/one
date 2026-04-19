@@ -52,6 +52,7 @@ export type SavePolicy = 'auto' | 'off';
 export type VerifyMode = 'none' | 'check' | 'wait' | 'warn';
 export type DiagnosticsInputMode = 'auto' | 'off' | 'summary' | 'verbose';
 export type DiagnosticsLevel = 'off' | 'summary' | 'verbose';
+export type OciHydrationPolicy = 'metadata-only' | 'bodies-before-ready' | 'bodies-background';
 
 export interface ToolSpec {
   name: string;
@@ -96,6 +97,7 @@ export interface OneInputs {
   proxyPort: string;
   proxyNoGit: boolean;
   proxyNoPlatform: boolean;
+  ociHydration: OciHydrationPolicy;
   cacheProfiles: string;
   entries: string;
   path: string;
@@ -201,6 +203,7 @@ export function getInputs(): OneInputs {
     proxyPort: core.getInput('proxy-port'),
     proxyNoGit: core.getBooleanInput('proxy-no-git'),
     proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
+    ociHydration: normalizeOciHydrationPolicy(core.getInput('oci-hydration')),
     cacheProfiles: core.getInput('cache-profiles'),
     entries: core.getInput('entries'),
     path: core.getInput('path'),
@@ -327,6 +330,19 @@ export function normalizeDiagnosticsLogLines(value: string): number {
     throw new Error(`Unsupported diagnostics-log-lines "${value}". Expected a positive integer.`);
   }
   return parsed;
+}
+
+export function normalizeOciHydrationPolicy(value: string): OciHydrationPolicy {
+  switch ((value || 'metadata-only').trim().toLowerCase()) {
+    case 'metadata-only':
+    case 'bodies-before-ready':
+    case 'bodies-background':
+      return (value || 'metadata-only').trim().toLowerCase() as OciHydrationPolicy;
+    default:
+      throw new Error(
+        `Unsupported oci-hydration "${value}". Expected metadata-only, bodies-before-ready, or bodies-background.`,
+      );
+  }
 }
 
 export function resolveDiagnosticsConfig(mode: DiagnosticsInputMode, logLines: number): DiagnosticsConfig {

@@ -42633,6 +42633,10 @@ async function startRegistryProxy(options) {
             args.push('--oci-prefetch-ref', trimmed);
         }
     }
+    const ociHydration = (options.ociHydration || 'metadata-only').trim();
+    if (ociHydration && ociHydration !== 'metadata-only') {
+        args.push('--oci-hydration', ociHydration);
+    }
     for (const [key, value] of Object.entries(options.metadataHints || {})) {
         args.push('--metadata-hint', `${key}=${value}`);
     }
@@ -42653,6 +42657,9 @@ async function startRegistryProxy(options) {
     core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
     if ((_a = options.ociPrefetchRefs) === null || _a === void 0 ? void 0 : _a.length) {
         core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
+    }
+    if (ociHydration !== 'metadata-only') {
+        core.info(`Registry proxy OCI hydration: ${ociHydration}`);
     }
     const logFile = proxyLogPath(options.port);
     const logFd = fs.openSync(logFile, 'w');
@@ -43302,6 +43309,7 @@ function actionProxyOptions(options, proxyPlan) {
         ...options,
         onDemand: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.startup_mode) === 'on-demand',
         ociPrefetchRefs: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_prefetch_refs) || [],
+        ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || 'metadata-only',
         metadataHints: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {},
     };
 }
@@ -43600,7 +43608,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag) {
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration) {
     var _a;
     const args = ['docker', '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
@@ -43631,6 +43639,10 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     }
     if (trimmedCacheRefTag) {
         args.push('--cache-ref-tag', trimmedCacheRefTag);
+    }
+    const trimmedOciHydration = ociHydration.trim();
+    if (trimmedOciHydration && trimmedOciHydration !== 'metadata-only') {
+        args.push('--oci-hydration', trimmedOciHydration);
     }
     args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
     let stdout = '';
@@ -44565,7 +44577,7 @@ async function runDockerRestore(plan, inputs) {
             }
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
@@ -44754,7 +44766,7 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
@@ -45714,6 +45726,7 @@ exports.readSavedSaveConfiguration = readSavedSaveConfiguration;
 exports.normalizeSavePolicy = normalizeSavePolicy;
 exports.normalizeDiagnosticsMode = normalizeDiagnosticsMode;
 exports.normalizeDiagnosticsLogLines = normalizeDiagnosticsLogLines;
+exports.normalizeOciHydrationPolicy = normalizeOciHydrationPolicy;
 exports.resolveDiagnosticsConfig = resolveDiagnosticsConfig;
 exports.loadDiagnosticsConfig = loadDiagnosticsConfig;
 exports.runDiagnosticsGroup = runDiagnosticsGroup;
@@ -45811,6 +45824,7 @@ function getInputs() {
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
+        ociHydration: normalizeOciHydrationPolicy(core.getInput('oci-hydration')),
         cacheProfiles: core.getInput('cache-profiles'),
         entries: core.getInput('entries'),
         path: core.getInput('path'),
@@ -45909,6 +45923,16 @@ function normalizeDiagnosticsLogLines(value) {
         throw new Error(`Unsupported diagnostics-log-lines "${value}". Expected a positive integer.`);
     }
     return parsed;
+}
+function normalizeOciHydrationPolicy(value) {
+    switch ((value || 'metadata-only').trim().toLowerCase()) {
+        case 'metadata-only':
+        case 'bodies-before-ready':
+        case 'bodies-background':
+            return (value || 'metadata-only').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only, bodies-before-ready, or bodies-background.`);
+    }
 }
 function resolveDiagnosticsConfig(mode, logLines) {
     let level;

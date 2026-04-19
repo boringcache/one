@@ -54,6 +54,7 @@ function actionProxyOptions(options, proxyPlan) {
         ...options,
         onDemand: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.startup_mode) === 'on-demand',
         ociPrefetchRefs: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_prefetch_refs) || [],
+        ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || 'metadata-only',
         metadataHints: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {},
     };
 }
@@ -352,7 +353,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag) {
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration) {
     var _a;
     const args = ['docker', '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
@@ -383,6 +384,10 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     }
     if (trimmedCacheRefTag) {
         args.push('--cache-ref-tag', trimmedCacheRefTag);
+    }
+    const trimmedOciHydration = ociHydration.trim();
+    if (trimmedOciHydration && trimmedOciHydration !== 'metadata-only') {
+        args.push('--oci-hydration', trimmedOciHydration);
     }
     args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
     let stdout = '';
@@ -1317,7 +1322,7 @@ async function runDockerRestore(plan, inputs) {
             }
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
@@ -1506,7 +1511,7 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',

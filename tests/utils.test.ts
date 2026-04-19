@@ -63,6 +63,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     proxyPort: '',
     proxyNoGit: false,
     proxyNoPlatform: false,
+    ociHydration: 'metadata-only',
     cacheProfiles: '',
     entries: 'deps:node_modules',
     path: '',
@@ -101,6 +102,14 @@ describe('one utils', () => {
 
     const inputs = getInputs();
     expect(inputs.verify).toBe('warn');
+  });
+
+  it('normalizes oci-hydration from action inputs', () => {
+    mockGetInput({ 'oci-hydration': 'bodies-background' });
+    mockGetBooleanInput({});
+
+    const inputs = getInputs();
+    expect(inputs.ociHydration).toBe('bodies-background');
   });
 
   it('keeps diagnostics off by default when step debug is disabled', () => {

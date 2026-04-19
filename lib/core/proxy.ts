@@ -23,6 +23,7 @@ export interface ProxyOptions {
   readOnly?: boolean;
   onDemand?: boolean;
   ociPrefetchRefs?: string[];
+  ociHydration?: string;
   metadataHints?: Record<string, string>;
 }
 
@@ -214,6 +215,10 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
       args.push('--oci-prefetch-ref', trimmed);
     }
   }
+  const ociHydration = (options.ociHydration || 'metadata-only').trim();
+  if (ociHydration && ociHydration !== 'metadata-only') {
+    args.push('--oci-hydration', ociHydration);
+  }
   for (const [key, value] of Object.entries(options.metadataHints || {})) {
     args.push('--metadata-hint', `${key}=${value}`);
   }
@@ -235,6 +240,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
   if (options.ociPrefetchRefs?.length) {
     core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
+  }
+  if (ociHydration !== 'metadata-only') {
+    core.info(`Registry proxy OCI hydration: ${ociHydration}`);
   }
 
   const logFile = proxyLogPath(options.port);

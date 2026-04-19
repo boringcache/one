@@ -101,6 +101,7 @@ describe('product modes', () => {
         workspace: 'boringcache/test-workspace',
         onDemand: false,
         ociPrefetchRefs: ['cache@buildcache'],
+        ociHydration: 'metadata-only',
       }));
       const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
         ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
@@ -122,6 +123,33 @@ describe('product modes', () => {
       const cacheTagCalls = (core.setOutput as jest.Mock).mock.calls.filter(([name]) => name === 'cache-tag');
       expect(cacheTagCalls.at(-1)).toEqual(['cache-tag', 'ghcr-io-boringcache-demo']);
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'docker');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('passes docker OCI hydration policy to the registry proxy', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'oci-hydration': 'bodies-before-ready',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'cache-registry',
+        workspace: 'boringcache/test-workspace',
+        ociPrefetchRefs: ['cache@buildcache'],
+        ociHydration: 'bodies-before-ready',
+      }));
     } finally {
       await removeTempProject(project);
     }

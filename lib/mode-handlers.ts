@@ -65,6 +65,7 @@ interface CliProxyDryRunPlan {
   read_only: boolean;
   startup_mode?: string;
   oci_prefetch_refs?: string[];
+  oci_hydration?: string;
   metadata_hints?: Record<string, string>;
 }
 
@@ -76,6 +77,7 @@ function actionProxyOptions<T extends RegistryProxyOptions>(
     ...options,
     onDemand: proxyPlan?.startup_mode === 'on-demand',
     ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
+    ociHydration: proxyPlan?.oci_hydration || options.ociHydration || 'metadata-only',
     metadataHints: proxyPlan?.metadata_hints || {},
   };
 }
@@ -527,6 +529,7 @@ async function resolveDockerCliPlan(
   readOnly: boolean,
   cacheMode: string,
   cacheRefTag: string,
+  ociHydration: string,
 ): Promise<CliAdapterDryRunPlan> {
   const args = ['docker', '--workspace', workspace];
   const trimmedCacheTag = inputCacheTag.trim();
@@ -557,6 +560,10 @@ async function resolveDockerCliPlan(
   }
   if (trimmedCacheRefTag) {
     args.push('--cache-ref-tag', trimmedCacheRefTag);
+  }
+  const trimmedOciHydration = ociHydration.trim();
+  if (trimmedOciHydration && trimmedOciHydration !== 'metadata-only') {
+    args.push('--oci-hydration', trimmedOciHydration);
   }
   args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
 
@@ -1671,6 +1678,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       inputs.readOnly,
       cacheMode,
       registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG,
+      inputs.ociHydration,
     );
     const cacheTag = dockerPlan.tag;
     const proxy = await startRegistryProxy(actionProxyOptions({
@@ -1889,6 +1897,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       inputs.readOnly,
       cacheMode,
       registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG,
+      inputs.ociHydration,
     );
     const cacheTag = dockerPlan.tag;
     const proxy = await startRegistryProxy(actionProxyOptions({
