@@ -61,5 +61,11 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 npm install && npm run build && npm test
 ```
 
+## Release Guidance
+
+- For any `boringcache/one` version bump, release tag, or `v1` major tag move, load `/Users/gaurav/boringcache/skills/categories/release-operations/release-paths/SKILL.md` first.
+- Then load `/Users/gaurav/boringcache/skills/categories/github-actions-maintenance/one-action/SKILL.md` for action-specific behavior.
+- Keep the release commit and tag signed. Update `v1` only after the versioned release succeeds.
+
 ---
 **See [../AGENTS.md](../AGENTS.md) for shared conventions.**
