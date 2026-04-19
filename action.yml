@@ -107,11 +107,11 @@ inputs:
     description: 'Build arguments as newline-separated KEY=VALUE pairs.'
     required: false
   docker-internal-cache:
-    description: 'Controls BoringCache calls inside the Dockerfile: off disables them and keeps registry layer cache as the Docker cache path, on enables them intentionally, manual leaves build args and helper files untouched.'
+    description: 'Advanced Dockerfiles only: controls BoringCache calls inside Dockerfile RUN steps. Default off keeps registry layer cache as the Docker cache path; on intentionally enables a real in-Dockerfile helper; manual leaves build args and helper files untouched.'
     default: 'off'
     required: false
   docker-helper-path:
-    description: 'Optional path under the Docker or BuildKit context to materialize a Dockerfile bind-mount helper. With docker-internal-cache=off this writes a stable no-op helper; with on it copies the installed boringcache CLI.'
+    description: 'Advanced Dockerfiles only: optional path under the Docker or BuildKit context to materialize a bind-mount helper. With docker-internal-cache=off this writes a stable no-op helper; with on it copies the installed boringcache CLI.'
     required: false
   target:
     description: 'Target build stage.'

@@ -51,7 +51,9 @@ For Docker or native remote-cache flows, set the mode you need and keep the same
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-For Dockerfiles that also bind-mount a `boringcache` helper inside `RUN` steps, keep that helper stable unless you deliberately want the helper binary to be part of the Docker cache key:
+Most Docker workflows only need the registry layer cache outputs. The helper options below are for advanced Dockerfiles that already bind-mount a `boringcache` helper inside `RUN` steps.
+
+Keep that helper stable unless you deliberately want the helper binary to be part of the Docker cache key:
 
 ```yaml
 - uses: boringcache/one@v1
@@ -76,7 +78,7 @@ For Dockerfiles that also bind-mount a `boringcache` helper inside `RUN` steps, 
       .
 ```
 
-`docker-internal-cache: off` is the registry-layer path: `one` disables Dockerfile-internal BoringCache calls and, when `docker-helper-path` is set, writes a stable no-op executable under the Docker context for bind mounts such as `RUN --mount=type=bind,source=boringcache-bin,target=/usr/local/bin/boringcache`. Set `docker-internal-cache: on` only when you intentionally want the real CLI inside the Dockerfile; that makes a CLI binary release a Docker graph input, so the first same-branch run after the binary changes is a reseed.
+`docker-internal-cache: off` is the registry-layer path: `one` disables Dockerfile-internal BoringCache calls and, when `docker-helper-path` is set, writes a stable no-op executable under the Docker context for bind mounts such as `RUN --mount=type=bind,source=boringcache-bin,target=/usr/local/bin/boringcache`. Set `docker-internal-cache: on` only when you intentionally want the real CLI inside the Dockerfile; that makes a CLI binary release a Docker graph input, so the first same-branch run after the binary changes is a reseed. BoringCache maintainers use separate benchmark-only `cli_ref` diagnostics for registry-proxy development; application workflows should use released action and CLI versions.
 
 ## What it handles
 
