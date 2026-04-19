@@ -23,7 +23,7 @@ import {
   readToolVersionsValue,
   reshimMise,
   type MiseVersionScope,
-} from '@boringcache/action-core';
+} from './core';
 import {
   assertImplementedMode,
   type ModeSpec,

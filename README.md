@@ -88,6 +88,10 @@ Keep that helper stable unless you deliberately want the helper binary to be par
 - Bazel, Gradle, Maven, Turbo, and Rust plus `sccache` proxy-backed modes
 - repo-config-driven cache profiles after `boringcache onboard`
 
+## Maintainer model
+
+`boringcache/one` owns its GitHub Actions support code directly under `lib/core/`. That code used to ship as the separate `@boringcache/action-core` npm package; keeping it in this repository makes a release of `one` self-contained and avoids a second package version becoming part of the product action's behavior.
+
 ## Trust model
 
 - every job that should read cache gets `BORINGCACHE_RESTORE_TOKEN`

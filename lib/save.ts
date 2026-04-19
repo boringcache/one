@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
-import { hasSaveToken, missingSaveTokenMessage } from '@boringcache/action-core';
+import { hasSaveToken, missingSaveTokenMessage } from './core';
 import {
   buildPlan,
   ensureBoringCache,

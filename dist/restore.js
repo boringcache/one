@@ -35,7 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.run = run;
 const core = __importStar(require("@actions/core"));
-const action_core_1 = require("@boringcache/action-core");
+const core_1 = require("./core");
 const utils_1 = require("./utils");
 const mode_handlers_1 = require("./mode-handlers");
 function buildRuntimeRestoreFlagArgs(inputs) {
@@ -63,7 +63,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         core.info(`cache-hit: ${String(overallHit)}`);
         core.info(`runtime-cache-hit: ${String(runtimeHit)}`);
         core.info(`verify-mode: ${inputs.verify}`);
-        core.info(`token-capabilities: restore=${String((0, action_core_1.hasRestoreToken)())} save=${String((0, action_core_1.hasSaveToken)())} legacy-api-only=${String((0, action_core_1.isUsingLegacyApiTokenOnly)())}`);
+        core.info(`token-capabilities: restore=${String((0, core_1.hasRestoreToken)())} save=${String((0, core_1.hasSaveToken)())} legacy-api-only=${String((0, core_1.isUsingLegacyApiTokenOnly)())}`);
         if (diagnostics.includeLogs) {
             const proxyLogPath = core.getState('proxy-log-path');
             if (proxyLogPath) {
@@ -139,7 +139,7 @@ async function run() {
             ...(modeRestore.verificationSpecs || []),
         ];
         const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
-        const saveCapable = saveEnabled && (0, action_core_1.hasSaveToken)();
+        const saveCapable = saveEnabled && (0, core_1.hasSaveToken)();
         const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
         const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);

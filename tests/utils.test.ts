@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
-import { getMiseInstallsDir } from '@boringcache/action-core';
+import { getMiseInstallsDir } from '../lib/core';
 import {
   applyMiseSetup,
   buildPlan,

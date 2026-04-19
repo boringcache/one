@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.run = run;
 const core = __importStar(require("@actions/core"));
 const fs = __importStar(require("fs"));
-const action_core_1 = require("@boringcache/action-core");
+const core_1 = require("./core");
 const utils_1 = require("./utils");
 const mode_handlers_1 = require("./mode-handlers");
 const MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS = 180;
@@ -221,12 +221,12 @@ async function run() {
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
             return;
         }
-        if (!(0, action_core_1.hasSaveToken)()) {
+        if (!(0, core_1.hasSaveToken)()) {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await (0, mode_handlers_1.runModeSave)(resolvedMode);
             }
             else if (genericEntries) {
-                core.notice(`Save skipped: ${(0, action_core_1.missingSaveTokenMessage)()}`);
+                core.notice(`Save skipped: ${(0, core_1.missingSaveTokenMessage)()}`);
             }
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
             return;

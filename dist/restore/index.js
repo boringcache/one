@@ -8586,1950 +8586,6 @@ exports.AbortSignal = AbortSignal;
 
 /***/ }),
 
-/***/ 89971:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getAuthTokens = getAuthTokens;
-exports.hasRestoreToken = hasRestoreToken;
-exports.hasSaveToken = hasSaveToken;
-exports.isUsingLegacyApiTokenOnly = isUsingLegacyApiTokenOnly;
-exports.warnIfUsingLegacyApiToken = warnIfUsingLegacyApiToken;
-exports.missingRestoreTokenMessage = missingRestoreTokenMessage;
-exports.missingSaveTokenMessage = missingSaveTokenMessage;
-const core = __importStar(__nccwpck_require__(37484));
-let warnedAboutLegacyApiToken = false;
-function getAuthTokens() {
-    const apiToken = process.env.BORINGCACHE_API_TOKEN || undefined;
-    const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || apiToken;
-    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || saveToken;
-    return {
-        restoreToken,
-        saveToken,
-        apiToken,
-    };
-}
-function hasRestoreToken() {
-    return Boolean(getAuthTokens().restoreToken);
-}
-function hasSaveToken() {
-    return Boolean(getAuthTokens().saveToken);
-}
-function isUsingLegacyApiTokenOnly() {
-    return Boolean(process.env.BORINGCACHE_API_TOKEN &&
-        !process.env.BORINGCACHE_RESTORE_TOKEN &&
-        !process.env.BORINGCACHE_SAVE_TOKEN);
-}
-function warnIfUsingLegacyApiToken() {
-    if (warnedAboutLegacyApiToken || !isUsingLegacyApiTokenOnly()) {
-        return;
-    }
-    warnedAboutLegacyApiToken = true;
-    core.notice('Using BORINGCACHE_API_TOKEN as a legacy compatibility fallback. Prefer BORINGCACHE_RESTORE_TOKEN and BORINGCACHE_SAVE_TOKEN for new workflows.');
-}
-function missingRestoreTokenMessage() {
-    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_SAVE_TOKEN, or BORINGCACHE_API_TOKEN.';
-}
-function missingSaveTokenMessage() {
-    return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN or BORINGCACHE_API_TOKEN.';
-}
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiYXV0aC5qcyIsInNvdXJjZVJvb3QiOiIiLCJzb3VyY2VzIjpbIi4uL2xpYi9hdXRoLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7O0FBVUEsc0NBVUM7QUFFRCwwQ0FFQztBQUVELG9DQUVDO0FBRUQsOERBTUM7QUFFRCw4REFTQztBQUVELGdFQUVDO0FBRUQsMERBRUM7QUF2REQsb0RBQXNDO0FBUXRDLElBQUkseUJBQXlCLEdBQUcsS0FBSyxDQUFDO0FBRXRDLFNBQWdCLGFBQWE7SUFDM0IsTUFBTSxRQUFRLEdBQUcsT0FBTyxDQUFDLEdBQUcsQ0FBQyxxQkFBcUIsSUFBSSxTQUFTLENBQUM7SUFDaEUsTUFBTSxTQUFTLEdBQUcsT0FBTyxDQUFDLEdBQUcsQ0FBQyxzQkFBc0IsSUFBSSxRQUFRLENBQUM7SUFDakUsTUFBTSxZQUFZLEdBQUcsT0FBTyxDQUFDLEdBQUcsQ0FBQyx5QkFBeUIsSUFBSSxTQUFTLENBQUM7SUFFeEUsT0FBTztRQUNMLFlBQVk7UUFDWixTQUFTO1FBQ1QsUUFBUTtLQUNULENBQUM7QUFDSixDQUFDO0FBRUQsU0FBZ0IsZUFBZTtJQUM3QixPQUFPLE9BQU8sQ0FBQyxhQUFhLEVBQUUsQ0FBQyxZQUFZLENBQUMsQ0FBQztBQUMvQyxDQUFDO0FBRUQsU0FBZ0IsWUFBWTtJQUMxQixPQUFPLE9BQU8sQ0FBQyxhQUFhLEVBQUUsQ0FBQyxTQUFTLENBQUMsQ0FBQztBQUM1QyxDQUFDO0FBRUQsU0FBZ0IseUJBQXlCO0lBQ3ZDLE9BQU8sT0FBTyxDQUNaLE9BQU8sQ0FBQyxHQUFHLENBQUMscUJBQXFCO1FBQ2pDLENBQUMsT0FBTyxDQUFDLEdBQUcsQ0FBQyx5QkFBeUI7UUFDdEMsQ0FBQyxPQUFPLENBQUMsR0FBRyxDQUFDLHNCQUFzQixDQUNwQyxDQUFDO0FBQ0osQ0FBQztBQUVELFNBQWdCLHlCQUF5QjtJQUN2QyxJQUFJLHlCQUF5QixJQUFJLENBQUMseUJBQXlCLEVBQUUsRUFBRSxDQUFDO1FBQzlELE9BQU87SUFDVCxDQUFDO0lBRUQseUJBQXlCLEdBQUcsSUFBSSxDQUFDO0lBQ2pDLElBQUksQ0FBQyxNQUFNLENBQ1QsZ0pBQWdKLENBQ2pKLENBQUM7QUFDSixDQUFDO0FBRUQsU0FBZ0IsMEJBQTBCO0lBQ3hDLE9BQU8sdUhBQXVILENBQUM7QUFDakksQ0FBQztBQUVELFNBQWdCLHVCQUF1QjtJQUNyQyxPQUFPLHdGQUF3RixDQUFDO0FBQ2xHLENBQUMifQ==
-
-/***/ }),
-
-/***/ 68701:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.readProjectMiseTools = exports.readMiseTomlVersion = exports.readMiseTomlTools = exports.readToolVersionsValue = exports.readToolVersions = exports.exportMiseEnv = exports.reshimMise = exports.activateMiseTool = exports.installMiseTool = exports.installMise = exports.buildMiseRuntimeTag = exports.buildMiseToolTag = exports.scopeMiseToolVersion = exports.slugMiseTagPart = exports.getMiseShimsDir = exports.getMiseInstallsDir = exports.getMiseDataDir = exports.getMiseBinPath = exports.findAvailablePort = exports.stopRegistryProxy = exports.startRegistryProxy = exports.convertCacheFormatToEntries = exports.getInputsWorkspace = exports.getPlatformSuffix = exports.parseEntries = exports.resolvePaths = exports.resolvePath = exports.validateInputs = exports.getCacheConfig = exports.pathExists = exports.getCacheTagPrefix = exports.getWorkspace = exports.missingSaveTokenMessage = exports.missingRestoreTokenMessage = exports.warnIfUsingLegacyApiToken = exports.isUsingLegacyApiTokenOnly = exports.hasSaveToken = exports.hasRestoreToken = exports.getAuthTokens = exports.getToolCacheInfo = exports.isCliAvailable = exports.execBoringCache = exports.ensureBoringCache = void 0;
-var setup_1 = __nccwpck_require__(1576);
-Object.defineProperty(exports, "ensureBoringCache", ({ enumerable: true, get: function () { return setup_1.ensureBoringCache; } }));
-Object.defineProperty(exports, "execBoringCache", ({ enumerable: true, get: function () { return setup_1.execBoringCache; } }));
-Object.defineProperty(exports, "isCliAvailable", ({ enumerable: true, get: function () { return setup_1.isCliAvailable; } }));
-Object.defineProperty(exports, "getToolCacheInfo", ({ enumerable: true, get: function () { return setup_1.getToolCacheInfo; } }));
-var auth_1 = __nccwpck_require__(89971);
-Object.defineProperty(exports, "getAuthTokens", ({ enumerable: true, get: function () { return auth_1.getAuthTokens; } }));
-Object.defineProperty(exports, "hasRestoreToken", ({ enumerable: true, get: function () { return auth_1.hasRestoreToken; } }));
-Object.defineProperty(exports, "hasSaveToken", ({ enumerable: true, get: function () { return auth_1.hasSaveToken; } }));
-Object.defineProperty(exports, "isUsingLegacyApiTokenOnly", ({ enumerable: true, get: function () { return auth_1.isUsingLegacyApiTokenOnly; } }));
-Object.defineProperty(exports, "warnIfUsingLegacyApiToken", ({ enumerable: true, get: function () { return auth_1.warnIfUsingLegacyApiToken; } }));
-Object.defineProperty(exports, "missingRestoreTokenMessage", ({ enumerable: true, get: function () { return auth_1.missingRestoreTokenMessage; } }));
-Object.defineProperty(exports, "missingSaveTokenMessage", ({ enumerable: true, get: function () { return auth_1.missingSaveTokenMessage; } }));
-var workspace_1 = __nccwpck_require__(88084);
-Object.defineProperty(exports, "getWorkspace", ({ enumerable: true, get: function () { return workspace_1.getWorkspace; } }));
-Object.defineProperty(exports, "getCacheTagPrefix", ({ enumerable: true, get: function () { return workspace_1.getCacheTagPrefix; } }));
-Object.defineProperty(exports, "pathExists", ({ enumerable: true, get: function () { return workspace_1.pathExists; } }));
-var inputs_1 = __nccwpck_require__(54696);
-Object.defineProperty(exports, "getCacheConfig", ({ enumerable: true, get: function () { return inputs_1.getCacheConfig; } }));
-Object.defineProperty(exports, "validateInputs", ({ enumerable: true, get: function () { return inputs_1.validateInputs; } }));
-Object.defineProperty(exports, "resolvePath", ({ enumerable: true, get: function () { return inputs_1.resolvePath; } }));
-Object.defineProperty(exports, "resolvePaths", ({ enumerable: true, get: function () { return inputs_1.resolvePaths; } }));
-Object.defineProperty(exports, "parseEntries", ({ enumerable: true, get: function () { return inputs_1.parseEntries; } }));
-Object.defineProperty(exports, "getPlatformSuffix", ({ enumerable: true, get: function () { return inputs_1.getPlatformSuffix; } }));
-Object.defineProperty(exports, "getInputsWorkspace", ({ enumerable: true, get: function () { return inputs_1.getInputsWorkspace; } }));
-Object.defineProperty(exports, "convertCacheFormatToEntries", ({ enumerable: true, get: function () { return inputs_1.convertCacheFormatToEntries; } }));
-var proxy_1 = __nccwpck_require__(74821);
-Object.defineProperty(exports, "startRegistryProxy", ({ enumerable: true, get: function () { return proxy_1.startRegistryProxy; } }));
-Object.defineProperty(exports, "stopRegistryProxy", ({ enumerable: true, get: function () { return proxy_1.stopRegistryProxy; } }));
-Object.defineProperty(exports, "findAvailablePort", ({ enumerable: true, get: function () { return proxy_1.findAvailablePort; } }));
-var mise_1 = __nccwpck_require__(28243);
-Object.defineProperty(exports, "getMiseBinPath", ({ enumerable: true, get: function () { return mise_1.getMiseBinPath; } }));
-Object.defineProperty(exports, "getMiseDataDir", ({ enumerable: true, get: function () { return mise_1.getMiseDataDir; } }));
-Object.defineProperty(exports, "getMiseInstallsDir", ({ enumerable: true, get: function () { return mise_1.getMiseInstallsDir; } }));
-Object.defineProperty(exports, "getMiseShimsDir", ({ enumerable: true, get: function () { return mise_1.getMiseShimsDir; } }));
-Object.defineProperty(exports, "slugMiseTagPart", ({ enumerable: true, get: function () { return mise_1.slugMiseTagPart; } }));
-Object.defineProperty(exports, "scopeMiseToolVersion", ({ enumerable: true, get: function () { return mise_1.scopeMiseToolVersion; } }));
-Object.defineProperty(exports, "buildMiseToolTag", ({ enumerable: true, get: function () { return mise_1.buildMiseToolTag; } }));
-Object.defineProperty(exports, "buildMiseRuntimeTag", ({ enumerable: true, get: function () { return mise_1.buildMiseRuntimeTag; } }));
-Object.defineProperty(exports, "installMise", ({ enumerable: true, get: function () { return mise_1.installMise; } }));
-Object.defineProperty(exports, "installMiseTool", ({ enumerable: true, get: function () { return mise_1.installMiseTool; } }));
-Object.defineProperty(exports, "activateMiseTool", ({ enumerable: true, get: function () { return mise_1.activateMiseTool; } }));
-Object.defineProperty(exports, "reshimMise", ({ enumerable: true, get: function () { return mise_1.reshimMise; } }));
-Object.defineProperty(exports, "exportMiseEnv", ({ enumerable: true, get: function () { return mise_1.exportMiseEnv; } }));
-Object.defineProperty(exports, "readToolVersions", ({ enumerable: true, get: function () { return mise_1.readToolVersions; } }));
-Object.defineProperty(exports, "readToolVersionsValue", ({ enumerable: true, get: function () { return mise_1.readToolVersionsValue; } }));
-Object.defineProperty(exports, "readMiseTomlTools", ({ enumerable: true, get: function () { return mise_1.readMiseTomlTools; } }));
-Object.defineProperty(exports, "readMiseTomlVersion", ({ enumerable: true, get: function () { return mise_1.readMiseTomlVersion; } }));
-Object.defineProperty(exports, "readProjectMiseTools", ({ enumerable: true, get: function () { return mise_1.readProjectMiseTools; } }));
-Object.defineProperty(exports, "hasMiseToolVersion", ({ enumerable: true, get: function () { return mise_1.hasMiseToolVersion; } }));
-Object.defineProperty(exports, "hasToolVersionOnPath", ({ enumerable: true, get: function () { return mise_1.hasToolVersionOnPath; } }));
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiaW5kZXguanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi9saWIvaW5kZXgudHMiXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6Ijs7O0FBQUEsaUNBT2lCO0FBTmYsMEdBQUEsaUJBQWlCLE9BQUE7QUFDakIsd0dBQUEsZUFBZSxPQUFBO0FBQ2YsdUdBQUEsY0FBYyxPQUFBO0FBQ2QseUdBQUEsZ0JBQWdCLE9BQUE7QUFLbEIsK0JBU2dCO0FBUmQscUdBQUEsYUFBYSxPQUFBO0FBQ2IsdUdBQUEsZUFBZSxPQUFBO0FBQ2Ysb0dBQUEsWUFBWSxPQUFBO0FBQ1osaUhBQUEseUJBQXlCLE9BQUE7QUFDekIsaUhBQUEseUJBQXlCLE9BQUE7QUFDekIsa0hBQUEsMEJBQTBCLE9BQUE7QUFDMUIsK0dBQUEsdUJBQXVCLE9BQUE7QUFJekIseUNBSXFCO0FBSG5CLHlHQUFBLFlBQVksT0FBQTtBQUNaLDhHQUFBLGlCQUFpQixPQUFBO0FBQ2pCLHVHQUFBLFVBQVUsT0FBQTtBQUdaLG1DQVdrQjtBQVZoQix3R0FBQSxjQUFjLE9BQUE7QUFDZCx3R0FBQSxjQUFjLE9BQUE7QUFDZCxxR0FBQSxXQUFXLE9BQUE7QUFDWCxzR0FBQSxZQUFZLE9BQUE7QUFDWixzR0FBQSxZQUFZLE9BQUE7QUFDWiwyR0FBQSxpQkFBaUIsT0FBQTtBQUNqQiw0R0FBQSxrQkFBa0IsT0FBQTtBQUNsQixxSEFBQSwyQkFBMkIsT0FBQTtBQUs3QixpQ0FNaUI7QUFMZiwyR0FBQSxrQkFBa0IsT0FBQTtBQUNsQiwwR0FBQSxpQkFBaUIsT0FBQTtBQUNqQiwwR0FBQSxpQkFBaUIsT0FBQTtBQUtuQiwrQkF3QmdCO0FBdkJkLHNHQUFBLGNBQWMsT0FBQTtBQUNkLHNHQUFBLGNBQWMsT0FBQTtBQUNkLDBHQUFBLGtCQUFrQixPQUFBO0FBQ2xCLHVHQUFBLGVBQWUsT0FBQTtBQUNmLHVHQUFBLGVBQWUsT0FBQTtBQUNmLDRHQUFBLG9CQUFvQixPQUFBO0FBQ3BCLHdHQUFBLGdCQUFnQixPQUFBO0FBQ2hCLDJHQUFBLG1CQUFtQixPQUFBO0FBQ25CLG1HQUFBLFdBQVcsT0FBQTtBQUNYLHVHQUFBLGVBQWUsT0FBQTtBQUNmLHdHQUFBLGdCQUFnQixPQUFBO0FBQ2hCLGtHQUFBLFVBQVUsT0FBQTtBQUNWLHFHQUFBLGFBQWEsT0FBQTtBQUNiLHdHQUFBLGdCQUFnQixPQUFBO0FBQ2hCLDZHQUFBLHFCQUFxQixPQUFBO0FBQ3JCLHlHQUFBLGlCQUFpQixPQUFBO0FBQ2pCLDJHQUFBLG1CQUFtQixPQUFBO0FBQ25CLDRHQUFBLG9CQUFvQixPQUFBO0FBQ3BCLDBHQUFBLGtCQUFrQixPQUFBO0FBQ2xCLDRHQUFBLG9CQUFvQixPQUFBIn0=
-
-/***/ }),
-
-/***/ 54696:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getCacheConfig = getCacheConfig;
-exports.validateInputs = validateInputs;
-exports.resolvePath = resolvePath;
-exports.resolvePaths = resolvePaths;
-exports.parseEntries = parseEntries;
-exports.getPlatformSuffix = getPlatformSuffix;
-exports.getInputsWorkspace = getInputsWorkspace;
-exports.convertCacheFormatToEntries = convertCacheFormatToEntries;
-const core = __importStar(__nccwpck_require__(37484));
-const os = __importStar(__nccwpck_require__(70857));
-const path = __importStar(__nccwpck_require__(16928));
-async function getCacheConfig(key, enableCrossOsArchive, noPlatform = false) {
-    let workspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE ||
-        'default/default';
-    if (!workspace.includes('/')) {
-        workspace = `default/${workspace}`;
-    }
-    let platformSuffix = '';
-    if (!noPlatform && !enableCrossOsArchive) {
-        const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
-        const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-        platformSuffix = `-${platform}-${arch}`;
-    }
-    const fullKey = key + platformSuffix;
-    return { workspace, fullKey, platformSuffix };
-}
-function validateInputs(inputs) {
-    const hasCliFormat = inputs.workspace || inputs.entries;
-    const hasCacheFormat = inputs.path || inputs.key;
-    if (!hasCliFormat && !hasCacheFormat) {
-        throw new Error('Either (workspace + entries) or (path + key) inputs are required');
-    }
-    if (hasCliFormat && hasCacheFormat) {
-        core.warning('Both CLI format (workspace/entries) and actions/cache format (path/key) provided. Using CLI format.');
-    }
-    if (hasCliFormat && !inputs.entries) {
-        throw new Error('Input "entries" is required when using CLI format');
-    }
-    if (hasCacheFormat && !hasCliFormat) {
-        if (!inputs.path) {
-            throw new Error('Input "path" is required when using actions/cache format');
-        }
-        if (!inputs.key) {
-            throw new Error('Input "key" is required when using actions/cache format');
-        }
-    }
-    if (inputs.workspace && typeof inputs.workspace === 'string' && !inputs.workspace.includes('/')) {
-        throw new Error('Workspace must be in format "namespace/workspace" (e.g., "my-org/my-project")');
-    }
-}
-function resolvePath(pathInput, baseDir) {
-    const trimmedPath = pathInput.trim();
-    if (path.isAbsolute(trimmedPath)) {
-        return trimmedPath;
-    }
-    if (trimmedPath.startsWith('~/')) {
-        return path.join(os.homedir(), trimmedPath.slice(2));
-    }
-    return path.resolve(baseDir || process.cwd(), trimmedPath);
-}
-function resolvePaths(pathInput, baseDir) {
-    return pathInput
-        .split('\n')
-        .map(p => p.trim())
-        .filter(p => p)
-        .map(p => resolvePath(p, baseDir))
-        .join('\n');
-}
-function parseEntries(entriesInput, _action, options = {}) {
-    const shouldResolve = options.resolvePaths ?? true;
-    const baseDir = options.baseDir;
-    return entriesInput
-        .split(/\r?\n|,/)
-        .map(entry => entry.trim())
-        .filter(entry => entry)
-        .map(entry => {
-        const colonIndex = entry.indexOf(':');
-        if (colonIndex === -1) {
-            throw new Error(`Invalid entry format: ${entry}. Expected format: tag:path or tag:restore_path=>save_path`);
-        }
-        const tag = entry.substring(0, colonIndex).trim();
-        const pathSpec = entry.substring(colonIndex + 1).trim();
-        if (!tag) {
-            throw new Error(`Invalid entry format: ${entry}. Tag cannot be empty`);
-        }
-        let restorePathInput = pathSpec;
-        let savePathInput = pathSpec;
-        const redirectIndex = pathSpec.indexOf('=>');
-        if (redirectIndex !== -1) {
-            restorePathInput = pathSpec.substring(0, redirectIndex).trim();
-            savePathInput = pathSpec.substring(redirectIndex + 2).trim();
-            if (!restorePathInput || !savePathInput) {
-                throw new Error(`Invalid entry format: ${entry}. Expected restore and save paths when using => syntax`);
-            }
-        }
-        const restorePath = shouldResolve ? resolvePath(restorePathInput, baseDir) : restorePathInput;
-        const savePath = shouldResolve ? resolvePath(savePathInput, baseDir) : savePathInput;
-        return { tag, restorePath, savePath };
-    });
-}
-function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
-    if (noPlatform || enableCrossOsArchive) {
-        return '';
-    }
-    const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
-    const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-    return `-${platform}-${arch}`;
-}
-/**
- * Get workspace from action inputs (Record-based).
- * Used by the generic action/save/restore actions.
- * NOTE: This is different from workspace.ts getWorkspace which takes a string.
- */
-function getInputsWorkspace(inputs) {
-    if (inputs.workspace && typeof inputs.workspace === 'string') {
-        return inputs.workspace;
-    }
-    const defaultWorkspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE;
-    if (defaultWorkspace) {
-        return defaultWorkspace.includes('/') ? defaultWorkspace : `default/${defaultWorkspace}`;
-    }
-    return 'default/default';
-}
-function convertCacheFormatToEntries(inputs, _action) {
-    if (!inputs.path || !inputs.key) {
-        throw new Error('actions/cache format requires both path and key inputs');
-    }
-    const pathInput = inputs.path;
-    const keyInput = inputs.key;
-    const noPlatformInput = inputs.noPlatform;
-    const enableCrossOsArchiveInput = inputs.enableCrossOsArchive;
-    const workingDirectoryInput = inputs.workingDirectory;
-    const baseDir = workingDirectoryInput?.trim() || undefined;
-    const paths = pathInput
-        .split('\n')
-        .map(p => p.trim())
-        .filter(p => p);
-    const shouldDisablePlatform = noPlatformInput || enableCrossOsArchiveInput || false;
-    const platformSuffix = getPlatformSuffix(shouldDisablePlatform, enableCrossOsArchiveInput || false);
-    const fullKey = keyInput + platformSuffix;
-    return paths.map(p => `${fullKey}:${resolvePath(p, baseDir)}`).join(',');
-}
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiaW5wdXRzLmpzIiwic291cmNlUm9vdCI6IiIsInNvdXJjZXMiOlsiLi4vbGliL2lucHV0cy50cyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7OztBQXFCQSx3Q0F1QkM7QUFFRCx3Q0E0QkM7QUFFRCxrQ0FZQztBQUVELG9DQU9DO0FBRUQsb0NBNENDO0FBRUQsOENBUUM7QUFPRCxnREFXQztBQUVELGtFQXlCQztBQXRNRCxvREFBc0M7QUFDdEMsdUNBQXlCO0FBQ3pCLDJDQUE2QjtBQW1CdEIsS0FBSyxVQUFVLGNBQWMsQ0FDbEMsR0FBVyxFQUNYLG9CQUE2QixFQUM3QixhQUFzQixLQUFLO0lBRTNCLElBQUksU0FBUyxHQUNYLE9BQU8sQ0FBQyxHQUFHLENBQUMsNkJBQTZCO1FBQ3pDLGlCQUFpQixDQUFDO0lBRXBCLElBQUksQ0FBQyxTQUFTLENBQUMsUUFBUSxDQUFDLEdBQUcsQ0FBQyxFQUFFLENBQUM7UUFDN0IsU0FBUyxHQUFHLFdBQVcsU0FBUyxFQUFFLENBQUM7SUFDckMsQ0FBQztJQUVELElBQUksY0FBYyxHQUFHLEVBQUUsQ0FBQztJQUN4QixJQUFJLENBQUMsVUFBVSxJQUFJLENBQUMsb0JBQW9CLEVBQUUsQ0FBQztRQUN6QyxNQUFNLFFBQVEsR0FBRyxFQUFFLENBQUMsUUFBUSxFQUFFLEtBQUssUUFBUSxDQUFDLENBQUMsQ0FBQyxRQUFRLENBQUMsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxRQUFRLEVBQUUsS0FBSyxPQUFPLENBQUMsQ0FBQyxDQUFDLFNBQVMsQ0FBQyxDQUFDLENBQUMsT0FBTyxDQUFDO1FBQ3pHLE1BQU0sSUFBSSxHQUFHLEVBQUUsQ0FBQyxJQUFJLEVBQUUsS0FBSyxPQUFPLENBQUMsQ0FBQyxDQUFDLE9BQU8sQ0FBQyxDQUFDLENBQUMsT0FBTyxDQUFDO1FBQ3ZELGNBQWMsR0FBRyxJQUFJLFFBQVEsSUFBSSxJQUFJLEVBQUUsQ0FBQztJQUMxQyxDQUFDO0lBRUQsTUFB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
-
-/***/ }),
-
-/***/ 28243:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getMiseBinPath = getMiseBinPath;
-exports.getMiseDataDir = getMiseDataDir;
-exports.getMiseInstallsDir = getMiseInstallsDir;
-exports.getMiseShimsDir = getMiseShimsDir;
-exports.slugMiseTagPart = slugMiseTagPart;
-exports.scopeMiseToolVersion = scopeMiseToolVersion;
-exports.buildMiseToolTag = buildMiseToolTag;
-exports.buildMiseRuntimeTag = buildMiseRuntimeTag;
-exports.hasMiseToolVersion = hasMiseToolVersion;
-exports.hasToolVersionOnPath = hasToolVersionOnPath;
-exports.installMise = installMise;
-exports.installMiseTool = installMiseTool;
-exports.activateMiseTool = activateMiseTool;
-exports.reshimMise = reshimMise;
-exports.exportMiseEnv = exportMiseEnv;
-exports.readToolVersions = readToolVersions;
-exports.readToolVersionsValue = readToolVersionsValue;
-exports.readMiseTomlTools = readMiseTomlTools;
-exports.readMiseTomlVersion = readMiseTomlVersion;
-exports.readProjectMiseTools = readProjectMiseTools;
-const core = __importStar(__nccwpck_require__(37484));
-const exec = __importStar(__nccwpck_require__(95236));
-const cache = __importStar(__nccwpck_require__(5116));
-const crypto = __importStar(__nccwpck_require__(76982));
-const fs = __importStar(__nccwpck_require__(79896));
-const os = __importStar(__nccwpck_require__(70857));
-const path = __importStar(__nccwpck_require__(16928));
-const tc = __importStar(__nccwpck_require__(33472));
-const isWindows = process.platform === 'win32';
-const MISE_TOOL_NAME = 'mise';
-const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
-const DEFAULT_MISE_VERSION = 'v2026.3.8';
-function getMiseBinPath() {
-    const homedir = os.homedir();
-    return isWindows
-        ? path.join(homedir, '.local', 'bin', 'mise.exe')
-        : path.join(homedir, '.local', 'bin', 'mise');
-}
-function getMiseDataDir() {
-    if (isWindows) {
-        return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'mise');
-    }
-    return path.join(os.homedir(), '.local', 'share', 'mise');
-}
-function getMiseInstallsDir() {
-    return process.env.MISE_INSTALLS_DIR || path.join(getMiseDataDir(), 'installs');
-}
-function getMiseShimsDir() {
-    return path.join(getMiseDataDir(), 'shims');
-}
-function slugMiseTagPart(value) {
-    const normalized = value
-        .trim()
-        .toLowerCase()
-        .replace(/^v(?=\d)/, '')
-        .replace(/[^a-z0-9._-]+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^[.-]+|[.-]+$/g, '');
-    return normalized || 'unknown';
-}
-function scopeMiseToolVersion(version, scope = 'patch') {
-    const normalized = version.trim().replace(/^v(?=\d)/, '');
-    const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
-    if (!match) {
-        return slugMiseTagPart(normalized);
-    }
-    const [, major, minor, patch] = match;
-    if (scope === 'major' || !minor) {
-        return major;
-    }
-    if (scope === 'minor' || !patch) {
-        return `${major}.${minor}`;
-    }
-    return `${major}.${minor}.${patch}`;
-}
-function buildMiseToolTag(tools, scope = 'patch') {
-    return tools
-        .map((tool) => `${slugMiseTagPart(tool.name)}-${slugMiseTagPart(scopeMiseToolVersion(tool.version, scope))}`)
-        .sort()
-        .join('-');
-}
-function buildMiseRuntimeTag(prefix, tools, scope = 'patch') {
-    const toolTag = buildMiseToolTag(tools, scope);
-    if (!toolTag) {
-        return slugMiseTagPart(prefix);
-    }
-    return `${slugMiseTagPart(prefix)}-mise-${toolTag}`;
-}
-async function hasMiseToolVersion(toolName, version) {
-    const normalizedTool = normalizeToolName(toolName);
-    let output = '';
-    const exitCode = await exec.exec(getMiseBinPath(), ['ls', normalizedTool, '--installed', '--json'], {
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0 || !output.trim()) {
-        return false;
-    }
-    let entries;
-    try {
-        const parsed = JSON.parse(output);
-        if (Array.isArray(parsed)) {
-            entries = parsed;
-        }
-        else if (Array.isArray(parsed?.versions)) {
-            entries = parsed.versions;
-        }
-        else {
-            return false;
-        }
-    }
-    catch {
-        return false;
-    }
-    return entries.some((entry) => entry.installed !== false && isMatchingToolVersion(version, entry.version || ''));
-}
-async function hasToolVersionOnPath(toolName, version) {
-    const normalizedTool = normalizeToolName(toolName);
-    const probes = getToolVersionProbes(normalizedTool);
-    for (const probe of probes) {
-        const detectedVersion = await detectToolVersion(probe);
-        if (detectedVersion && isMatchingToolVersion(version, detectedVersion)) {
-            return true;
-        }
-    }
-    return false;
-}
-async function installMise() {
-    const version = getMiseVersion();
-    const normalizedVersion = version.replace(/^v/, '');
-    const platform = getMisePlatformInfo();
-    const cacheInfo = getMiseToolCacheInfo(version, platform);
-    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
-    const cachePaths = [`${toolCacheRoot}/${MISE_TOOL_NAME}`];
-    let restoredFromCache = false;
-    try {
-        const cacheKey = await cache.restoreCache(cachePaths, cacheInfo.cacheKey);
-        if (cacheKey) {
-            core.info(`Restored mise from cache (key: ${cacheKey})`);
-            restoredFromCache = true;
-        }
-    }
-    catch (error) {
-        core.debug(`mise cache restore failed: ${error instanceof Error ? error.message : error}`);
-    }
-    let toolPath = tc.find(MISE_TOOL_NAME, normalizedVersion);
-    if (toolPath) {
-        core.info(`Using cached mise ${version}`);
-    }
-    else {
-        core.info(`Installing mise ${version}...`);
-        toolPath = await downloadAndInstallMise(version, platform);
-        try {
-            await cache.saveCache(cachePaths, cacheInfo.cacheKey);
-            core.info(`Saved mise to cache (key: ${cacheInfo.cacheKey})`);
-        }
-        catch (error) {
-            core.debug(`mise cache save failed: ${error instanceof Error ? error.message : error}`);
-        }
-    }
-    if (!toolPath) {
-        throw new Error(`Failed to install mise ${version}`);
-    }
-    if (restoredFromCache && !tc.find(MISE_TOOL_NAME, normalizedVersion)) {
-        core.debug(`mise cache restored but tool cache lookup for ${version} remained empty`);
-    }
-    await materializeMiseBinary(toolPath, platform);
-    core.addPath(toolPath);
-    core.addPath(path.dirname(getMiseBinPath()));
-    core.addPath(getMiseShimsDir());
-    core.info(`mise ${version} ready`);
-}
-function getMiseVersion() {
-    const value = process.env.MISE_VERSION || DEFAULT_MISE_VERSION;
-    return value.startsWith('v') ? value : `v${value}`;
-}
-function getMisePlatformInfo() {
-    const runnerOS = process.env.RUNNER_OS || os.platform();
-    const runnerArch = process.env.RUNNER_ARCH || os.arch();
-    const osName = normalizeRunnerOs(runnerOS);
-    const arch = normalizeRunnerArch(runnerArch);
-    const version = getMiseVersion();
-    if (osName === 'windows') {
-        return {
-            os: osName,
-            arch,
-            assetName: `mise-${version}-windows-${arch}.zip`,
-            binaryName: 'mise.exe',
-            isWindows: true,
-        };
-    }
-    return {
-        os: osName,
-        arch,
-        assetName: `mise-${version}-${osName}-${arch}`,
-        binaryName: 'mise',
-        isWindows: false,
-    };
-}
-function normalizeRunnerOs(value) {
-    const normalized = value.toLowerCase();
-    if (normalized === 'darwin' || normalized === 'macos') {
-        return 'macos';
-    }
-    if (normalized === 'win32' || normalized === 'windows') {
-        return 'windows';
-    }
-    if (normalized === 'linux') {
-        return 'linux';
-    }
-    throw new Error(`Unsupported platform for mise: OS=${value}`);
-}
-function normalizeRunnerArch(value) {
-    const normalized = value.toLowerCase();
-    if (normalized === 'x64' || normalized === 'amd64') {
-        return 'x64';
-    }
-    if (normalized === 'arm64' || normalized === 'aarch64') {
-        return 'arm64';
-    }
-    throw new Error(`Unsupported architecture for mise: ARCH=${value}`);
-}
-function getMiseToolCacheInfo(version, platform) {
-    const normalizedVersion = version.replace(/^v/, '');
-    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
-    return {
-        cacheKey: `${MISE_TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.arch}`,
-        cachePattern: `${toolCacheRoot}/${MISE_TOOL_NAME}/${normalizedVersion}*`,
-    };
-}
-function getMiseDownloadUrl(version, assetName) {
-    return `${MISE_RELEASES_BASE}/${version}/${assetName}`;
-}
-function getMiseChecksumsUrl(version) {
-    return `${MISE_RELEASES_BASE}/${version}/SHASUMS256.txt`;
-}
-async function computeFileHash(filePath) {
-    const fileBuffer = await fs.promises.readFile(filePath);
-    const hashSum = crypto.createHash('sha256');
-    hashSum.update(fileBuffer);
-    return hashSum.digest('hex');
-}
-function parseChecksums(content, assetName) {
-    for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-            continue;
-        }
-        const match = trimmed.match(/^([a-f0-9]{64})\s+(.+)$/i);
-        if (!match) {
-            continue;
-        }
-        const [, hash, filename] = match;
-        if (filename === assetName || filename.endsWith(`/${assetName}`)) {
-            return hash.toLowerCase();
-        }
-    }
-    return null;
-}
-async function getExpectedChecksum(version, assetName) {
-    const checksumsPath = await tc.downloadTool(getMiseChecksumsUrl(version));
-    const content = await fs.promises.readFile(checksumsPath, 'utf-8');
-    const checksum = parseChecksums(content, assetName);
-    if (!checksum) {
-        throw new Error(`Checksum not found for mise asset: ${assetName}`);
-    }
-    return checksum;
-}
-async function verifyChecksum(filePath, expectedChecksum, assetName) {
-    const actualChecksum = await computeFileHash(filePath);
-    if (actualChecksum !== expectedChecksum) {
-        throw new Error(`Checksum verification failed for ${assetName}:\n` +
-            `  Expected: ${expectedChecksum}\n` +
-            `  Actual:   ${actualChecksum}`);
-    }
-}
-async function downloadAndInstallMise(version, platform) {
-    const downloadUrl = getMiseDownloadUrl(version, platform.assetName);
-    core.info(`Downloading mise from: ${downloadUrl}`);
-    const downloadedPath = await tc.downloadTool(downloadUrl);
-    const expectedChecksum = await getExpectedChecksum(version, platform.assetName);
-    await verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
-    const installDir = path.join(os.tmpdir(), 'mise-install', version.replace(/^v/, ''));
-    await fs.promises.mkdir(installDir, { recursive: true });
-    const binaryPath = path.join(installDir, platform.binaryName);
-    if (platform.isWindows) {
-        const extractedPath = await tc.extractZip(downloadedPath);
-        const extractedBinary = await findMiseBinary(extractedPath, platform.binaryName);
-        await fs.promises.copyFile(extractedBinary, binaryPath);
-    }
-    else {
-        await fs.promises.copyFile(downloadedPath, binaryPath);
-        await fs.promises.chmod(binaryPath, 0o755);
-    }
-    return tc.cacheDir(installDir, MISE_TOOL_NAME, version.replace(/^v/, ''));
-}
-async function materializeMiseBinary(toolPath, platform) {
-    const sourceBinary = path.join(toolPath, platform.binaryName);
-    const targetBinary = getMiseBinPath();
-    await fs.promises.mkdir(path.dirname(targetBinary), { recursive: true });
-    await fs.promises.copyFile(sourceBinary, targetBinary);
-    if (!platform.isWindows) {
-        await fs.promises.chmod(targetBinary, 0o755);
-    }
-}
-async function findMiseBinary(extractedPath, binaryName) {
-    const candidates = [
-        path.join(extractedPath, 'mise', 'bin', binaryName),
-        path.join(extractedPath, 'bin', binaryName),
-        path.join(extractedPath, binaryName),
-    ];
-    for (const candidate of candidates) {
-        try {
-            await fs.promises.access(candidate);
-            return candidate;
-        }
-        catch {
-            continue;
-        }
-    }
-    throw new Error(`Unable to locate ${binaryName} in extracted mise archive`);
-}
-async function installMiseTool(toolName, version, options = {}) {
-    const spec = `${toolName}@${version}`;
-    const label = options.label || toolName;
-    const global = options.global ?? true;
-    core.info(`Installing ${label} ${version} via mise...`);
-    await exec.exec(getMiseBinPath(), ['install', spec], { env: options.env });
-    await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
-}
-function normalizeToolVersion(value) {
-    return value.trim().replace(/^v(?=\d)/, '');
-}
-function isMatchingToolVersion(requested, candidate) {
-    const normalizedRequested = normalizeToolVersion(requested);
-    const normalizedCandidate = normalizeToolVersion(candidate);
-    if (!normalizedRequested || !normalizedCandidate) {
-        return false;
-    }
-    const requestedParts = extractNumericVersionParts(normalizedRequested);
-    const candidateParts = extractNumericVersionParts(normalizedCandidate);
-    if (requestedParts.length > 0 || candidateParts.length > 0) {
-        if (requestedParts.length === 0 || requestedParts.length > candidateParts.length) {
-            return false;
-        }
-        return requestedParts.every((part, index) => part === candidateParts[index]);
-    }
-    return slugMiseTagPart(normalizedRequested) === slugMiseTagPart(normalizedCandidate);
-}
-function extractNumericVersionParts(value) {
-    const baseVersion = normalizeToolVersion(value).split('+')[0].trim();
-    const numericPrefix = baseVersion.match(/^\d+(?:\.\d+)*/)?.[0];
-    if (!numericPrefix) {
-        return [];
-    }
-    return numericPrefix
-        .split('.')
-        .map(normalizeVersionSegment)
-        .filter(Boolean);
-}
-function normalizeVersionSegment(value) {
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return '';
-    }
-    const numericMatch = trimmed.match(/^\d+/);
-    return numericMatch ? numericMatch[0] : trimmed;
-}
-async function detectToolVersion(probe) {
-    let stdout = '';
-    let stderr = '';
-    let exitCode;
-    try {
-        exitCode = await exec.exec(probe.command, probe.args, {
-            ignoreReturnCode: true,
-            silent: true,
-            listeners: {
-                stdout: (data) => {
-                    stdout += data.toString();
-                },
-                stderr: (data) => {
-                    stderr += data.toString();
-                },
-            },
-        });
-    }
-    catch (error) {
-        core.debug(`Skipping PATH probe for ${probe.command}: ${error instanceof Error ? error.message : String(error)}`);
-        return null;
-    }
-    if (exitCode !== 0) {
-        return null;
-    }
-    const output = probe.stream === 'stderr'
-        ? stderr
-        : probe.stream === 'combined'
-            ? `${stdout}\n${stderr}`
-            : stdout;
-    return extractVersionFromOutput(output, probe.versionPattern);
-}
-function extractVersionFromOutput(output, versionPattern) {
-    const pattern = versionPattern || /\bv?(\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?)\b/;
-    const match = output.match(pattern);
-    if (!match) {
-        return null;
-    }
-    return match[1] || match[0] || null;
-}
-function getToolVersionProbes(toolName) {
-    switch (toolName) {
-        case 'bazel':
-            return [
-                { command: 'bazel', args: ['--version'], versionPattern: /bazel\s+([0-9A-Za-z.+-]+)/i },
-                { command: 'bazelisk', args: ['version'], versionPattern: /Build label:\s*([0-9A-Za-z.+-]+)/i, stream: 'combined' },
-            ];
-        case 'bun':
-            return [{ command: 'bun', args: ['--version'] }];
-        case 'elixir':
-            return [{ command: 'elixir', args: ['--version'], versionPattern: /Elixir\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
-        case 'erlang':
-            return [{
-                    command: 'erl',
-                    args: ['-noshell', '-eval', 'io:format("~s", [erlang:system_info(otp_release)]), halt().'],
-                }];
-        case 'go':
-            return [{ command: 'go', args: ['version'], versionPattern: /go version go([0-9A-Za-z.+-]+)/i }];
-        case 'gradle':
-            return [{ command: 'gradle', args: ['--version'], versionPattern: /Gradle\s+([0-9A-Za-z.+-]+)/i }];
-        case 'java':
-            return [{ command: 'java', args: ['-version'], versionPattern: /version\s+"([0-9A-Za-z.+-]+)"/i, stream: 'stderr' }];
-        case 'maven':
-            return [{ command: 'mvn', args: ['--version'], versionPattern: /Apache Maven\s+([0-9A-Za-z.+-]+)/i }];
-        case 'node':
-            return [{ command: 'node', args: ['--version'] }];
-        case 'npm':
-            return [{ command: 'npm', args: ['--version'] }];
-        case 'pnpm':
-            return [{ command: 'pnpm', args: ['--version'] }];
-        case 'composer':
-            return [{ command: 'composer', args: ['--version'], versionPattern: /Composer version\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
-        case 'php':
-            return [{ command: 'php', args: ['--version'], versionPattern: /PHP\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
-        case 'python':
-            return [
-                { command: 'python3', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
-                { command: 'python', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
-            ];
-        case 'ruby':
-            return [{ command: 'ruby', args: ['--version'], versionPattern: /ruby\s+([0-9A-Za-z.+-]+)/i }];
-        case 'rust':
-            return [{ command: 'rustc', args: ['--version'], versionPattern: /rustc\s+([0-9A-Za-z.+-]+)/i }];
-        case 'sccache':
-            return [{ command: 'sccache', args: ['--version'], versionPattern: /sccache\s+([0-9A-Za-z.+-]+)/i }];
-        case 'turbo':
-            return [{ command: 'turbo', args: ['--version'] }];
-        case 'uv':
-            return [{ command: 'uv', args: ['--version'] }];
-        case 'yarn':
-            return [{ command: 'yarn', args: ['--version'] }];
-        default:
-            return [];
-    }
-}
-async function activateMiseTool(toolName, version, options = {}) {
-    const spec = `${toolName}@${version}`;
-    const label = options.label || toolName;
-    const global = options.global ?? true;
-    core.info(`Activating ${label} ${version}...`);
-    await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
-}
-async function reshimMise(force = true) {
-    const args = force ? ['reshim', '-f'] : ['reshim'];
-    core.info('Refreshing mise shims...');
-    await exec.exec(getMiseBinPath(), args);
-}
-async function exportMiseEnv(cwd) {
-    core.info('Exporting mise environment...');
-    const envVars = await readMiseEnvJson(cwd);
-    if (envVars) {
-        for (const [key, value] of Object.entries(envVars)) {
-            if (typeof value === 'string') {
-                core.exportVariable(key, value);
-            }
-        }
-        return;
-    }
-    const dotenv = await readMiseEnvDotenv(cwd);
-    for (const [key, value] of parseDotenvLines(dotenv)) {
-        core.exportVariable(key, value);
-    }
-}
-function buildUseArgs(spec, global) {
-    return global ? ['use', '-g', spec] : ['use', spec];
-}
-async function readMiseEnvJson(cwd) {
-    let output = '';
-    const exitCode = await exec.exec(getMiseBinPath(), ['env', '--json'], {
-        cwd,
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0 || !output.trim()) {
-        return null;
-    }
-    try {
-        const parsed = JSON.parse(output);
-        return Object.fromEntries(Object.entries(parsed).filter((entry) => typeof entry[1] === 'string'));
-    }
-    catch {
-        return null;
-    }
-}
-async function readMiseEnvDotenv(cwd) {
-    let output = '';
-    const exitCode = await exec.exec(getMiseBinPath(), ['env', '--dotenv'], {
-        cwd,
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0) {
-        throw new Error('Failed to export mise environment');
-    }
-    return output;
-}
-function parseDotenvLines(content) {
-    const entries = [];
-    for (const rawLine of content.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith('#')) {
-            continue;
-        }
-        const separatorIndex = line.indexOf('=');
-        if (separatorIndex <= 0) {
-            continue;
-        }
-        const key = line.slice(0, separatorIndex).trim();
-        const rawValue = line.slice(separatorIndex + 1).trim();
-        const value = rawValue.replace(/^['"]|['"]$/g, '');
-        if (key) {
-            entries.push([key, value]);
-        }
-    }
-    return entries;
-}
-async function readToolVersions(workingDir) {
-    const toolVersionsPath = path.join(workingDir, '.tool-versions');
-    try {
-        const content = await fs.promises.readFile(toolVersionsPath, 'utf-8');
-        const tools = new Map();
-        for (const rawLine of content.split(/\r?\n/)) {
-            const line = stripTomlComment(rawLine).trim();
-            if (!line) {
-                continue;
-            }
-            const [toolName, version] = line.split(/\s+/, 3);
-            if (!toolName || !version) {
-                continue;
-            }
-            tools.set(normalizeToolName(toolName), version.trim());
-        }
-        return Array.from(tools, ([name, version]) => ({ name, version }));
-    }
-    catch {
-        return [];
-    }
-}
-async function readToolVersionsValue(workingDir, toolName) {
-    const normalizedToolName = normalizeToolName(toolName);
-    const tools = await readToolVersions(workingDir);
-    return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
-}
-async function readMiseTomlTools(workingDir) {
-    const miseToml = path.join(workingDir, 'mise.toml');
-    try {
-        const content = await fs.promises.readFile(miseToml, 'utf-8');
-        const toolsBlock = extractToolsBlock(content);
-        if (!toolsBlock) {
-            return [];
-        }
-        const tools = new Map();
-        const lines = toolsBlock.split(/\r?\n/);
-        for (let index = 0; index < lines.length; index += 1) {
-            const parsedLine = stripTomlComment(lines[index]).trim();
-            if (!parsedLine) {
-                continue;
-            }
-            const assignmentMatch = parsedLine.match(/^([A-Za-z0-9._-]+)\s*=\s*(.+)$/);
-            if (!assignmentMatch) {
-                continue;
-            }
-            const [, rawToolName, rawValue] = assignmentMatch;
-            const toolName = normalizeToolName(rawToolName);
-            const value = rawValue.trim();
-            const stringVersion = value.match(/^["']([^"']+)["']$/);
-            if (stringVersion?.[1]) {
-                tools.set(toolName, stringVersion[1]);
-                continue;
-            }
-            const inlineVersion = extractInlineTableVersion(value);
-            if (inlineVersion) {
-                tools.set(toolName, inlineVersion);
-                continue;
-            }
-            if (value.startsWith('{')) {
-                let blockValue = value;
-                let braceDepth = countBraceDelta(value);
-                while (braceDepth > 0 && index + 1 < lines.length) {
-                    index += 1;
-                    const nextLine = stripTomlComment(lines[index]).trim();
-                    blockValue = `${blockValue}\n${nextLine}`;
-                    braceDepth += countBraceDelta(nextLine);
-                }
-                const blockVersion = extractInlineTableVersion(blockValue);
-                if (blockVersion) {
-                    tools.set(toolName, blockVersion);
-                }
-            }
-        }
-        return Array.from(tools, ([name, version]) => ({ name, version }));
-    }
-    catch {
-        return [];
-    }
-}
-async function readMiseTomlVersion(workingDir, toolName) {
-    const normalizedToolName = normalizeToolName(toolName);
-    const tools = await readMiseTomlTools(workingDir);
-    return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
-}
-async function readProjectMiseTools(workingDir) {
-    const toolVersions = await readToolVersions(workingDir);
-    const miseTomlTools = await readMiseTomlTools(workingDir);
-    const merged = new Map();
-    for (const tool of toolVersions) {
-        merged.set(tool.name, tool.version);
-    }
-    for (const tool of miseTomlTools) {
-        merged.set(tool.name, tool.version);
-    }
-    return Array.from(merged, ([name, version]) => ({ name, version }));
-}
-function extractToolsBlock(content) {
-    const lines = content.split(/\r?\n/);
-    const block = [];
-    let inToolsBlock = false;
-    for (const rawLine of lines) {
-        const line = stripTomlComment(rawLine).trim();
-        if (!inToolsBlock) {
-            if (line === '[tools]') {
-                inToolsBlock = true;
-            }
-            continue;
-        }
-        if (line.startsWith('[') && line.endsWith(']')) {
-            break;
-        }
-        block.push(rawLine);
-    }
-    return inToolsBlock ? block.join('\n') : null;
-}
-function extractInlineTableVersion(value) {
-    const versionMatch = value.match(/\bversion\s*=\s*["']([^"']+)["']/);
-    return versionMatch?.[1] || null;
-}
-function countBraceDelta(value) {
-    let delta = 0;
-    let inSingleQuote = false;
-    let inDoubleQuote = false;
-    let isEscaped = false;
-    for (const character of value) {
-        if (isEscaped) {
-            isEscaped = false;
-            continue;
-        }
-        if (character === '\\' && inDoubleQuote) {
-            isEscaped = true;
-            continue;
-        }
-        if (!inDoubleQuote && character === '\'') {
-            inSingleQuote = !inSingleQuote;
-            continue;
-        }
-        if (!inSingleQuote && character === '"') {
-            inDoubleQuote = !inDoubleQuote;
-            continue;
-        }
-        if (inSingleQuote || inDoubleQuote) {
-            continue;
-        }
-        if (character === '{') {
-            delta += 1;
-        }
-        else if (character === '}') {
-            delta -= 1;
-        }
-    }
-    return delta;
-}
-function stripTomlComment(value) {
-    let result = '';
-    let inSingleQuote = false;
-    let inDoubleQuote = false;
-    let isEscaped = false;
-    for (const character of value) {
-        if (isEscaped) {
-            result += character;
-            isEscaped = false;
-            continue;
-        }
-        if (character === '\\' && inDoubleQuote) {
-            result += character;
-            isEscaped = true;
-            continue;
-        }
-        if (!inDoubleQuote && character === '\'') {
-            inSingleQuote = !inSingleQuote;
-            result += character;
-            continue;
-        }
-        if (!inSingleQuote && character === '"') {
-            inDoubleQuote = !inDoubleQuote;
-            result += character;
-            continue;
-        }
-        if (!inSingleQuote && !inDoubleQuote && character === '#') {
-            break;
-        }
-        result += character;
-    }
-    return result;
-}
-function normalizeToolName(value) {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'nodejs') {
-        return 'node';
-    }
-    if (normalized === 'golang') {
-        return 'go';
-    }
-    return normalized;
-}
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoibWlzZS5qcyIsInNvdXJjZVJvb3QiOiIiLCJzb3VyY2VzIjpbIi4uL2xpYi9taXNlLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7O0FBK0NBLHdDQUtDO0FBRUQsd0NBS0M7QUFFRCxnREFFQztBQUVELDBDQUVDO0FBRUQsMENBVUM7QUFFRCxvREFnQkM7QUFFRCw0Q0FRQztBQUVELGtEQVVDO0FBRUQsZ0RBcUNDO0FBRUQsb0RBWUM7QUFFRCxrQ0ErQ0M7QUEwTEQsMENBWUM7QUFpS0QsNENBV0M7QUFFRCxnQ0FJQztBQUVELHNDQWlCQztBQXdGRCw0Q0F5QkM7QUFFRCxzREFJQztBQUVELDhDQThEQztBQUVELGtEQUlDO0FBRUQsb0RBY0M7QUFyekJELG9EQUFzQztBQUN0QyxvREFBc0M7QUFDdEMsc0RBQXdDO0FBQ3hDLCtDQUFpQztBQUNqQyx1Q0FBeUI7QUFDekIsdUNBQXlCO0FBQ3pCLDJDQUE2QjtBQUM3Qix3REFBMEM7QUFFMUMsTUFBTSxTQUFTLEdBQUcsT0FBTyxDQUFDLFFBQVEsS0FBSyxPQUFPLENBQUM7QUFDL0MsTUFBTSxjQUFjLEdBQUcsTUFBTSxDQUFDO0FBQzlCLE1BQU0sa0JBQWtCLEdBQUcsK0NBQStDLENBQUM7QUFDM0UsTUFBTSxvQkFBb0IsR0FBRyxXQUFXLENBQUM7QUFtQ3pDLFNBQWdCLGNBQWM7SUFDNUIsTUFBTSxPQUFPLEdBQUcsRUFBRSxDQUFDLE9BQU8sRUFBRSxDQUFDO0lBQzdCLE9BQU8sU0FBUztRQUNkLENBQUMsQ0FBQyxJQUFJLENBQUMsSUFBSSxDQUFDLE9BQU8sRUFBRSxRQUFRLEVBQUUsS0FBSyxFQUFFLFVBQVUsQ0FBQztRQUNqRCxDQUFDLENBQUMsSUFBSSxDQUFDLElBQUksQ0FBQyxPQUFPLEVBQUUsUUFBUSxFQUFFLEtBQUssRUFBRSxNQUFNLENBQUMsQ0FBQztBQUNsRCxDQUFDO0FBRUQsU0FBZ0IsY0FBYztJQUM1QixJQUFJLFNBQVMsRUFB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
-
-/***/ }),
-
-/***/ 74821:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.normalizeProxyTags = normalizeProxyTags;
-exports.startRegistryProxy = startRegistryProxy;
-exports.stopRegistryProxy = stopRegistryProxy;
-exports.findAvailablePort = findAvailablePort;
-const core = __importStar(__nccwpck_require__(37484));
-const fs = __importStar(__nccwpck_require__(79896));
-const net = __importStar(__nccwpck_require__(69278));
-const os = __importStar(__nccwpck_require__(70857));
-const path = __importStar(__nccwpck_require__(16928));
-const child_process_1 = __nccwpck_require__(35317);
-const auth_1 = __nccwpck_require__(89971);
-const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
-const PROXY_READY_TIMEOUT_MS = 300000;
-const PROXY_READY_POLL_INTERVAL_MS = 200;
-const PROXY_READY_WARN_INTERVAL_MS = 10000;
-function normalizeProxyTags(tagInput) {
-    const tags = [];
-    const seen = new Set();
-    for (const rawTag of tagInput.split(',')) {
-        const tag = rawTag.trim();
-        if (!tag || seen.has(tag)) {
-            continue;
-        }
-        seen.add(tag);
-        tags.push(tag);
-    }
-    if (tags.length === 0) {
-        throw new Error('At least one proxy tag is required');
-    }
-    return tags.join(',');
-}
-function isProcessAlive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-function proxyLogPath(port) {
-    return path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
-}
-function readProxyLogs(port) {
-    try {
-        return fs.readFileSync(proxyLogPath(port), 'utf-8').trim();
-    }
-    catch {
-        return '';
-    }
-}
-function proxyProbeHost(host) {
-    return host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
-}
-async function isProxyRunning(host, port) {
-    const probeHost = proxyProbeHost(host);
-    return await new Promise((resolve) => {
-        const socket = net.createConnection({ host: probeHost, port });
-        let settled = false;
-        const finish = (value) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            socket.destroy();
-            resolve(value);
-        };
-        socket.setTimeout(1000);
-        socket.once('connect', () => finish(true));
-        socket.once('timeout', () => finish(false));
-        socket.once('error', () => finish(false));
-        socket.once('close', () => finish(false));
-    });
-}
-function proxyReadyFilePath(port) {
-    return path.join(os.tmpdir(), `boringcache-proxy-${port}.ready`);
-}
-function clearProxyReadyFile(readyFile) {
-    try {
-        fs.unlinkSync(readyFile);
-    }
-    catch {
-        // Ignore missing or inaccessible ready markers; startup will recreate them.
-    }
-}
-async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_MS, port, pid) {
-    const start = Date.now();
-    let lastLogAt = 0;
-    while (Date.now() - start < timeoutMs) {
-        if (fs.existsSync(readyFile)) {
-            const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-            core.info(`Registry proxy is ready (${elapsed}s)`);
-            clearProxyReadyFile(readyFile);
-            return;
-        }
-        if (pid && pid > 0 && !isProcessAlive(pid)) {
-            const logs = port ? readProxyLogs(port) : '';
-            throw new Error(`Registry proxy exited before becoming ready${logs ? `:\n${logs}` : ''}`);
-        }
-        const elapsed = Date.now() - start;
-        if (elapsed - lastLogAt >= PROXY_READY_WARN_INTERVAL_MS) {
-            core.info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
-            lastLogAt = elapsed;
-        }
-        await new Promise((resolve) => setTimeout(resolve, PROXY_READY_POLL_INTERVAL_MS));
-    }
-    const logs = port ? readProxyLogs(port) : '';
-    throw new Error(`Registry proxy did not become ready within ${timeoutMs}ms${logs ? `:\n${logs}` : ''}`);
-}
-/**
- * Start the cache-registry proxy.
- * Spawns a detached boringcache process, writes PID file, returns handle.
- */
-async function startRegistryProxy(options) {
-    (0, auth_1.warnIfUsingLegacyApiToken)();
-    const { restoreToken, saveToken } = (0, auth_1.getAuthTokens)();
-    let effectiveReadOnly = options.readOnly === true;
-    let authToken = effectiveReadOnly ? restoreToken : saveToken;
-    if (!authToken && !effectiveReadOnly && restoreToken) {
-        effectiveReadOnly = true;
-        authToken = restoreToken;
-        core.info('No save-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN');
-    }
-    if (!authToken) {
-        if (effectiveReadOnly) {
-            throw new Error(`${(0, auth_1.missingRestoreTokenMessage)()} This is required for registry proxy mode.`);
-        }
-        throw new Error(`${(0, auth_1.missingSaveTokenMessage)()} This is required for registry proxy mode.`);
-    }
-    const host = options.host || '127.0.0.1';
-    const cliCommand = 'cache-registry';
-    const normalizedTags = normalizeProxyTags(options.tag);
-    const tagList = normalizedTags.split(',');
-    const primaryTag = tagList[0];
-    const readyFile = proxyReadyFilePath(options.port);
-    if (await isProxyRunning(host, options.port)) {
-        core.info(`Registry proxy already running on port ${options.port}, reusing`);
-        try {
-            const pid = parseInt(fs.readFileSync(PROXY_PID_FILE, 'utf-8').trim(), 10);
-            if (pid > 0)
-                return { pid, port: options.port, readOnly: effectiveReadOnly };
-        }
-        catch { }
-        return { pid: -1, port: options.port, readOnly: effectiveReadOnly };
-    }
-    clearProxyReadyFile(readyFile);
-    const args = [cliCommand, options.workspace, normalizedTags];
-    if (options.noGit) {
-        args.push('--no-git');
-    }
-    if (options.noPlatform) {
-        args.push('--no-platform');
-    }
-    args.push('--host', host, '--port', String(options.port));
-    args.push('--ready-file', readyFile);
-    if (options.onDemand) {
-        args.push('--on-demand');
-    }
-    for (const ref of options.ociPrefetchRefs || []) {
-        const trimmed = ref.trim();
-        if (trimmed) {
-            args.push('--oci-prefetch-ref', trimmed);
-        }
-    }
-    for (const [key, value] of Object.entries(options.metadataHints || {})) {
-        args.push('--metadata-hint', `${key}=${value}`);
-    }
-    if (effectiveReadOnly) {
-        args.push('--read-only');
-    }
-    if (options.verbose) {
-        args.push('--verbose');
-    }
-    core.info(`Starting registry proxy on ${host}:${options.port}...`);
-    core.info(`Registry proxy primary tag: ${primaryTag}`);
-    if (tagList.length > 1) {
-        core.info(`Registry proxy alias tags: ${tagList.slice(1).join(', ')}`);
-    }
-    if (effectiveReadOnly) {
-        core.info('Registry proxy mode: read-only');
-    }
-    core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
-    if (options.ociPrefetchRefs?.length) {
-        core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
-    }
-    const logFile = proxyLogPath(options.port);
-    const logFd = fs.openSync(logFile, 'w');
-    const child = (0, child_process_1.spawn)('boringcache', args, {
-        detached: true,
-        stdio: ['ignore', logFd, logFd],
-        env: {
-            ...process.env,
-            BORINGCACHE_API_TOKEN: authToken,
-        }
-    });
-    child.unref();
-    fs.closeSync(logFd);
-    if (!child.pid) {
-        throw new Error('Failed to start registry proxy');
-    }
-    fs.writeFileSync(PROXY_PID_FILE, String(child.pid));
-    core.info(`Registry proxy started (PID: ${child.pid})`);
-    const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
-    try {
-        await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
-        return handle;
-    }
-    catch (error) {
-        try {
-            await stopRegistryProxy(child.pid);
-        }
-        catch {
-            // Keep the original readiness failure as the primary error.
-        }
-        clearProxyReadyFile(readyFile);
-        throw error;
-    }
-}
-/**
- * Graceful stop: send SIGTERM and wait for the proxy to exit on its own.
- * The proxy handles SIGTERM by flushing all pending blobs to the backend,
- * then exits. Never send SIGKILL — the proxy owns its own shutdown timing.
- */
-async function stopRegistryProxy(pid) {
-    if (pid <= 0) {
-        core.info('No proxy PID to stop (was reused from another invocation)');
-        return;
-    }
-    core.info(`Stopping registry proxy (PID: ${pid})...`);
-    try {
-        process.kill(pid, 'SIGTERM');
-    }
-    catch (err) {
-        const code = err.code;
-        if (code === 'ESRCH') {
-            core.info(`Registry proxy (PID: ${pid}) already exited`);
-            return;
-        }
-        core.warning(`Failed to send SIGTERM to registry proxy: ${err.message}`);
-        return;
-    }
-    const start = Date.now();
-    const pollInterval = 1000;
-    const logInterval = 30000;
-    let lastLog = start;
-    while (true) {
-        if (!isProcessAlive(pid)) {
-            core.info(`Registry proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
-            return;
-        }
-        const now = Date.now();
-        if (now - lastLog >= logInterval) {
-            core.info(`Waiting for registry proxy to flush and exit... (${Math.round((now - start) / 1000)}s elapsed)`);
-            lastLog = now;
-        }
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-    }
-}
-/**
- * Bind to port 0 and return the assigned port.
- */
-async function findAvailablePort() {
-    return new Promise((resolve, reject) => {
-        const server = net.createServer();
-        server.listen(0, '127.0.0.1', () => {
-            const addr = server.address();
-            if (addr && typeof addr !== 'string') {
-                const port = addr.port;
-                server.close(() => resolve(port));
-            }
-            else {
-                server.close(() => reject(new Error('Failed to get port')));
-            }
-        });
-        server.on('error', reject);
-    });
-}
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicHJveHkuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi9saWIvcHJveHkudHMiXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6Ijs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7QUF1Q0EsZ0RBa0JDO0FBcUdELGdEQW1IQztBQU9ELDhDQW9DQztBQUtELDhDQWNDO0FBL1VELG9EQUFzQztBQUN0Qyx1Q0FBeUI7QUFDekIseUNBQTJCO0FBQzNCLHVDQUF5QjtBQUN6QiwyQ0FBNkI7QUFDN0IsaURBQW9EO0FBQ3BELGlDQUtnQjtBQXVCaEIsTUFBTSxjQUFjLEdBQUcsSUFBSSxDQUFDLElBQUksQ0FBQyxFQUFFLENBQUMsTUFBTSxFQUFFLEVBQUUsdUJBQXVCLENBQUMsQ0FBQztBQUN2RSxNQUFNLHNCQUFzQixHQUFHLE1BQU0sQ0FBQztBQUN0QyxNQUFNLDRCQUE0QixHQUFHLEdBQUcsQ0FBQztBQUN6QyxNQUFNLDRCQUE0QixHQUFHLEtBQUssQ0FBQztBQUUzQyxTQUFnQixrQkFBa0IsQ0FBQyxRQUFnQjtJQUNqRCxNQUFNLElBQUksR0FBYSxFQUFFLENBQUM7SUFDMUIsTUFBTSxJQUFJLEdBQUcsSUFBSSxHQUFHLEVBQVUsQ0FBQztJQUUvQixLQUFLLE1BQU0sTUFBTSxJQUFJLFFBQVEsQ0FBQyxLQUFLLENBQUMsR0FBRyxDQUFDLEVBQUUsQ0FBQztRQUN6QyxNQUFNLEdBQUcsR0FBRyxNQUFNLENBQUMsSUFBSSxFQUFFLENBQUM7UUFDMUIsSUFBSSxDQUFDLEdBQUcsSUFBSSxJQUFJLENBQUMsR0FBRyxDQUFDLEdBQUcsQ0FBQyxFQUFFLENBQUM7WUFDMUIsU0FBUztRQUNYLENBQUM7UUFDRCxJQUFJLENBQUMsR0FBRyxDQUFDLEdBQUcsQ0FBQyxDQUFDO1FBQ2QsSUFBSSxDQUFDLElBQUksQ0FBQyxHQUFHLENBQUMsQ0FBQztJQUNqQixDQUFDO0lBRUQsSUFBSSxJQUFJLENBQUMsTUFBTSxLQUFLLENBQUMsRUFBRSxDQUFDO1FBQ3RC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
-
-/***/ }),
-
-/***/ 1576:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getToolCacheInfo = getToolCacheInfo;
-exports.isCliAvailable = isCliAvailable;
-exports.ensureBoringCache = ensureBoringCache;
-exports.execBoringCache = execBoringCache;
-const core = __importStar(__nccwpck_require__(37484));
-const exec = __importStar(__nccwpck_require__(95236));
-const tc = __importStar(__nccwpck_require__(33472));
-const cache = __importStar(__nccwpck_require__(5116));
-const crypto = __importStar(__nccwpck_require__(76982));
-const fs = __importStar(__nccwpck_require__(79896));
-const os = __importStar(__nccwpck_require__(70857));
-const path = __importStar(__nccwpck_require__(16928));
-const auth_1 = __nccwpck_require__(89971);
-const TOOL_NAME = 'boringcache';
-const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
-/**
- * Get tool cache information for a specific version.
- * Use this to persist the tool cache across workflow runs with actions/cache.
- */
-function getToolCacheInfo(version, platformOverride) {
-    const normalizedVersion = version.replace(/^v/, '');
-    const platform = getPlatformInfo(platformOverride);
-    const cachePath = tc.find(TOOL_NAME, normalizedVersion, platform.cacheKey);
-    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
-    return {
-        toolName: TOOL_NAME,
-        version: normalizedVersion,
-        cachePath: cachePath || null,
-        cachePattern: `${toolCacheRoot}/${TOOL_NAME}/${normalizedVersion}*`,
-        cacheKey: `${TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.cacheKey}`,
-        platformKey: platform.cacheKey,
-    };
-}
-function getPlatformInfo(platformOverride) {
-    if (platformOverride) {
-        const normalizedPlatform = platformOverride.trim().toLowerCase();
-        const isWindows = normalizedPlatform.includes('windows');
-        const arch = normalizedPlatform.includes('arm64') ? 'arm64' : 'amd64';
-        const legacyAssetName = `boringcache-${normalizedPlatform}${isWindows && !normalizedPlatform.endsWith('.exe') ? '.exe' : ''}`;
-        if (isWindows) {
-            const assetName = `boringcache-windows-${arch}.exe`;
-            return {
-                os: 'windows',
-                arch,
-                assetName,
-                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
-                isWindows: true,
-                cacheKey: arch,
-            };
-        }
-        if (normalizedPlatform.includes('macos') || normalizedPlatform.includes('darwin')) {
-            const assetName = 'boringcache-macos-universal';
-            return {
-                os: 'macos',
-                arch,
-                assetName,
-                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
-                isWindows: false,
-                cacheKey: 'universal',
-            };
-        }
-        const usesMusl = normalizedPlatform.includes('alpine') || normalizedPlatform.includes('musl');
-        const genericPlatform = `linux${usesMusl ? '-musl' : ''}-${arch}`;
-        const assetName = `boringcache-${genericPlatform}`;
-        return {
-            os: 'linux',
-            arch,
-            assetName,
-            fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
-            isWindows: false,
-            cacheKey: usesMusl ? `musl-${arch}` : arch,
-        };
-    }
-    const runnerOS = process.env.RUNNER_OS || os.platform();
-    const runnerArch = process.env.RUNNER_ARCH || os.arch();
-    let normalizedOS = runnerOS;
-    let normalizedArch = runnerArch;
-    if (runnerOS === 'darwin' || runnerOS === 'Darwin') {
-        normalizedOS = 'macOS';
-    }
-    else if (runnerOS === 'win32' || runnerOS === 'Windows') {
-        normalizedOS = 'Windows';
-    }
-    else if (runnerOS === 'linux' || runnerOS === 'Linux') {
-        normalizedOS = 'Linux';
-    }
-    if (runnerArch === 'x64' || runnerArch === 'X64' || runnerArch === 'amd64') {
-        normalizedArch = 'X64';
-    }
-    else if (runnerArch === 'arm64' || runnerArch === 'ARM64' || runnerArch === 'aarch64') {
-        normalizedArch = 'ARM64';
-    }
-    const isWindows = normalizedOS === 'Windows';
-    let assetName;
-    switch (normalizedOS) {
-        case 'Linux':
-            assetName = normalizedArch === 'ARM64' ? 'boringcache-linux-arm64' : 'boringcache-linux-amd64';
-            break;
-        case 'macOS':
-            assetName = 'boringcache-macos-universal';
-            break;
-        case 'Windows':
-            assetName = normalizedArch === 'ARM64' ? 'boringcache-windows-arm64.exe' : 'boringcache-windows-amd64.exe';
-            break;
-        default:
-            throw new Error(`Unsupported platform: OS=${runnerOS}, ARCH=${runnerArch}`);
-    }
-    return {
-        os: normalizedOS.toLowerCase(),
-        arch: normalizedArch.toLowerCase(),
-        assetName,
-        isWindows,
-        cacheKey: normalizedOS === 'macOS'
-            ? 'universal'
-            : normalizedArch === 'ARM64'
-                ? 'arm64'
-                : 'amd64',
-    };
-}
-function getDownloadUrl(version, assetName) {
-    return `${GITHUB_RELEASES_BASE}/${version}/${assetName}`;
-}
-function getChecksumsUrl(version) {
-    return `${GITHUB_RELEASES_BASE}/${version}/SHA256SUMS`;
-}
-/**
- * Compute SHA256 hash of a file
- */
-async function computeFileHash(filePath) {
-    const fileBuffer = await fs.promises.readFile(filePath);
-    const hashSum = crypto.createHash('sha256');
-    hashSum.update(fileBuffer);
-    return hashSum.digest('hex');
-}
-/**
- * Parse SHA256SUMS file content and extract checksum for a specific asset
- * Format: <sha256>  <filename> (two spaces between hash and filename)
- * or: <sha256> <filename> (single space)
- */
-function parseChecksums(content, assetName) {
-    const lines = content.split('\n');
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed)
-            continue;
-        // Match either "hash  filename" or "hash filename"
-        const match = trimmed.match(/^([a-f0-9]{64})\s+(.+)$/i);
-        if (match) {
-            const [, hash, filename] = match;
-            // Match exact filename or filename at end of path
-            if (filename === assetName || filename.endsWith(`/${assetName}`)) {
-                return hash.toLowerCase();
-            }
-        }
-    }
-    return null;
-}
-/**
- * Download SHA256SUMS and get expected checksum for the asset
- */
-async function getExpectedChecksum(version, assetName) {
-    const checksumsUrl = getChecksumsUrl(version);
-    core.debug(`Downloading checksums from: ${checksumsUrl}`);
-    try {
-        const checksumsPath = await tc.downloadTool(checksumsUrl);
-        const content = await fs.promises.readFile(checksumsPath, 'utf-8');
-        const checksum = parseChecksums(content, assetName);
-        if (!checksum) {
-            throw new Error(`Checksum not found for asset: ${assetName}`);
-        }
-        return checksum;
-    }
-    catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to fetch checksums from ${checksumsUrl}: ${msg}`);
-    }
-}
-/**
- * Verify file checksum matches expected value
- */
-async function verifyChecksum(filePath, expectedChecksum, assetName) {
-    const actualChecksum = await computeFileHash(filePath);
-    if (actualChecksum !== expectedChecksum) {
-        throw new Error(`Checksum verification failed for ${assetName}:\n` +
-            `  Expected: ${expectedChecksum}\n` +
-            `  Actual:   ${actualChecksum}`);
-    }
-    core.info(`Checksum verified for ${assetName}`);
-}
-async function downloadAndInstall(version, platform, verify) {
-    let resolvedAssetName = platform.assetName;
-    let downloadUrl = getDownloadUrl(version, resolvedAssetName);
-    core.info(`Downloading BoringCache CLI from: ${downloadUrl}`);
-    let downloadedPath;
-    try {
-        downloadedPath = await tc.downloadTool(downloadUrl);
-    }
-    catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (platform.fallbackAssetName) {
-            resolvedAssetName = platform.fallbackAssetName;
-            downloadUrl = getDownloadUrl(version, resolvedAssetName);
-            core.info(`Primary CLI asset ${platform.assetName} unavailable (${msg}); trying legacy fallback: ${resolvedAssetName}`);
-            try {
-                downloadedPath = await tc.downloadTool(downloadUrl);
-            }
-            catch (fallbackError) {
-                const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-                if (fallbackMsg.includes('404')) {
-                    throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ` +
-                        'release asset not found. The requested cli-version may not be published yet.');
-                }
-                throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ${fallbackMsg}`);
-            }
-        }
-        else if (msg.includes('404')) {
-            throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ` +
-                'release asset not found. The requested cli-version may not be published yet.');
-        }
-        else {
-            throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ${msg}`);
-        }
-    }
-    // Verify checksum if enabled
-    if (verify) {
-        const expectedChecksum = await getExpectedChecksum(version, resolvedAssetName);
-        await verifyChecksum(downloadedPath, expectedChecksum, resolvedAssetName);
-    }
-    else {
-        core.warning('Checksum verification disabled - this is not recommended for production use');
-    }
-    const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
-    const installDir = path.join(os.tmpdir(), 'boringcache-install', version);
-    await fs.promises.mkdir(installDir, { recursive: true });
-    const binaryPath = path.join(installDir, binaryName);
-    await fs.promises.copyFile(downloadedPath, binaryPath);
-    if (!platform.isWindows) {
-        await fs.promises.chmod(binaryPath, 0o755);
-    }
-    const cachedPath = await tc.cacheDir(installDir, TOOL_NAME, version.replace(/^v/, ''), platform.cacheKey);
-    return cachedPath;
-}
-async function isCliAvailable() {
-    try {
-        let output = '';
-        const result = await exec.exec('boringcache', ['--version'], {
-            ignoreReturnCode: true,
-            silent: true,
-            listeners: {
-                stdout: (data) => { output += data.toString(); },
-                stderr: (data) => { output += data.toString(); }
-            }
-        });
-        return result === 0 && output.includes('boringcache');
-    }
-    catch {
-        return false;
-    }
-}
-async function ensureBoringCache(options) {
-    (0, auth_1.warnIfUsingLegacyApiToken)();
-    const secrets = new Set([
-        options.token,
-        process.env.BORINGCACHE_RESTORE_TOKEN,
-        process.env.BORINGCACHE_SAVE_TOKEN,
-        process.env.BORINGCACHE_API_TOKEN,
-    ].filter((value) => Boolean(value)));
-    for (const secret of secrets) {
-        core.setSecret(secret);
-    }
-    const shouldRequireServerSignature = options.requireServerSignature !== false;
-    if (shouldRequireServerSignature && !process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE) {
-        core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
-        core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
-    }
-    if (options.version === 'skip') {
-        core.debug('CLI setup skipped (version: skip)');
-        if (await isCliAvailable()) {
-            return;
-        }
-        throw new Error('BoringCache CLI not found and cli-version is set to "skip"');
-    }
-    if (await isCliAvailable()) {
-        core.debug('BoringCache CLI already available');
-        return;
-    }
-    const version = options.version;
-    const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-    const platform = getPlatformInfo(options.platform);
-    const enableCache = options.cache !== false;
-    const enableVerify = options.verify !== false; // Default: true
-    core.info(`Installing BoringCache CLI ${normalizedVersion}...`);
-    // Get cache info for this version
-    const cacheInfo = getToolCacheInfo(normalizedVersion, options.platform);
-    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
-    const cachePaths = [`${toolCacheRoot}/${TOOL_NAME}`];
-    // Try to restore from actions/cache first
-    let restoredFromCache = false;
-    if (enableCache) {
-        try {
-            const cacheKey = await cache.restoreCache(cachePaths, cacheInfo.cacheKey);
-            if (cacheKey) {
-                core.info(`Restored CLI from cache (key: ${cacheKey})`);
-                restoredFromCache = true;
-            }
-        }
-        catch (error) {
-            core.debug(`Cache restore failed: ${error instanceof Error ? error.message : error}`);
-        }
-    }
-    let toolPath;
-    let cachedPath = tc.find(TOOL_NAME, normalizedVersion.replace(/^v/, ''), cacheInfo.platformKey);
-    if (cachedPath && enableVerify) {
-        const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
-        const cachedBinary = path.join(cachedPath, binaryName);
-        if (fs.existsSync(cachedBinary)) {
-            try {
-                const expectedChecksum = await getExpectedChecksum(normalizedVersion, platform.assetName);
-                const actualChecksum = await computeFileHash(cachedBinary);
-                if (actualChecksum !== expectedChecksum) {
-                    core.warning(`Cached CLI binary is stale (checksum mismatch), re-downloading`);
-                    cachedPath = '';
-                }
-            }
-            catch (error) {
-                core.debug(`Cache validation failed: ${error instanceof Error ? error.message : error}`);
-            }
-        }
-    }
-    if (cachedPath) {
-        core.info(`Using cached BoringCache CLI`);
-        toolPath = cachedPath;
-    }
-    else {
-        toolPath = await downloadAndInstall(normalizedVersion, platform, enableVerify);
-        if (enableCache) {
-            try {
-                await cache.saveCache(cachePaths, cacheInfo.cacheKey);
-                core.info(`Saved CLI to cache (key: ${cacheInfo.cacheKey})`);
-            }
-            catch (error) {
-                core.debug(`Cache save failed: ${error instanceof Error ? error.message : error}`);
-            }
-        }
-    }
-    core.addPath(toolPath);
-    core.info(`BoringCache CLI ${normalizedVersion} ready`);
-}
-async function execBoringCache(args, options = {}) {
-    const isWindows = os.platform() === 'win32';
-    try {
-        return await exec.exec('boringcache', args, options);
-    }
-    catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (isWindows && msg.includes('Unable to locate executable file')) {
-            const quoted = ['boringcache', ...args.map(a => {
-                    const escaped = a.replace(/"/g, '\\"');
-                    return /\s/.test(escaped) ? `"${escaped}"` : escaped;
-                })].join(' ');
-            return await exec.exec('bash', ['-lc', quoted], options);
-        }
-        throw error;
-    }
-}
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoic2V0dXAuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi9saWIvc2V0dXAudHMiXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6Ijs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7QUE2Q0EsNENBY0M7QUFrUUQsd0NBZUM7QUFFRCw4Q0FvR0M7QUFFRCwwQ0FxQkM7QUF6Y0Qsb0RBQXNDO0FBQ3RDLG9EQUFzQztBQUN0Qyx3REFBMEM7QUFDMUMsc0RBQXdDO0FBQ3hDLCtDQUFpQztBQUNqQyx1Q0FBeUI7QUFDekIsdUNBQXlCO0FBQ3pCLDJDQUE2QjtBQUM3QixpQ0FBbUQ7QUFFbkQsTUFBTSxTQUFTLEdBQUcsYUFBYSxDQUFDO0FBQ2hDLE1BQU0sb0JBQW9CLEdBQUcsc0RBQXNELENBQUM7QUE4QnBGOzs7R0FHRztBQUNILFNBQWdCLGdCQUFnQixDQUFDLE9BQWUsRUFBRSxnQkFBeUI7SUFDekUsTUFBTSxpQkFBaUIsR0FBRyxPQUFPLENBQUMsT0FBTyxDQUFDLElBQUksRUFBRSxFQUFFLENBQUMsQ0FBQztJQUNwRCxNQUFNLFFBQVEsR0FBRyxlQUFlLENBQUMsZ0JBQWdCLENBQUMsQ0FBQztJQUNuRCxNQUFNLFNBQVMsR0FBRyxFQUFFLENBQUMsSUFBSSxDQUFDLFNBQVMsRUFBRSxpQkFBaUIsRUFBRSxRQUFRLENBQUMsUUFBUSxDQUFDLENBQUM7SUFDM0UsTUFBTSxhQUFhLEdBQUcsT0FBTyxDQUFDLEdBQUcsQ0FBQyxpQkFBaUIsSUFBSSxzQkFBc0IsQ0FBQztJQUU5RSxPQUFPO1FBQ0wsUUFBUSxFQUFFLFNBQVM7UUFDbkIsT0FBTyxFQUFFLGlCQUFpQjtRQUMxQixTQUFTLEVBQUUsU0FBUyxJQUFJLElBQUk7UUFDNUIsWUFBWSxFQUFFLEdBQUcsYUFBYSxJQUFJLFNBQVMsSUFBSSxpQkFBaUIsR0FBRztRQUNuRSxRQUFRLEVBQUUsR0FBRyxTQUFTLElBQUksaUJBQWlCLElBQUksUUFBUSxDQUFDLEVBQUUsSUFBSSxRQUFRLENBQUMs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
-
-/***/ }),
-
-/***/ 88084:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getWorkspace = getWorkspace;
-exports.getCacheTagPrefix = getCacheTagPrefix;
-exports.pathExists = pathExists;
-const core = __importStar(__nccwpck_require__(37484));
-const fs = __importStar(__nccwpck_require__(79896));
-/**
- * Resolve workspace from input or environment.
- * Used by docker, buildkit, nodejs, rust, ruby actions.
- */
-function getWorkspace(inputWorkspace) {
-    let workspace = inputWorkspace || process.env.BORINGCACHE_DEFAULT_WORKSPACE || '';
-    if (!workspace) {
-        core.setFailed('Workspace is required. Set workspace input or BORINGCACHE_DEFAULT_WORKSPACE env var.');
-        throw new Error('Workspace required');
-    }
-    if (!workspace.includes('/')) {
-        workspace = `default/${workspace}`;
-    }
-    return workspace;
-}
-/**
- * Resolve cache tag prefix from input or the provided default.
- */
-function getCacheTagPrefix(inputCacheTag, defaultPrefix) {
-    if (inputCacheTag) {
-        return inputCacheTag;
-    }
-    return defaultPrefix;
-}
-/**
- * Async file/directory existence check.
- */
-async function pathExists(p) {
-    try {
-        await fs.promises.access(p);
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoid29ya3NwYWNlLmpzIiwic291cmNlUm9vdCI6IiIsInNvdXJjZXMiOlsiLi4vbGliL3dvcmtzcGFjZS50cyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7OztBQU9BLG9DQWFDO0FBS0QsOENBTUM7QUFLRCxnQ0FPQztBQTNDRCxvREFBc0M7QUFDdEMsdUNBQXlCO0FBRXpCOzs7R0FHRztBQUNILFNBQWdCLFlBQVksQ0FBQyxjQUFzQjtJQUNqRCxJQUFJLFNBQVMsR0FBRyxjQUFjLElBQUksT0FBTyxDQUFDLEdBQUcsQ0FBQyw2QkFBNkIsSUFBSSxFQUFFLENBQUM7SUFFbEYsSUFBSSxDQUFDLFNBQVMsRUFBRSxDQUFDO1FBQ2YsSUFBSSxDQUFDLFNBQVMsQ0FBQyxzRkFBc0YsQ0FBQyxDQUFDO1FBQ3ZHLE1BQU0sSUFBSSxLQUFLLENBQUMsb0JBQW9CLENBQUMsQ0FBQztJQUN4QyxDQUFDO0lBRUQsSUFBSSxDQUFDLFNBQVMsQ0FBQyxRQUFRLENBQUMsR0FBRyxDQUFDLEVBQUUsQ0FBQztRQUM3QixTQUFTLEdBQUcsV0FBVyxTQUFTLEVBQUUsQ0FBQztJQUNyQyxDQUFDO0lBRUQsT0FBTyxTQUFTLENBQUM7QUFDbkIsQ0FBQztBQUVEOztHQUVHO0FBQ0gsU0FBZ0IsaUJBQWlCLENBQUMsYUFBcUIsRUFBRSxhQUFxQjtJQUM1RSxJQUFJLGFBQWEsRUFBRSxDQUFDO1FBQ2xCLE9BQU8sYUFBYSxDQUFDO0lBQ3ZCLENBQUM7SUFFRCxPQUFPLGFBQWEsQ0FBQztBQUN2QixDQUFDO0FBRUQ7O0dBRUc7QUFDSSxLQUFLLFVBQVUsVUFBVSxDQUFDLENBQVM7SUFDeEMsSUFBSSxDQUFDO1FBQ0gsTUFBTSxFQUFFLENBQUMsUUFBUSxDQUFDLE1BQU0sQ0FBQyxDQUFDLENBQUMsQ0FBQztRQUM1QixPQUFPLElBQUksQ0FBQztJQUNkLENBQUM7SUFBQyxNQUFNLENBQUM7UUFDUCxPQUFPLEtBQUssQ0FBQztJQUNmLENBQUM7QUFDSCxDQUFDIn0=
-
-/***/ }),
-
 /***/ 37889:
 /***/ (function(__unused_webpack_module, exports) {
 
@@ -43235,6 +41291,1957 @@ module.exports = {
 
 /***/ }),
 
+/***/ 46840:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getAuthTokens = getAuthTokens;
+exports.hasRestoreToken = hasRestoreToken;
+exports.hasSaveToken = hasSaveToken;
+exports.isUsingLegacyApiTokenOnly = isUsingLegacyApiTokenOnly;
+exports.warnIfUsingLegacyApiToken = warnIfUsingLegacyApiToken;
+exports.missingRestoreTokenMessage = missingRestoreTokenMessage;
+exports.missingSaveTokenMessage = missingSaveTokenMessage;
+const core = __importStar(__nccwpck_require__(37484));
+let warnedAboutLegacyApiToken = false;
+function getAuthTokens() {
+    const apiToken = process.env.BORINGCACHE_API_TOKEN || undefined;
+    const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || apiToken;
+    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || saveToken;
+    return {
+        restoreToken,
+        saveToken,
+        apiToken,
+    };
+}
+function hasRestoreToken() {
+    return Boolean(getAuthTokens().restoreToken);
+}
+function hasSaveToken() {
+    return Boolean(getAuthTokens().saveToken);
+}
+function isUsingLegacyApiTokenOnly() {
+    return Boolean(process.env.BORINGCACHE_API_TOKEN &&
+        !process.env.BORINGCACHE_RESTORE_TOKEN &&
+        !process.env.BORINGCACHE_SAVE_TOKEN);
+}
+function warnIfUsingLegacyApiToken() {
+    if (warnedAboutLegacyApiToken || !isUsingLegacyApiTokenOnly()) {
+        return;
+    }
+    warnedAboutLegacyApiToken = true;
+    core.notice('Using BORINGCACHE_API_TOKEN as a legacy compatibility fallback. Prefer BORINGCACHE_RESTORE_TOKEN and BORINGCACHE_SAVE_TOKEN for new workflows.');
+}
+function missingRestoreTokenMessage() {
+    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_SAVE_TOKEN, or BORINGCACHE_API_TOKEN.';
+}
+function missingSaveTokenMessage() {
+    return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN or BORINGCACHE_API_TOKEN.';
+}
+
+
+/***/ }),
+
+/***/ 15796:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.readProjectMiseTools = exports.readMiseTomlVersion = exports.readMiseTomlTools = exports.readToolVersionsValue = exports.readToolVersions = exports.exportMiseEnv = exports.reshimMise = exports.activateMiseTool = exports.installMiseTool = exports.installMise = exports.buildMiseRuntimeTag = exports.buildMiseToolTag = exports.scopeMiseToolVersion = exports.slugMiseTagPart = exports.getMiseShimsDir = exports.getMiseInstallsDir = exports.getMiseDataDir = exports.getMiseBinPath = exports.findAvailablePort = exports.stopRegistryProxy = exports.startRegistryProxy = exports.convertCacheFormatToEntries = exports.getInputsWorkspace = exports.getPlatformSuffix = exports.parseEntries = exports.resolvePaths = exports.resolvePath = exports.validateInputs = exports.getCacheConfig = exports.pathExists = exports.getCacheTagPrefix = exports.getWorkspace = exports.missingSaveTokenMessage = exports.missingRestoreTokenMessage = exports.warnIfUsingLegacyApiToken = exports.isUsingLegacyApiTokenOnly = exports.hasSaveToken = exports.hasRestoreToken = exports.getAuthTokens = exports.getToolCacheInfo = exports.isCliAvailable = exports.execBoringCache = exports.ensureBoringCache = void 0;
+var setup_1 = __nccwpck_require__(51529);
+Object.defineProperty(exports, "ensureBoringCache", ({ enumerable: true, get: function () { return setup_1.ensureBoringCache; } }));
+Object.defineProperty(exports, "execBoringCache", ({ enumerable: true, get: function () { return setup_1.execBoringCache; } }));
+Object.defineProperty(exports, "isCliAvailable", ({ enumerable: true, get: function () { return setup_1.isCliAvailable; } }));
+Object.defineProperty(exports, "getToolCacheInfo", ({ enumerable: true, get: function () { return setup_1.getToolCacheInfo; } }));
+var auth_1 = __nccwpck_require__(46840);
+Object.defineProperty(exports, "getAuthTokens", ({ enumerable: true, get: function () { return auth_1.getAuthTokens; } }));
+Object.defineProperty(exports, "hasRestoreToken", ({ enumerable: true, get: function () { return auth_1.hasRestoreToken; } }));
+Object.defineProperty(exports, "hasSaveToken", ({ enumerable: true, get: function () { return auth_1.hasSaveToken; } }));
+Object.defineProperty(exports, "isUsingLegacyApiTokenOnly", ({ enumerable: true, get: function () { return auth_1.isUsingLegacyApiTokenOnly; } }));
+Object.defineProperty(exports, "warnIfUsingLegacyApiToken", ({ enumerable: true, get: function () { return auth_1.warnIfUsingLegacyApiToken; } }));
+Object.defineProperty(exports, "missingRestoreTokenMessage", ({ enumerable: true, get: function () { return auth_1.missingRestoreTokenMessage; } }));
+Object.defineProperty(exports, "missingSaveTokenMessage", ({ enumerable: true, get: function () { return auth_1.missingSaveTokenMessage; } }));
+var workspace_1 = __nccwpck_require__(99245);
+Object.defineProperty(exports, "getWorkspace", ({ enumerable: true, get: function () { return workspace_1.getWorkspace; } }));
+Object.defineProperty(exports, "getCacheTagPrefix", ({ enumerable: true, get: function () { return workspace_1.getCacheTagPrefix; } }));
+Object.defineProperty(exports, "pathExists", ({ enumerable: true, get: function () { return workspace_1.pathExists; } }));
+var inputs_1 = __nccwpck_require__(57579);
+Object.defineProperty(exports, "getCacheConfig", ({ enumerable: true, get: function () { return inputs_1.getCacheConfig; } }));
+Object.defineProperty(exports, "validateInputs", ({ enumerable: true, get: function () { return inputs_1.validateInputs; } }));
+Object.defineProperty(exports, "resolvePath", ({ enumerable: true, get: function () { return inputs_1.resolvePath; } }));
+Object.defineProperty(exports, "resolvePaths", ({ enumerable: true, get: function () { return inputs_1.resolvePaths; } }));
+Object.defineProperty(exports, "parseEntries", ({ enumerable: true, get: function () { return inputs_1.parseEntries; } }));
+Object.defineProperty(exports, "getPlatformSuffix", ({ enumerable: true, get: function () { return inputs_1.getPlatformSuffix; } }));
+Object.defineProperty(exports, "getInputsWorkspace", ({ enumerable: true, get: function () { return inputs_1.getInputsWorkspace; } }));
+Object.defineProperty(exports, "convertCacheFormatToEntries", ({ enumerable: true, get: function () { return inputs_1.convertCacheFormatToEntries; } }));
+var proxy_1 = __nccwpck_require__(58328);
+Object.defineProperty(exports, "startRegistryProxy", ({ enumerable: true, get: function () { return proxy_1.startRegistryProxy; } }));
+Object.defineProperty(exports, "stopRegistryProxy", ({ enumerable: true, get: function () { return proxy_1.stopRegistryProxy; } }));
+Object.defineProperty(exports, "findAvailablePort", ({ enumerable: true, get: function () { return proxy_1.findAvailablePort; } }));
+var mise_1 = __nccwpck_require__(14476);
+Object.defineProperty(exports, "getMiseBinPath", ({ enumerable: true, get: function () { return mise_1.getMiseBinPath; } }));
+Object.defineProperty(exports, "getMiseDataDir", ({ enumerable: true, get: function () { return mise_1.getMiseDataDir; } }));
+Object.defineProperty(exports, "getMiseInstallsDir", ({ enumerable: true, get: function () { return mise_1.getMiseInstallsDir; } }));
+Object.defineProperty(exports, "getMiseShimsDir", ({ enumerable: true, get: function () { return mise_1.getMiseShimsDir; } }));
+Object.defineProperty(exports, "slugMiseTagPart", ({ enumerable: true, get: function () { return mise_1.slugMiseTagPart; } }));
+Object.defineProperty(exports, "scopeMiseToolVersion", ({ enumerable: true, get: function () { return mise_1.scopeMiseToolVersion; } }));
+Object.defineProperty(exports, "buildMiseToolTag", ({ enumerable: true, get: function () { return mise_1.buildMiseToolTag; } }));
+Object.defineProperty(exports, "buildMiseRuntimeTag", ({ enumerable: true, get: function () { return mise_1.buildMiseRuntimeTag; } }));
+Object.defineProperty(exports, "installMise", ({ enumerable: true, get: function () { return mise_1.installMise; } }));
+Object.defineProperty(exports, "installMiseTool", ({ enumerable: true, get: function () { return mise_1.installMiseTool; } }));
+Object.defineProperty(exports, "activateMiseTool", ({ enumerable: true, get: function () { return mise_1.activateMiseTool; } }));
+Object.defineProperty(exports, "reshimMise", ({ enumerable: true, get: function () { return mise_1.reshimMise; } }));
+Object.defineProperty(exports, "exportMiseEnv", ({ enumerable: true, get: function () { return mise_1.exportMiseEnv; } }));
+Object.defineProperty(exports, "readToolVersions", ({ enumerable: true, get: function () { return mise_1.readToolVersions; } }));
+Object.defineProperty(exports, "readToolVersionsValue", ({ enumerable: true, get: function () { return mise_1.readToolVersionsValue; } }));
+Object.defineProperty(exports, "readMiseTomlTools", ({ enumerable: true, get: function () { return mise_1.readMiseTomlTools; } }));
+Object.defineProperty(exports, "readMiseTomlVersion", ({ enumerable: true, get: function () { return mise_1.readMiseTomlVersion; } }));
+Object.defineProperty(exports, "readProjectMiseTools", ({ enumerable: true, get: function () { return mise_1.readProjectMiseTools; } }));
+Object.defineProperty(exports, "hasMiseToolVersion", ({ enumerable: true, get: function () { return mise_1.hasMiseToolVersion; } }));
+Object.defineProperty(exports, "hasToolVersionOnPath", ({ enumerable: true, get: function () { return mise_1.hasToolVersionOnPath; } }));
+
+
+/***/ }),
+
+/***/ 57579:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getCacheConfig = getCacheConfig;
+exports.validateInputs = validateInputs;
+exports.resolvePath = resolvePath;
+exports.resolvePaths = resolvePaths;
+exports.parseEntries = parseEntries;
+exports.getPlatformSuffix = getPlatformSuffix;
+exports.getInputsWorkspace = getInputsWorkspace;
+exports.convertCacheFormatToEntries = convertCacheFormatToEntries;
+const core = __importStar(__nccwpck_require__(37484));
+const os = __importStar(__nccwpck_require__(70857));
+const path = __importStar(__nccwpck_require__(16928));
+async function getCacheConfig(key, enableCrossOsArchive, noPlatform = false) {
+    let workspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE ||
+        'default/default';
+    if (!workspace.includes('/')) {
+        workspace = `default/${workspace}`;
+    }
+    let platformSuffix = '';
+    if (!noPlatform && !enableCrossOsArchive) {
+        const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
+        const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
+        platformSuffix = `-${platform}-${arch}`;
+    }
+    const fullKey = key + platformSuffix;
+    return { workspace, fullKey, platformSuffix };
+}
+function validateInputs(inputs) {
+    const hasCliFormat = inputs.workspace || inputs.entries;
+    const hasCacheFormat = inputs.path || inputs.key;
+    if (!hasCliFormat && !hasCacheFormat) {
+        throw new Error('Either (workspace + entries) or (path + key) inputs are required');
+    }
+    if (hasCliFormat && hasCacheFormat) {
+        core.warning('Both CLI format (workspace/entries) and actions/cache format (path/key) provided. Using CLI format.');
+    }
+    if (hasCliFormat && !inputs.entries) {
+        throw new Error('Input "entries" is required when using CLI format');
+    }
+    if (hasCacheFormat && !hasCliFormat) {
+        if (!inputs.path) {
+            throw new Error('Input "path" is required when using actions/cache format');
+        }
+        if (!inputs.key) {
+            throw new Error('Input "key" is required when using actions/cache format');
+        }
+    }
+    if (inputs.workspace && typeof inputs.workspace === 'string' && !inputs.workspace.includes('/')) {
+        throw new Error('Workspace must be in format "namespace/workspace" (e.g., "my-org/my-project")');
+    }
+}
+function resolvePath(pathInput, baseDir) {
+    const trimmedPath = pathInput.trim();
+    if (path.isAbsolute(trimmedPath)) {
+        return trimmedPath;
+    }
+    if (trimmedPath.startsWith('~/')) {
+        return path.join(os.homedir(), trimmedPath.slice(2));
+    }
+    return path.resolve(baseDir || process.cwd(), trimmedPath);
+}
+function resolvePaths(pathInput, baseDir) {
+    return pathInput
+        .split('\n')
+        .map(p => p.trim())
+        .filter(p => p)
+        .map(p => resolvePath(p, baseDir))
+        .join('\n');
+}
+function parseEntries(entriesInput, _action, options = {}) {
+    var _a;
+    const shouldResolve = (_a = options.resolvePaths) !== null && _a !== void 0 ? _a : true;
+    const baseDir = options.baseDir;
+    return entriesInput
+        .split(/\r?\n|,/)
+        .map(entry => entry.trim())
+        .filter(entry => entry)
+        .map(entry => {
+        const colonIndex = entry.indexOf(':');
+        if (colonIndex === -1) {
+            throw new Error(`Invalid entry format: ${entry}. Expected format: tag:path or tag:restore_path=>save_path`);
+        }
+        const tag = entry.substring(0, colonIndex).trim();
+        const pathSpec = entry.substring(colonIndex + 1).trim();
+        if (!tag) {
+            throw new Error(`Invalid entry format: ${entry}. Tag cannot be empty`);
+        }
+        let restorePathInput = pathSpec;
+        let savePathInput = pathSpec;
+        const redirectIndex = pathSpec.indexOf('=>');
+        if (redirectIndex !== -1) {
+            restorePathInput = pathSpec.substring(0, redirectIndex).trim();
+            savePathInput = pathSpec.substring(redirectIndex + 2).trim();
+            if (!restorePathInput || !savePathInput) {
+                throw new Error(`Invalid entry format: ${entry}. Expected restore and save paths when using => syntax`);
+            }
+        }
+        const restorePath = shouldResolve ? resolvePath(restorePathInput, baseDir) : restorePathInput;
+        const savePath = shouldResolve ? resolvePath(savePathInput, baseDir) : savePathInput;
+        return { tag, restorePath, savePath };
+    });
+}
+function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
+    if (noPlatform || enableCrossOsArchive) {
+        return '';
+    }
+    const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
+    const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
+    return `-${platform}-${arch}`;
+}
+/**
+ * Get workspace from action inputs (Record-based).
+ * Used by the generic action/save/restore actions.
+ * NOTE: This is different from workspace.ts getWorkspace which takes a string.
+ */
+function getInputsWorkspace(inputs) {
+    if (inputs.workspace && typeof inputs.workspace === 'string') {
+        return inputs.workspace;
+    }
+    const defaultWorkspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE;
+    if (defaultWorkspace) {
+        return defaultWorkspace.includes('/') ? defaultWorkspace : `default/${defaultWorkspace}`;
+    }
+    return 'default/default';
+}
+function convertCacheFormatToEntries(inputs, _action) {
+    if (!inputs.path || !inputs.key) {
+        throw new Error('actions/cache format requires both path and key inputs');
+    }
+    const pathInput = inputs.path;
+    const keyInput = inputs.key;
+    const noPlatformInput = inputs.noPlatform;
+    const enableCrossOsArchiveInput = inputs.enableCrossOsArchive;
+    const workingDirectoryInput = inputs.workingDirectory;
+    const baseDir = (workingDirectoryInput === null || workingDirectoryInput === void 0 ? void 0 : workingDirectoryInput.trim()) || undefined;
+    const paths = pathInput
+        .split('\n')
+        .map(p => p.trim())
+        .filter(p => p);
+    const shouldDisablePlatform = noPlatformInput || enableCrossOsArchiveInput || false;
+    const platformSuffix = getPlatformSuffix(shouldDisablePlatform, enableCrossOsArchiveInput || false);
+    const fullKey = keyInput + platformSuffix;
+    return paths.map(p => `${fullKey}:${resolvePath(p, baseDir)}`).join(',');
+}
+
+
+/***/ }),
+
+/***/ 14476:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getMiseBinPath = getMiseBinPath;
+exports.getMiseDataDir = getMiseDataDir;
+exports.getMiseInstallsDir = getMiseInstallsDir;
+exports.getMiseShimsDir = getMiseShimsDir;
+exports.slugMiseTagPart = slugMiseTagPart;
+exports.scopeMiseToolVersion = scopeMiseToolVersion;
+exports.buildMiseToolTag = buildMiseToolTag;
+exports.buildMiseRuntimeTag = buildMiseRuntimeTag;
+exports.hasMiseToolVersion = hasMiseToolVersion;
+exports.hasToolVersionOnPath = hasToolVersionOnPath;
+exports.installMise = installMise;
+exports.installMiseTool = installMiseTool;
+exports.activateMiseTool = activateMiseTool;
+exports.reshimMise = reshimMise;
+exports.exportMiseEnv = exportMiseEnv;
+exports.readToolVersions = readToolVersions;
+exports.readToolVersionsValue = readToolVersionsValue;
+exports.readMiseTomlTools = readMiseTomlTools;
+exports.readMiseTomlVersion = readMiseTomlVersion;
+exports.readProjectMiseTools = readProjectMiseTools;
+const core = __importStar(__nccwpck_require__(37484));
+const exec = __importStar(__nccwpck_require__(95236));
+const cache = __importStar(__nccwpck_require__(5116));
+const crypto = __importStar(__nccwpck_require__(76982));
+const fs = __importStar(__nccwpck_require__(79896));
+const os = __importStar(__nccwpck_require__(70857));
+const path = __importStar(__nccwpck_require__(16928));
+const tc = __importStar(__nccwpck_require__(33472));
+const isWindows = process.platform === 'win32';
+const MISE_TOOL_NAME = 'mise';
+const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
+const DEFAULT_MISE_VERSION = 'v2026.3.8';
+function getMiseBinPath() {
+    const homedir = os.homedir();
+    return isWindows
+        ? path.join(homedir, '.local', 'bin', 'mise.exe')
+        : path.join(homedir, '.local', 'bin', 'mise');
+}
+function getMiseDataDir() {
+    if (isWindows) {
+        return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'mise');
+    }
+    return path.join(os.homedir(), '.local', 'share', 'mise');
+}
+function getMiseInstallsDir() {
+    return process.env.MISE_INSTALLS_DIR || path.join(getMiseDataDir(), 'installs');
+}
+function getMiseShimsDir() {
+    return path.join(getMiseDataDir(), 'shims');
+}
+function slugMiseTagPart(value) {
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/^v(?=\d)/, '')
+        .replace(/[^a-z0-9._-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[.-]+|[.-]+$/g, '');
+    return normalized || 'unknown';
+}
+function scopeMiseToolVersion(version, scope = 'patch') {
+    const normalized = version.trim().replace(/^v(?=\d)/, '');
+    const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
+    if (!match) {
+        return slugMiseTagPart(normalized);
+    }
+    const [, major, minor, patch] = match;
+    if (scope === 'major' || !minor) {
+        return major;
+    }
+    if (scope === 'minor' || !patch) {
+        return `${major}.${minor}`;
+    }
+    return `${major}.${minor}.${patch}`;
+}
+function buildMiseToolTag(tools, scope = 'patch') {
+    return tools
+        .map((tool) => `${slugMiseTagPart(tool.name)}-${slugMiseTagPart(scopeMiseToolVersion(tool.version, scope))}`)
+        .sort()
+        .join('-');
+}
+function buildMiseRuntimeTag(prefix, tools, scope = 'patch') {
+    const toolTag = buildMiseToolTag(tools, scope);
+    if (!toolTag) {
+        return slugMiseTagPart(prefix);
+    }
+    return `${slugMiseTagPart(prefix)}-mise-${toolTag}`;
+}
+async function hasMiseToolVersion(toolName, version) {
+    const normalizedTool = normalizeToolName(toolName);
+    let output = '';
+    const exitCode = await exec.exec(getMiseBinPath(), ['ls', normalizedTool, '--installed', '--json'], {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                output += data.toString();
+            },
+        },
+    });
+    if (exitCode !== 0 || !output.trim()) {
+        return false;
+    }
+    let entries;
+    try {
+        const parsed = JSON.parse(output);
+        if (Array.isArray(parsed)) {
+            entries = parsed;
+        }
+        else if (Array.isArray(parsed === null || parsed === void 0 ? void 0 : parsed.versions)) {
+            entries = parsed.versions;
+        }
+        else {
+            return false;
+        }
+    }
+    catch {
+        return false;
+    }
+    return entries.some((entry) => entry.installed !== false && isMatchingToolVersion(version, entry.version || ''));
+}
+async function hasToolVersionOnPath(toolName, version) {
+    const normalizedTool = normalizeToolName(toolName);
+    const probes = getToolVersionProbes(normalizedTool);
+    for (const probe of probes) {
+        const detectedVersion = await detectToolVersion(probe);
+        if (detectedVersion && isMatchingToolVersion(version, detectedVersion)) {
+            return true;
+        }
+    }
+    return false;
+}
+async function installMise() {
+    const version = getMiseVersion();
+    const normalizedVersion = version.replace(/^v/, '');
+    const platform = getMisePlatformInfo();
+    const cacheInfo = getMiseToolCacheInfo(version, platform);
+    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
+    const cachePaths = [`${toolCacheRoot}/${MISE_TOOL_NAME}`];
+    let restoredFromCache = false;
+    try {
+        const cacheKey = await cache.restoreCache(cachePaths, cacheInfo.cacheKey);
+        if (cacheKey) {
+            core.info(`Restored mise from cache (key: ${cacheKey})`);
+            restoredFromCache = true;
+        }
+    }
+    catch (error) {
+        core.debug(`mise cache restore failed: ${error instanceof Error ? error.message : error}`);
+    }
+    let toolPath = tc.find(MISE_TOOL_NAME, normalizedVersion);
+    if (toolPath) {
+        core.info(`Using cached mise ${version}`);
+    }
+    else {
+        core.info(`Installing mise ${version}...`);
+        toolPath = await downloadAndInstallMise(version, platform);
+        try {
+            await cache.saveCache(cachePaths, cacheInfo.cacheKey);
+            core.info(`Saved mise to cache (key: ${cacheInfo.cacheKey})`);
+        }
+        catch (error) {
+            core.debug(`mise cache save failed: ${error instanceof Error ? error.message : error}`);
+        }
+    }
+    if (!toolPath) {
+        throw new Error(`Failed to install mise ${version}`);
+    }
+    if (restoredFromCache && !tc.find(MISE_TOOL_NAME, normalizedVersion)) {
+        core.debug(`mise cache restored but tool cache lookup for ${version} remained empty`);
+    }
+    await materializeMiseBinary(toolPath, platform);
+    core.addPath(toolPath);
+    core.addPath(path.dirname(getMiseBinPath()));
+    core.addPath(getMiseShimsDir());
+    core.info(`mise ${version} ready`);
+}
+function getMiseVersion() {
+    const value = process.env.MISE_VERSION || DEFAULT_MISE_VERSION;
+    return value.startsWith('v') ? value : `v${value}`;
+}
+function getMisePlatformInfo() {
+    const runnerOS = process.env.RUNNER_OS || os.platform();
+    const runnerArch = process.env.RUNNER_ARCH || os.arch();
+    const osName = normalizeRunnerOs(runnerOS);
+    const arch = normalizeRunnerArch(runnerArch);
+    const version = getMiseVersion();
+    if (osName === 'windows') {
+        return {
+            os: osName,
+            arch,
+            assetName: `mise-${version}-windows-${arch}.zip`,
+            binaryName: 'mise.exe',
+            isWindows: true,
+        };
+    }
+    return {
+        os: osName,
+        arch,
+        assetName: `mise-${version}-${osName}-${arch}`,
+        binaryName: 'mise',
+        isWindows: false,
+    };
+}
+function normalizeRunnerOs(value) {
+    const normalized = value.toLowerCase();
+    if (normalized === 'darwin' || normalized === 'macos') {
+        return 'macos';
+    }
+    if (normalized === 'win32' || normalized === 'windows') {
+        return 'windows';
+    }
+    if (normalized === 'linux') {
+        return 'linux';
+    }
+    throw new Error(`Unsupported platform for mise: OS=${value}`);
+}
+function normalizeRunnerArch(value) {
+    const normalized = value.toLowerCase();
+    if (normalized === 'x64' || normalized === 'amd64') {
+        return 'x64';
+    }
+    if (normalized === 'arm64' || normalized === 'aarch64') {
+        return 'arm64';
+    }
+    throw new Error(`Unsupported architecture for mise: ARCH=${value}`);
+}
+function getMiseToolCacheInfo(version, platform) {
+    const normalizedVersion = version.replace(/^v/, '');
+    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
+    return {
+        cacheKey: `${MISE_TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.arch}`,
+        cachePattern: `${toolCacheRoot}/${MISE_TOOL_NAME}/${normalizedVersion}*`,
+    };
+}
+function getMiseDownloadUrl(version, assetName) {
+    return `${MISE_RELEASES_BASE}/${version}/${assetName}`;
+}
+function getMiseChecksumsUrl(version) {
+    return `${MISE_RELEASES_BASE}/${version}/SHASUMS256.txt`;
+}
+async function computeFileHash(filePath) {
+    const fileBuffer = await fs.promises.readFile(filePath);
+    const hashSum = crypto.createHash('sha256');
+    hashSum.update(fileBuffer);
+    return hashSum.digest('hex');
+}
+function parseChecksums(content, assetName) {
+    for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            continue;
+        }
+        const match = trimmed.match(/^([a-f0-9]{64})\s+(.+)$/i);
+        if (!match) {
+            continue;
+        }
+        const [, hash, filename] = match;
+        if (filename === assetName || filename.endsWith(`/${assetName}`)) {
+            return hash.toLowerCase();
+        }
+    }
+    return null;
+}
+async function getExpectedChecksum(version, assetName) {
+    const checksumsPath = await tc.downloadTool(getMiseChecksumsUrl(version));
+    const content = await fs.promises.readFile(checksumsPath, 'utf-8');
+    const checksum = parseChecksums(content, assetName);
+    if (!checksum) {
+        throw new Error(`Checksum not found for mise asset: ${assetName}`);
+    }
+    return checksum;
+}
+async function verifyChecksum(filePath, expectedChecksum, assetName) {
+    const actualChecksum = await computeFileHash(filePath);
+    if (actualChecksum !== expectedChecksum) {
+        throw new Error(`Checksum verification failed for ${assetName}:\n` +
+            `  Expected: ${expectedChecksum}\n` +
+            `  Actual:   ${actualChecksum}`);
+    }
+}
+async function downloadAndInstallMise(version, platform) {
+    const downloadUrl = getMiseDownloadUrl(version, platform.assetName);
+    core.info(`Downloading mise from: ${downloadUrl}`);
+    const downloadedPath = await tc.downloadTool(downloadUrl);
+    const expectedChecksum = await getExpectedChecksum(version, platform.assetName);
+    await verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
+    const installDir = path.join(os.tmpdir(), 'mise-install', version.replace(/^v/, ''));
+    await fs.promises.mkdir(installDir, { recursive: true });
+    const binaryPath = path.join(installDir, platform.binaryName);
+    if (platform.isWindows) {
+        const extractedPath = await tc.extractZip(downloadedPath);
+        const extractedBinary = await findMiseBinary(extractedPath, platform.binaryName);
+        await fs.promises.copyFile(extractedBinary, binaryPath);
+    }
+    else {
+        await fs.promises.copyFile(downloadedPath, binaryPath);
+        await fs.promises.chmod(binaryPath, 0o755);
+    }
+    return tc.cacheDir(installDir, MISE_TOOL_NAME, version.replace(/^v/, ''));
+}
+async function materializeMiseBinary(toolPath, platform) {
+    const sourceBinary = path.join(toolPath, platform.binaryName);
+    const targetBinary = getMiseBinPath();
+    await fs.promises.mkdir(path.dirname(targetBinary), { recursive: true });
+    await fs.promises.copyFile(sourceBinary, targetBinary);
+    if (!platform.isWindows) {
+        await fs.promises.chmod(targetBinary, 0o755);
+    }
+}
+async function findMiseBinary(extractedPath, binaryName) {
+    const candidates = [
+        path.join(extractedPath, 'mise', 'bin', binaryName),
+        path.join(extractedPath, 'bin', binaryName),
+        path.join(extractedPath, binaryName),
+    ];
+    for (const candidate of candidates) {
+        try {
+            await fs.promises.access(candidate);
+            return candidate;
+        }
+        catch {
+            continue;
+        }
+    }
+    throw new Error(`Unable to locate ${binaryName} in extracted mise archive`);
+}
+async function installMiseTool(toolName, version, options = {}) {
+    var _a;
+    const spec = `${toolName}@${version}`;
+    const label = options.label || toolName;
+    const global = (_a = options.global) !== null && _a !== void 0 ? _a : true;
+    core.info(`Installing ${label} ${version} via mise...`);
+    await exec.exec(getMiseBinPath(), ['install', spec], { env: options.env });
+    await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
+}
+function normalizeToolVersion(value) {
+    return value.trim().replace(/^v(?=\d)/, '');
+}
+function isMatchingToolVersion(requested, candidate) {
+    const normalizedRequested = normalizeToolVersion(requested);
+    const normalizedCandidate = normalizeToolVersion(candidate);
+    if (!normalizedRequested || !normalizedCandidate) {
+        return false;
+    }
+    const requestedParts = extractNumericVersionParts(normalizedRequested);
+    const candidateParts = extractNumericVersionParts(normalizedCandidate);
+    if (requestedParts.length > 0 || candidateParts.length > 0) {
+        if (requestedParts.length === 0 || requestedParts.length > candidateParts.length) {
+            return false;
+        }
+        return requestedParts.every((part, index) => part === candidateParts[index]);
+    }
+    return slugMiseTagPart(normalizedRequested) === slugMiseTagPart(normalizedCandidate);
+}
+function extractNumericVersionParts(value) {
+    var _a;
+    const baseVersion = normalizeToolVersion(value).split('+')[0].trim();
+    const numericPrefix = (_a = baseVersion.match(/^\d+(?:\.\d+)*/)) === null || _a === void 0 ? void 0 : _a[0];
+    if (!numericPrefix) {
+        return [];
+    }
+    return numericPrefix
+        .split('.')
+        .map(normalizeVersionSegment)
+        .filter(Boolean);
+}
+function normalizeVersionSegment(value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return '';
+    }
+    const numericMatch = trimmed.match(/^\d+/);
+    return numericMatch ? numericMatch[0] : trimmed;
+}
+async function detectToolVersion(probe) {
+    let stdout = '';
+    let stderr = '';
+    let exitCode;
+    try {
+        exitCode = await exec.exec(probe.command, probe.args, {
+            ignoreReturnCode: true,
+            silent: true,
+            listeners: {
+                stdout: (data) => {
+                    stdout += data.toString();
+                },
+                stderr: (data) => {
+                    stderr += data.toString();
+                },
+            },
+        });
+    }
+    catch (error) {
+        core.debug(`Skipping PATH probe for ${probe.command}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+    if (exitCode !== 0) {
+        return null;
+    }
+    const output = probe.stream === 'stderr'
+        ? stderr
+        : probe.stream === 'combined'
+            ? `${stdout}\n${stderr}`
+            : stdout;
+    return extractVersionFromOutput(output, probe.versionPattern);
+}
+function extractVersionFromOutput(output, versionPattern) {
+    const pattern = versionPattern || /\bv?(\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?)\b/;
+    const match = output.match(pattern);
+    if (!match) {
+        return null;
+    }
+    return match[1] || match[0] || null;
+}
+function getToolVersionProbes(toolName) {
+    switch (toolName) {
+        case 'bazel':
+            return [
+                { command: 'bazel', args: ['--version'], versionPattern: /bazel\s+([0-9A-Za-z.+-]+)/i },
+                { command: 'bazelisk', args: ['version'], versionPattern: /Build label:\s*([0-9A-Za-z.+-]+)/i, stream: 'combined' },
+            ];
+        case 'bun':
+            return [{ command: 'bun', args: ['--version'] }];
+        case 'elixir':
+            return [{ command: 'elixir', args: ['--version'], versionPattern: /Elixir\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
+        case 'erlang':
+            return [{
+                    command: 'erl',
+                    args: ['-noshell', '-eval', 'io:format("~s", [erlang:system_info(otp_release)]), halt().'],
+                }];
+        case 'go':
+            return [{ command: 'go', args: ['version'], versionPattern: /go version go([0-9A-Za-z.+-]+)/i }];
+        case 'gradle':
+            return [{ command: 'gradle', args: ['--version'], versionPattern: /Gradle\s+([0-9A-Za-z.+-]+)/i }];
+        case 'java':
+            return [{ command: 'java', args: ['-version'], versionPattern: /version\s+"([0-9A-Za-z.+-]+)"/i, stream: 'stderr' }];
+        case 'maven':
+            return [{ command: 'mvn', args: ['--version'], versionPattern: /Apache Maven\s+([0-9A-Za-z.+-]+)/i }];
+        case 'node':
+            return [{ command: 'node', args: ['--version'] }];
+        case 'npm':
+            return [{ command: 'npm', args: ['--version'] }];
+        case 'pnpm':
+            return [{ command: 'pnpm', args: ['--version'] }];
+        case 'composer':
+            return [{ command: 'composer', args: ['--version'], versionPattern: /Composer version\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
+        case 'php':
+            return [{ command: 'php', args: ['--version'], versionPattern: /PHP\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
+        case 'python':
+            return [
+                { command: 'python3', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
+                { command: 'python', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
+            ];
+        case 'ruby':
+            return [{ command: 'ruby', args: ['--version'], versionPattern: /ruby\s+([0-9A-Za-z.+-]+)/i }];
+        case 'rust':
+            return [{ command: 'rustc', args: ['--version'], versionPattern: /rustc\s+([0-9A-Za-z.+-]+)/i }];
+        case 'sccache':
+            return [{ command: 'sccache', args: ['--version'], versionPattern: /sccache\s+([0-9A-Za-z.+-]+)/i }];
+        case 'turbo':
+            return [{ command: 'turbo', args: ['--version'] }];
+        case 'uv':
+            return [{ command: 'uv', args: ['--version'] }];
+        case 'yarn':
+            return [{ command: 'yarn', args: ['--version'] }];
+        default:
+            return [];
+    }
+}
+async function activateMiseTool(toolName, version, options = {}) {
+    var _a;
+    const spec = `${toolName}@${version}`;
+    const label = options.label || toolName;
+    const global = (_a = options.global) !== null && _a !== void 0 ? _a : true;
+    core.info(`Activating ${label} ${version}...`);
+    await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
+}
+async function reshimMise(force = true) {
+    const args = force ? ['reshim', '-f'] : ['reshim'];
+    core.info('Refreshing mise shims...');
+    await exec.exec(getMiseBinPath(), args);
+}
+async function exportMiseEnv(cwd) {
+    core.info('Exporting mise environment...');
+    const envVars = await readMiseEnvJson(cwd);
+    if (envVars) {
+        for (const [key, value] of Object.entries(envVars)) {
+            if (typeof value === 'string') {
+                core.exportVariable(key, value);
+            }
+        }
+        return;
+    }
+    const dotenv = await readMiseEnvDotenv(cwd);
+    for (const [key, value] of parseDotenvLines(dotenv)) {
+        core.exportVariable(key, value);
+    }
+}
+function buildUseArgs(spec, global) {
+    return global ? ['use', '-g', spec] : ['use', spec];
+}
+async function readMiseEnvJson(cwd) {
+    let output = '';
+    const exitCode = await exec.exec(getMiseBinPath(), ['env', '--json'], {
+        cwd,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                output += data.toString();
+            },
+        },
+    });
+    if (exitCode !== 0 || !output.trim()) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(output);
+        return Object.fromEntries(Object.entries(parsed).filter((entry) => typeof entry[1] === 'string'));
+    }
+    catch {
+        return null;
+    }
+}
+async function readMiseEnvDotenv(cwd) {
+    let output = '';
+    const exitCode = await exec.exec(getMiseBinPath(), ['env', '--dotenv'], {
+        cwd,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                output += data.toString();
+            },
+        },
+    });
+    if (exitCode !== 0) {
+        throw new Error('Failed to export mise environment');
+    }
+    return output;
+}
+function parseDotenvLines(content) {
+    const entries = [];
+    for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) {
+            continue;
+        }
+        const separatorIndex = line.indexOf('=');
+        if (separatorIndex <= 0) {
+            continue;
+        }
+        const key = line.slice(0, separatorIndex).trim();
+        const rawValue = line.slice(separatorIndex + 1).trim();
+        const value = rawValue.replace(/^['"]|['"]$/g, '');
+        if (key) {
+            entries.push([key, value]);
+        }
+    }
+    return entries;
+}
+async function readToolVersions(workingDir) {
+    const toolVersionsPath = path.join(workingDir, '.tool-versions');
+    try {
+        const content = await fs.promises.readFile(toolVersionsPath, 'utf-8');
+        const tools = new Map();
+        for (const rawLine of content.split(/\r?\n/)) {
+            const line = stripTomlComment(rawLine).trim();
+            if (!line) {
+                continue;
+            }
+            const [toolName, version] = line.split(/\s+/, 3);
+            if (!toolName || !version) {
+                continue;
+            }
+            tools.set(normalizeToolName(toolName), version.trim());
+        }
+        return Array.from(tools, ([name, version]) => ({ name, version }));
+    }
+    catch {
+        return [];
+    }
+}
+async function readToolVersionsValue(workingDir, toolName) {
+    var _a;
+    const normalizedToolName = normalizeToolName(toolName);
+    const tools = await readToolVersions(workingDir);
+    return ((_a = tools.find((tool) => tool.name === normalizedToolName)) === null || _a === void 0 ? void 0 : _a.version) || null;
+}
+async function readMiseTomlTools(workingDir) {
+    const miseToml = path.join(workingDir, 'mise.toml');
+    try {
+        const content = await fs.promises.readFile(miseToml, 'utf-8');
+        const toolsBlock = extractToolsBlock(content);
+        if (!toolsBlock) {
+            return [];
+        }
+        const tools = new Map();
+        const lines = toolsBlock.split(/\r?\n/);
+        for (let index = 0; index < lines.length; index += 1) {
+            const parsedLine = stripTomlComment(lines[index]).trim();
+            if (!parsedLine) {
+                continue;
+            }
+            const assignmentMatch = parsedLine.match(/^([A-Za-z0-9._-]+)\s*=\s*(.+)$/);
+            if (!assignmentMatch) {
+                continue;
+            }
+            const [, rawToolName, rawValue] = assignmentMatch;
+            const toolName = normalizeToolName(rawToolName);
+            const value = rawValue.trim();
+            const stringVersion = value.match(/^["']([^"']+)["']$/);
+            if (stringVersion === null || stringVersion === void 0 ? void 0 : stringVersion[1]) {
+                tools.set(toolName, stringVersion[1]);
+                continue;
+            }
+            const inlineVersion = extractInlineTableVersion(value);
+            if (inlineVersion) {
+                tools.set(toolName, inlineVersion);
+                continue;
+            }
+            if (value.startsWith('{')) {
+                let blockValue = value;
+                let braceDepth = countBraceDelta(value);
+                while (braceDepth > 0 && index + 1 < lines.length) {
+                    index += 1;
+                    const nextLine = stripTomlComment(lines[index]).trim();
+                    blockValue = `${blockValue}\n${nextLine}`;
+                    braceDepth += countBraceDelta(nextLine);
+                }
+                const blockVersion = extractInlineTableVersion(blockValue);
+                if (blockVersion) {
+                    tools.set(toolName, blockVersion);
+                }
+            }
+        }
+        return Array.from(tools, ([name, version]) => ({ name, version }));
+    }
+    catch {
+        return [];
+    }
+}
+async function readMiseTomlVersion(workingDir, toolName) {
+    var _a;
+    const normalizedToolName = normalizeToolName(toolName);
+    const tools = await readMiseTomlTools(workingDir);
+    return ((_a = tools.find((tool) => tool.name === normalizedToolName)) === null || _a === void 0 ? void 0 : _a.version) || null;
+}
+async function readProjectMiseTools(workingDir) {
+    const toolVersions = await readToolVersions(workingDir);
+    const miseTomlTools = await readMiseTomlTools(workingDir);
+    const merged = new Map();
+    for (const tool of toolVersions) {
+        merged.set(tool.name, tool.version);
+    }
+    for (const tool of miseTomlTools) {
+        merged.set(tool.name, tool.version);
+    }
+    return Array.from(merged, ([name, version]) => ({ name, version }));
+}
+function extractToolsBlock(content) {
+    const lines = content.split(/\r?\n/);
+    const block = [];
+    let inToolsBlock = false;
+    for (const rawLine of lines) {
+        const line = stripTomlComment(rawLine).trim();
+        if (!inToolsBlock) {
+            if (line === '[tools]') {
+                inToolsBlock = true;
+            }
+            continue;
+        }
+        if (line.startsWith('[') && line.endsWith(']')) {
+            break;
+        }
+        block.push(rawLine);
+    }
+    return inToolsBlock ? block.join('\n') : null;
+}
+function extractInlineTableVersion(value) {
+    const versionMatch = value.match(/\bversion\s*=\s*["']([^"']+)["']/);
+    return (versionMatch === null || versionMatch === void 0 ? void 0 : versionMatch[1]) || null;
+}
+function countBraceDelta(value) {
+    let delta = 0;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let isEscaped = false;
+    for (const character of value) {
+        if (isEscaped) {
+            isEscaped = false;
+            continue;
+        }
+        if (character === '\\' && inDoubleQuote) {
+            isEscaped = true;
+            continue;
+        }
+        if (!inDoubleQuote && character === '\'') {
+            inSingleQuote = !inSingleQuote;
+            continue;
+        }
+        if (!inSingleQuote && character === '"') {
+            inDoubleQuote = !inDoubleQuote;
+            continue;
+        }
+        if (inSingleQuote || inDoubleQuote) {
+            continue;
+        }
+        if (character === '{') {
+            delta += 1;
+        }
+        else if (character === '}') {
+            delta -= 1;
+        }
+    }
+    return delta;
+}
+function stripTomlComment(value) {
+    let result = '';
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let isEscaped = false;
+    for (const character of value) {
+        if (isEscaped) {
+            result += character;
+            isEscaped = false;
+            continue;
+        }
+        if (character === '\\' && inDoubleQuote) {
+            result += character;
+            isEscaped = true;
+            continue;
+        }
+        if (!inDoubleQuote && character === '\'') {
+            inSingleQuote = !inSingleQuote;
+            result += character;
+            continue;
+        }
+        if (!inSingleQuote && character === '"') {
+            inDoubleQuote = !inDoubleQuote;
+            result += character;
+            continue;
+        }
+        if (!inSingleQuote && !inDoubleQuote && character === '#') {
+            break;
+        }
+        result += character;
+    }
+    return result;
+}
+function normalizeToolName(value) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'nodejs') {
+        return 'node';
+    }
+    if (normalized === 'golang') {
+        return 'go';
+    }
+    return normalized;
+}
+
+
+/***/ }),
+
+/***/ 58328:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.normalizeProxyTags = normalizeProxyTags;
+exports.startRegistryProxy = startRegistryProxy;
+exports.stopRegistryProxy = stopRegistryProxy;
+exports.findAvailablePort = findAvailablePort;
+const core = __importStar(__nccwpck_require__(37484));
+const fs = __importStar(__nccwpck_require__(79896));
+const net = __importStar(__nccwpck_require__(69278));
+const os = __importStar(__nccwpck_require__(70857));
+const path = __importStar(__nccwpck_require__(16928));
+const child_process_1 = __nccwpck_require__(35317);
+const auth_1 = __nccwpck_require__(46840);
+const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
+const PROXY_READY_TIMEOUT_MS = 300000;
+const PROXY_READY_POLL_INTERVAL_MS = 200;
+const PROXY_READY_WARN_INTERVAL_MS = 10000;
+function normalizeProxyTags(tagInput) {
+    const tags = [];
+    const seen = new Set();
+    for (const rawTag of tagInput.split(',')) {
+        const tag = rawTag.trim();
+        if (!tag || seen.has(tag)) {
+            continue;
+        }
+        seen.add(tag);
+        tags.push(tag);
+    }
+    if (tags.length === 0) {
+        throw new Error('At least one proxy tag is required');
+    }
+    return tags.join(',');
+}
+function isProcessAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function proxyLogPath(port) {
+    return path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
+}
+function readProxyLogs(port) {
+    try {
+        return fs.readFileSync(proxyLogPath(port), 'utf-8').trim();
+    }
+    catch {
+        return '';
+    }
+}
+function proxyProbeHost(host) {
+    return host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+}
+async function isProxyRunning(host, port) {
+    const probeHost = proxyProbeHost(host);
+    return await new Promise((resolve) => {
+        const socket = net.createConnection({ host: probeHost, port });
+        let settled = false;
+        const finish = (value) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            socket.destroy();
+            resolve(value);
+        };
+        socket.setTimeout(1000);
+        socket.once('connect', () => finish(true));
+        socket.once('timeout', () => finish(false));
+        socket.once('error', () => finish(false));
+        socket.once('close', () => finish(false));
+    });
+}
+function proxyReadyFilePath(port) {
+    return path.join(os.tmpdir(), `boringcache-proxy-${port}.ready`);
+}
+function clearProxyReadyFile(readyFile) {
+    try {
+        fs.unlinkSync(readyFile);
+    }
+    catch {
+        // Ignore missing or inaccessible ready markers; startup will recreate them.
+    }
+}
+async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_MS, port, pid) {
+    const start = Date.now();
+    let lastLogAt = 0;
+    while (Date.now() - start < timeoutMs) {
+        if (fs.existsSync(readyFile)) {
+            const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+            core.info(`Registry proxy is ready (${elapsed}s)`);
+            clearProxyReadyFile(readyFile);
+            return;
+        }
+        if (pid && pid > 0 && !isProcessAlive(pid)) {
+            const logs = port ? readProxyLogs(port) : '';
+            throw new Error(`Registry proxy exited before becoming ready${logs ? `:\n${logs}` : ''}`);
+        }
+        const elapsed = Date.now() - start;
+        if (elapsed - lastLogAt >= PROXY_READY_WARN_INTERVAL_MS) {
+            core.info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
+            lastLogAt = elapsed;
+        }
+        await new Promise((resolve) => setTimeout(resolve, PROXY_READY_POLL_INTERVAL_MS));
+    }
+    const logs = port ? readProxyLogs(port) : '';
+    throw new Error(`Registry proxy did not become ready within ${timeoutMs}ms${logs ? `:\n${logs}` : ''}`);
+}
+/**
+ * Start the cache-registry proxy.
+ * Spawns a detached boringcache process, writes PID file, returns handle.
+ */
+async function startRegistryProxy(options) {
+    var _a;
+    (0, auth_1.warnIfUsingLegacyApiToken)();
+    const { restoreToken, saveToken } = (0, auth_1.getAuthTokens)();
+    let effectiveReadOnly = options.readOnly === true;
+    let authToken = effectiveReadOnly ? restoreToken : saveToken;
+    if (!authToken && !effectiveReadOnly && restoreToken) {
+        effectiveReadOnly = true;
+        authToken = restoreToken;
+        core.info('No save-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN');
+    }
+    if (!authToken) {
+        if (effectiveReadOnly) {
+            throw new Error(`${(0, auth_1.missingRestoreTokenMessage)()} This is required for registry proxy mode.`);
+        }
+        throw new Error(`${(0, auth_1.missingSaveTokenMessage)()} This is required for registry proxy mode.`);
+    }
+    const host = options.host || '127.0.0.1';
+    const cliCommand = 'cache-registry';
+    const normalizedTags = normalizeProxyTags(options.tag);
+    const tagList = normalizedTags.split(',');
+    const primaryTag = tagList[0];
+    const readyFile = proxyReadyFilePath(options.port);
+    if (await isProxyRunning(host, options.port)) {
+        core.info(`Registry proxy already running on port ${options.port}, reusing`);
+        try {
+            const pid = parseInt(fs.readFileSync(PROXY_PID_FILE, 'utf-8').trim(), 10);
+            if (pid > 0)
+                return { pid, port: options.port, readOnly: effectiveReadOnly };
+        }
+        catch { }
+        return { pid: -1, port: options.port, readOnly: effectiveReadOnly };
+    }
+    clearProxyReadyFile(readyFile);
+    const args = [cliCommand, options.workspace, normalizedTags];
+    if (options.noGit) {
+        args.push('--no-git');
+    }
+    if (options.noPlatform) {
+        args.push('--no-platform');
+    }
+    args.push('--host', host, '--port', String(options.port));
+    args.push('--ready-file', readyFile);
+    if (options.onDemand) {
+        args.push('--on-demand');
+    }
+    for (const ref of options.ociPrefetchRefs || []) {
+        const trimmed = ref.trim();
+        if (trimmed) {
+            args.push('--oci-prefetch-ref', trimmed);
+        }
+    }
+    for (const [key, value] of Object.entries(options.metadataHints || {})) {
+        args.push('--metadata-hint', `${key}=${value}`);
+    }
+    if (effectiveReadOnly) {
+        args.push('--read-only');
+    }
+    if (options.verbose) {
+        args.push('--verbose');
+    }
+    core.info(`Starting registry proxy on ${host}:${options.port}...`);
+    core.info(`Registry proxy primary tag: ${primaryTag}`);
+    if (tagList.length > 1) {
+        core.info(`Registry proxy alias tags: ${tagList.slice(1).join(', ')}`);
+    }
+    if (effectiveReadOnly) {
+        core.info('Registry proxy mode: read-only');
+    }
+    core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
+    if ((_a = options.ociPrefetchRefs) === null || _a === void 0 ? void 0 : _a.length) {
+        core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
+    }
+    const logFile = proxyLogPath(options.port);
+    const logFd = fs.openSync(logFile, 'w');
+    const child = (0, child_process_1.spawn)('boringcache', args, {
+        detached: true,
+        stdio: ['ignore', logFd, logFd],
+        env: {
+            ...process.env,
+            BORINGCACHE_API_TOKEN: authToken,
+        }
+    });
+    child.unref();
+    fs.closeSync(logFd);
+    if (!child.pid) {
+        throw new Error('Failed to start registry proxy');
+    }
+    fs.writeFileSync(PROXY_PID_FILE, String(child.pid));
+    core.info(`Registry proxy started (PID: ${child.pid})`);
+    const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
+    try {
+        await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
+        return handle;
+    }
+    catch (error) {
+        try {
+            await stopRegistryProxy(child.pid);
+        }
+        catch {
+            // Keep the original readiness failure as the primary error.
+        }
+        clearProxyReadyFile(readyFile);
+        throw error;
+    }
+}
+/**
+ * Graceful stop: send SIGTERM and wait for the proxy to exit on its own.
+ * The proxy handles SIGTERM by flushing all pending blobs to the backend,
+ * then exits. Never send SIGKILL — the proxy owns its own shutdown timing.
+ */
+async function stopRegistryProxy(pid) {
+    if (pid <= 0) {
+        core.info('No proxy PID to stop (was reused from another invocation)');
+        return;
+    }
+    core.info(`Stopping registry proxy (PID: ${pid})...`);
+    try {
+        process.kill(pid, 'SIGTERM');
+    }
+    catch (err) {
+        const code = err.code;
+        if (code === 'ESRCH') {
+            core.info(`Registry proxy (PID: ${pid}) already exited`);
+            return;
+        }
+        core.warning(`Failed to send SIGTERM to registry proxy: ${err.message}`);
+        return;
+    }
+    const start = Date.now();
+    const pollInterval = 1000;
+    const logInterval = 30000;
+    let lastLog = start;
+    while (true) {
+        if (!isProcessAlive(pid)) {
+            core.info(`Registry proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
+            return;
+        }
+        const now = Date.now();
+        if (now - lastLog >= logInterval) {
+            core.info(`Waiting for registry proxy to flush and exit... (${Math.round((now - start) / 1000)}s elapsed)`);
+            lastLog = now;
+        }
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+}
+/**
+ * Bind to port 0 and return the assigned port.
+ */
+async function findAvailablePort() {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.listen(0, '127.0.0.1', () => {
+            const addr = server.address();
+            if (addr && typeof addr !== 'string') {
+                const port = addr.port;
+                server.close(() => resolve(port));
+            }
+            else {
+                server.close(() => reject(new Error('Failed to get port')));
+            }
+        });
+        server.on('error', reject);
+    });
+}
+
+
+/***/ }),
+
+/***/ 51529:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getToolCacheInfo = getToolCacheInfo;
+exports.isCliAvailable = isCliAvailable;
+exports.ensureBoringCache = ensureBoringCache;
+exports.execBoringCache = execBoringCache;
+const core = __importStar(__nccwpck_require__(37484));
+const exec = __importStar(__nccwpck_require__(95236));
+const tc = __importStar(__nccwpck_require__(33472));
+const cache = __importStar(__nccwpck_require__(5116));
+const crypto = __importStar(__nccwpck_require__(76982));
+const fs = __importStar(__nccwpck_require__(79896));
+const os = __importStar(__nccwpck_require__(70857));
+const path = __importStar(__nccwpck_require__(16928));
+const auth_1 = __nccwpck_require__(46840);
+const TOOL_NAME = 'boringcache';
+const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
+/**
+ * Get tool cache information for a specific version.
+ * Use this to persist the tool cache across workflow runs with actions/cache.
+ */
+function getToolCacheInfo(version, platformOverride) {
+    const normalizedVersion = version.replace(/^v/, '');
+    const platform = getPlatformInfo(platformOverride);
+    const cachePath = tc.find(TOOL_NAME, normalizedVersion, platform.cacheKey);
+    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
+    return {
+        toolName: TOOL_NAME,
+        version: normalizedVersion,
+        cachePath: cachePath || null,
+        cachePattern: `${toolCacheRoot}/${TOOL_NAME}/${normalizedVersion}*`,
+        cacheKey: `${TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.cacheKey}`,
+        platformKey: platform.cacheKey,
+    };
+}
+function getPlatformInfo(platformOverride) {
+    if (platformOverride) {
+        const normalizedPlatform = platformOverride.trim().toLowerCase();
+        const isWindows = normalizedPlatform.includes('windows');
+        const arch = normalizedPlatform.includes('arm64') ? 'arm64' : 'amd64';
+        const legacyAssetName = `boringcache-${normalizedPlatform}${isWindows && !normalizedPlatform.endsWith('.exe') ? '.exe' : ''}`;
+        if (isWindows) {
+            const assetName = `boringcache-windows-${arch}.exe`;
+            return {
+                os: 'windows',
+                arch,
+                assetName,
+                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+                isWindows: true,
+                cacheKey: arch,
+            };
+        }
+        if (normalizedPlatform.includes('macos') || normalizedPlatform.includes('darwin')) {
+            const assetName = 'boringcache-macos-universal';
+            return {
+                os: 'macos',
+                arch,
+                assetName,
+                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+                isWindows: false,
+                cacheKey: 'universal',
+            };
+        }
+        const usesMusl = normalizedPlatform.includes('alpine') || normalizedPlatform.includes('musl');
+        const genericPlatform = `linux${usesMusl ? '-musl' : ''}-${arch}`;
+        const assetName = `boringcache-${genericPlatform}`;
+        return {
+            os: 'linux',
+            arch,
+            assetName,
+            fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+            isWindows: false,
+            cacheKey: usesMusl ? `musl-${arch}` : arch,
+        };
+    }
+    const runnerOS = process.env.RUNNER_OS || os.platform();
+    const runnerArch = process.env.RUNNER_ARCH || os.arch();
+    let normalizedOS = runnerOS;
+    let normalizedArch = runnerArch;
+    if (runnerOS === 'darwin' || runnerOS === 'Darwin') {
+        normalizedOS = 'macOS';
+    }
+    else if (runnerOS === 'win32' || runnerOS === 'Windows') {
+        normalizedOS = 'Windows';
+    }
+    else if (runnerOS === 'linux' || runnerOS === 'Linux') {
+        normalizedOS = 'Linux';
+    }
+    if (runnerArch === 'x64' || runnerArch === 'X64' || runnerArch === 'amd64') {
+        normalizedArch = 'X64';
+    }
+    else if (runnerArch === 'arm64' || runnerArch === 'ARM64' || runnerArch === 'aarch64') {
+        normalizedArch = 'ARM64';
+    }
+    const isWindows = normalizedOS === 'Windows';
+    let assetName;
+    switch (normalizedOS) {
+        case 'Linux':
+            assetName = normalizedArch === 'ARM64' ? 'boringcache-linux-arm64' : 'boringcache-linux-amd64';
+            break;
+        case 'macOS':
+            assetName = 'boringcache-macos-universal';
+            break;
+        case 'Windows':
+            assetName = normalizedArch === 'ARM64' ? 'boringcache-windows-arm64.exe' : 'boringcache-windows-amd64.exe';
+            break;
+        default:
+            throw new Error(`Unsupported platform: OS=${runnerOS}, ARCH=${runnerArch}`);
+    }
+    return {
+        os: normalizedOS.toLowerCase(),
+        arch: normalizedArch.toLowerCase(),
+        assetName,
+        isWindows,
+        cacheKey: normalizedOS === 'macOS'
+            ? 'universal'
+            : normalizedArch === 'ARM64'
+                ? 'arm64'
+                : 'amd64',
+    };
+}
+function getDownloadUrl(version, assetName) {
+    return `${GITHUB_RELEASES_BASE}/${version}/${assetName}`;
+}
+function getChecksumsUrl(version) {
+    return `${GITHUB_RELEASES_BASE}/${version}/SHA256SUMS`;
+}
+/**
+ * Compute SHA256 hash of a file
+ */
+async function computeFileHash(filePath) {
+    const fileBuffer = await fs.promises.readFile(filePath);
+    const hashSum = crypto.createHash('sha256');
+    hashSum.update(fileBuffer);
+    return hashSum.digest('hex');
+}
+/**
+ * Parse SHA256SUMS file content and extract checksum for a specific asset
+ * Format: <sha256>  <filename> (two spaces between hash and filename)
+ * or: <sha256> <filename> (single space)
+ */
+function parseChecksums(content, assetName) {
+    const lines = content.split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed)
+            continue;
+        // Match either "hash  filename" or "hash filename"
+        const match = trimmed.match(/^([a-f0-9]{64})\s+(.+)$/i);
+        if (match) {
+            const [, hash, filename] = match;
+            // Match exact filename or filename at end of path
+            if (filename === assetName || filename.endsWith(`/${assetName}`)) {
+                return hash.toLowerCase();
+            }
+        }
+    }
+    return null;
+}
+/**
+ * Download SHA256SUMS and get expected checksum for the asset
+ */
+async function getExpectedChecksum(version, assetName) {
+    const checksumsUrl = getChecksumsUrl(version);
+    core.debug(`Downloading checksums from: ${checksumsUrl}`);
+    try {
+        const checksumsPath = await tc.downloadTool(checksumsUrl);
+        const content = await fs.promises.readFile(checksumsPath, 'utf-8');
+        const checksum = parseChecksums(content, assetName);
+        if (!checksum) {
+            throw new Error(`Checksum not found for asset: ${assetName}`);
+        }
+        return checksum;
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to fetch checksums from ${checksumsUrl}: ${msg}`);
+    }
+}
+/**
+ * Verify file checksum matches expected value
+ */
+async function verifyChecksum(filePath, expectedChecksum, assetName) {
+    const actualChecksum = await computeFileHash(filePath);
+    if (actualChecksum !== expectedChecksum) {
+        throw new Error(`Checksum verification failed for ${assetName}:\n` +
+            `  Expected: ${expectedChecksum}\n` +
+            `  Actual:   ${actualChecksum}`);
+    }
+    core.info(`Checksum verified for ${assetName}`);
+}
+async function downloadAndInstall(version, platform, verify) {
+    let resolvedAssetName = platform.assetName;
+    let downloadUrl = getDownloadUrl(version, resolvedAssetName);
+    core.info(`Downloading BoringCache CLI from: ${downloadUrl}`);
+    let downloadedPath;
+    try {
+        downloadedPath = await tc.downloadTool(downloadUrl);
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (platform.fallbackAssetName) {
+            resolvedAssetName = platform.fallbackAssetName;
+            downloadUrl = getDownloadUrl(version, resolvedAssetName);
+            core.info(`Primary CLI asset ${platform.assetName} unavailable (${msg}); trying legacy fallback: ${resolvedAssetName}`);
+            try {
+                downloadedPath = await tc.downloadTool(downloadUrl);
+            }
+            catch (fallbackError) {
+                const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+                if (fallbackMsg.includes('404')) {
+                    throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ` +
+                        'release asset not found. The requested cli-version may not be published yet.');
+                }
+                throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ${fallbackMsg}`);
+            }
+        }
+        else if (msg.includes('404')) {
+            throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ` +
+                'release asset not found. The requested cli-version may not be published yet.');
+        }
+        else {
+            throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ${msg}`);
+        }
+    }
+    // Verify checksum if enabled
+    if (verify) {
+        const expectedChecksum = await getExpectedChecksum(version, resolvedAssetName);
+        await verifyChecksum(downloadedPath, expectedChecksum, resolvedAssetName);
+    }
+    else {
+        core.warning('Checksum verification disabled - this is not recommended for production use');
+    }
+    const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
+    const installDir = path.join(os.tmpdir(), 'boringcache-install', version);
+    await fs.promises.mkdir(installDir, { recursive: true });
+    const binaryPath = path.join(installDir, binaryName);
+    await fs.promises.copyFile(downloadedPath, binaryPath);
+    if (!platform.isWindows) {
+        await fs.promises.chmod(binaryPath, 0o755);
+    }
+    const cachedPath = await tc.cacheDir(installDir, TOOL_NAME, version.replace(/^v/, ''), platform.cacheKey);
+    return cachedPath;
+}
+async function isCliAvailable() {
+    try {
+        let output = '';
+        const result = await exec.exec('boringcache', ['--version'], {
+            ignoreReturnCode: true,
+            silent: true,
+            listeners: {
+                stdout: (data) => { output += data.toString(); },
+                stderr: (data) => { output += data.toString(); }
+            }
+        });
+        return result === 0 && output.includes('boringcache');
+    }
+    catch {
+        return false;
+    }
+}
+async function ensureBoringCache(options) {
+    (0, auth_1.warnIfUsingLegacyApiToken)();
+    const secrets = new Set([
+        options.token,
+        process.env.BORINGCACHE_RESTORE_TOKEN,
+        process.env.BORINGCACHE_SAVE_TOKEN,
+        process.env.BORINGCACHE_API_TOKEN,
+    ].filter((value) => Boolean(value)));
+    for (const secret of secrets) {
+        core.setSecret(secret);
+    }
+    const shouldRequireServerSignature = options.requireServerSignature !== false;
+    if (shouldRequireServerSignature && !process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE) {
+        core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
+        core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
+    }
+    if (options.version === 'skip') {
+        core.debug('CLI setup skipped (version: skip)');
+        if (await isCliAvailable()) {
+            return;
+        }
+        throw new Error('BoringCache CLI not found and cli-version is set to "skip"');
+    }
+    if (await isCliAvailable()) {
+        core.debug('BoringCache CLI already available');
+        return;
+    }
+    const version = options.version;
+    const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
+    const platform = getPlatformInfo(options.platform);
+    const enableCache = options.cache !== false;
+    const enableVerify = options.verify !== false; // Default: true
+    core.info(`Installing BoringCache CLI ${normalizedVersion}...`);
+    // Get cache info for this version
+    const cacheInfo = getToolCacheInfo(normalizedVersion, options.platform);
+    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
+    const cachePaths = [`${toolCacheRoot}/${TOOL_NAME}`];
+    // Try to restore from actions/cache first
+    let restoredFromCache = false;
+    if (enableCache) {
+        try {
+            const cacheKey = await cache.restoreCache(cachePaths, cacheInfo.cacheKey);
+            if (cacheKey) {
+                core.info(`Restored CLI from cache (key: ${cacheKey})`);
+                restoredFromCache = true;
+            }
+        }
+        catch (error) {
+            core.debug(`Cache restore failed: ${error instanceof Error ? error.message : error}`);
+        }
+    }
+    let toolPath;
+    let cachedPath = tc.find(TOOL_NAME, normalizedVersion.replace(/^v/, ''), cacheInfo.platformKey);
+    if (cachedPath && enableVerify) {
+        const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
+        const cachedBinary = path.join(cachedPath, binaryName);
+        if (fs.existsSync(cachedBinary)) {
+            try {
+                const expectedChecksum = await getExpectedChecksum(normalizedVersion, platform.assetName);
+                const actualChecksum = await computeFileHash(cachedBinary);
+                if (actualChecksum !== expectedChecksum) {
+                    core.warning(`Cached CLI binary is stale (checksum mismatch), re-downloading`);
+                    cachedPath = '';
+                }
+            }
+            catch (error) {
+                core.debug(`Cache validation failed: ${error instanceof Error ? error.message : error}`);
+            }
+        }
+    }
+    if (cachedPath) {
+        core.info(`Using cached BoringCache CLI`);
+        toolPath = cachedPath;
+    }
+    else {
+        toolPath = await downloadAndInstall(normalizedVersion, platform, enableVerify);
+        if (enableCache) {
+            try {
+                await cache.saveCache(cachePaths, cacheInfo.cacheKey);
+                core.info(`Saved CLI to cache (key: ${cacheInfo.cacheKey})`);
+            }
+            catch (error) {
+                core.debug(`Cache save failed: ${error instanceof Error ? error.message : error}`);
+            }
+        }
+    }
+    core.addPath(toolPath);
+    core.info(`BoringCache CLI ${normalizedVersion} ready`);
+}
+async function execBoringCache(args, options = {}) {
+    const isWindows = os.platform() === 'win32';
+    try {
+        return await exec.exec('boringcache', args, options);
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (isWindows && msg.includes('Unable to locate executable file')) {
+            const quoted = ['boringcache', ...args.map(a => {
+                    const escaped = a.replace(/"/g, '\\"');
+                    return /\s/.test(escaped) ? `"${escaped}"` : escaped;
+                })].join(' ');
+            return await exec.exec('bash', ['-lc', quoted], options);
+        }
+        throw error;
+    }
+}
+
+
+/***/ }),
+
+/***/ 99245:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getWorkspace = getWorkspace;
+exports.getCacheTagPrefix = getCacheTagPrefix;
+exports.pathExists = pathExists;
+const core = __importStar(__nccwpck_require__(37484));
+const fs = __importStar(__nccwpck_require__(79896));
+/**
+ * Resolve workspace from input or environment.
+ * Used by docker, buildkit, nodejs, rust, ruby actions.
+ */
+function getWorkspace(inputWorkspace) {
+    let workspace = inputWorkspace || process.env.BORINGCACHE_DEFAULT_WORKSPACE || '';
+    if (!workspace) {
+        core.setFailed('Workspace is required. Set workspace input or BORINGCACHE_DEFAULT_WORKSPACE env var.');
+        throw new Error('Workspace required');
+    }
+    if (!workspace.includes('/')) {
+        workspace = `default/${workspace}`;
+    }
+    return workspace;
+}
+/**
+ * Resolve cache tag prefix from input or the provided default.
+ */
+function getCacheTagPrefix(inputCacheTag, defaultPrefix) {
+    if (inputCacheTag) {
+        return inputCacheTag;
+    }
+    return defaultPrefix;
+}
+/**
+ * Async file/directory existence check.
+ */
+async function pathExists(p) {
+    try {
+        await fs.promises.access(p);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+
+
+/***/ }),
+
 /***/ 80861:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -43281,7 +43288,7 @@ const exec = __importStar(__nccwpck_require__(95236));
 const fs = __importStar(__nccwpck_require__(79896));
 const os = __importStar(__nccwpck_require__(70857));
 const path = __importStar(__nccwpck_require__(16928));
-const action_core_1 = __nccwpck_require__(68701);
+const core_1 = __nccwpck_require__(15796);
 const utils_1 = __nccwpck_require__(2219);
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
@@ -43539,7 +43546,7 @@ async function shutdownBazelServer() {
     });
 }
 async function execBoringCache(args, options) {
-    return (0, action_core_1.execBoringCache)(args, options);
+    return (0, core_1.execBoringCache)(args, options);
 }
 function emitCliPlannerWarnings(stderr) {
     for (const line of stderr.split('\n').map((value) => value.trim()).filter(Boolean)) {
@@ -43658,8 +43665,8 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     return plan;
 }
 async function restoreSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!(0, action_core_1.hasRestoreToken)()) {
-        core.notice(`Skipping cache restore (${(0, action_core_1.missingRestoreTokenMessage)()})`);
+    if (!(0, core_1.hasRestoreToken)()) {
+        core.notice(`Skipping cache restore (${(0, core_1.missingRestoreTokenMessage)()})`);
         return;
     }
     const args = ['restore', workspace, `${cacheKey}:${cacheDir}`];
@@ -43669,8 +43676,8 @@ async function restoreSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     await execBoringCache(args);
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!(0, action_core_1.hasSaveToken)()) {
-        core.notice(`Skipping cache save (${(0, action_core_1.missingSaveTokenMessage)()})`);
+    if (!(0, core_1.hasSaveToken)()) {
+        core.notice(`Skipping cache save (${(0, core_1.missingSaveTokenMessage)()})`);
         return;
     }
     if (!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0) {
@@ -44248,7 +44255,7 @@ async function startSccacheServer() {
 }
 async function installSccache(versionInput = '0.14.0') {
     addLocalBinPaths();
-    if (await (0, action_core_1.hasToolVersionOnPath)('sccache', versionInput)) {
+    if (await (0, core_1.hasToolVersionOnPath)('sccache', versionInput)) {
         core.info(`Using existing sccache ${versionInput} from PATH`);
         return;
     }
@@ -44335,7 +44342,7 @@ async function stopSccacheServer() {
     return summarizeSccacheStats(output);
 }
 async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag,
@@ -44560,7 +44567,7 @@ async function runDockerRestore(plan, inputs) {
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
         const cacheTag = dockerPlan.tag;
-        const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+        const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
             workspace: dockerPlan.workspace,
             tag: cacheTag,
@@ -44663,7 +44670,7 @@ async function runDockerSave() {
     try {
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
-            await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+            await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
             return;
         }
         const workspace = getModeState('workspace');
@@ -44749,7 +44756,7 @@ async function runBuildkitRestore(plan, inputs) {
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
         const cacheTag = dockerPlan.tag;
-        const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+        const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
             workspace: dockerPlan.workspace,
             tag: cacheTag,
@@ -44852,7 +44859,7 @@ async function runBuildkitRestore(plan, inputs) {
 async function runBuildkitSave() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
-        await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+        await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
         return;
     }
     const workspace = getModeState('workspace');
@@ -44873,7 +44880,7 @@ async function runBazelRestore(plan, inputs) {
     const bazelrcLines = core.getInput('bazelrc-lines') || '';
     const runtimeVersion = ((_a = plan.runtimeTools.find((tool) => tool.name === 'bazel')) === null || _a === void 0 ? void 0 : _a.version) || '';
     const bazelVersion = inputVersion || runtimeVersion;
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
     const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
@@ -44881,7 +44888,7 @@ async function runBazelRestore(plan, inputs) {
     if (bazelVersion) {
         core.exportVariable('USE_BAZEL_VERSION', bazelVersion);
     }
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
@@ -44911,13 +44918,13 @@ async function runBazelRestore(plan, inputs) {
 }
 async function runGradleRestore(plan, inputs) {
     var _a;
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
     const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const gradleHome = resolveGradleHome(core.getInput('gradle-home') || '');
     const enableBuildCache = parseBoolean(core.getInput('enable-build-cache'), true);
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
@@ -44950,7 +44957,7 @@ async function runGradleRestore(plan, inputs) {
 }
 async function runMavenRestore(plan, inputs) {
     var _a;
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
     const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
@@ -44960,7 +44967,7 @@ async function runMavenRestore(plan, inputs) {
     const localRepo = resolveUserPath(core.getInput('maven-local-repo') || '~/.m2/repository', workingDirectory);
     const extensionVersion = core.getInput('maven-build-cache-extension-version') || '1.2.2';
     const cacheId = core.getInput('maven-build-cache-id') || 'boringcache';
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
@@ -45019,7 +45026,7 @@ async function runTurboProxyRestore(plan, inputs) {
         proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     catch {
-        proxy = await startPortableCacheProxy(workspace, await (0, action_core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
+        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -45154,13 +45161,13 @@ async function runRustRestore(plan, inputs) {
     if (useSccache && sccacheEntry) {
         await installSccache(sccacheVersion);
         if (sccacheMode === 'proxy') {
-            const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+            const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
             const proxyPlan = await resolveAdapterCliPlan('sccache', workspace, workingDir, sccacheEntry.tag, requestedPort, true, true, inputs.readOnly);
             sccacheRestored = await checkRustTagHit(proxyPlan.workspace, proxyPlan.tag, {
                 noPlatform: proxyPlan.proxy.no_platform,
                 noGit: proxyPlan.proxy.no_git,
             });
-            const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+            const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
                 command: 'cache-registry',
                 workspace: proxyPlan.workspace,
                 tag: proxyPlan.tag,
@@ -45257,12 +45264,12 @@ async function runRustSave() {
     if (!workspace) {
         return;
     }
-    if (!(0, action_core_1.hasSaveToken)()) {
+    if (!(0, core_1.hasSaveToken)()) {
         if (useSccache && sccacheMode === 'proxy') {
             await stopSccacheServer();
             await stopProxyFromState();
         }
-        core.notice(`Save skipped: ${(0, action_core_1.missingSaveTokenMessage)()}`);
+        core.notice(`Save skipped: ${(0, core_1.missingSaveTokenMessage)()}`);
         return;
     }
     if (cacheCargo) {
@@ -45344,7 +45351,7 @@ async function runRustSave() {
 async function stopProxyFromState() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
-        await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+        await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
     }
 }
 
@@ -45479,7 +45486,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(37484));
-const action_core_1 = __nccwpck_require__(68701);
+const core_1 = __nccwpck_require__(15796);
 const utils_1 = __nccwpck_require__(2219);
 const mode_handlers_1 = __nccwpck_require__(80861);
 function buildRuntimeRestoreFlagArgs(inputs) {
@@ -45507,7 +45514,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         core.info(`cache-hit: ${String(overallHit)}`);
         core.info(`runtime-cache-hit: ${String(runtimeHit)}`);
         core.info(`verify-mode: ${inputs.verify}`);
-        core.info(`token-capabilities: restore=${String((0, action_core_1.hasRestoreToken)())} save=${String((0, action_core_1.hasSaveToken)())} legacy-api-only=${String((0, action_core_1.isUsingLegacyApiTokenOnly)())}`);
+        core.info(`token-capabilities: restore=${String((0, core_1.hasRestoreToken)())} save=${String((0, core_1.hasSaveToken)())} legacy-api-only=${String((0, core_1.isUsingLegacyApiTokenOnly)())}`);
         if (diagnostics.includeLogs) {
             const proxyLogPath = core.getState('proxy-log-path');
             if (proxyLogPath) {
@@ -45583,7 +45590,7 @@ async function run() {
             ...(modeRestore.verificationSpecs || []),
         ];
         const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
-        const saveCapable = saveEnabled && (0, action_core_1.hasSaveToken)();
+        const saveCapable = saveEnabled && (0, core_1.hasSaveToken)();
         const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
         const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
@@ -45741,17 +45748,17 @@ const exec = __importStar(__nccwpck_require__(95236));
 const fs = __importStar(__nccwpck_require__(79896));
 const os = __importStar(__nccwpck_require__(70857));
 const path = __importStar(__nccwpck_require__(16928));
-const action_core_1 = __nccwpck_require__(68701);
-Object.defineProperty(exports, "activateMiseTool", ({ enumerable: true, get: function () { return action_core_1.activateMiseTool; } }));
-Object.defineProperty(exports, "ensureBoringCache", ({ enumerable: true, get: function () { return action_core_1.ensureBoringCache; } }));
-Object.defineProperty(exports, "exportMiseEnv", ({ enumerable: true, get: function () { return action_core_1.exportMiseEnv; } }));
-Object.defineProperty(exports, "execBoringCache", ({ enumerable: true, get: function () { return action_core_1.execBoringCache; } }));
-Object.defineProperty(exports, "getMiseInstallsDir", ({ enumerable: true, get: function () { return action_core_1.getMiseInstallsDir; } }));
-Object.defineProperty(exports, "hasMiseToolVersion", ({ enumerable: true, get: function () { return action_core_1.hasMiseToolVersion; } }));
-Object.defineProperty(exports, "hasToolVersionOnPath", ({ enumerable: true, get: function () { return action_core_1.hasToolVersionOnPath; } }));
-Object.defineProperty(exports, "installMise", ({ enumerable: true, get: function () { return action_core_1.installMise; } }));
-Object.defineProperty(exports, "installMiseTool", ({ enumerable: true, get: function () { return action_core_1.installMiseTool; } }));
-Object.defineProperty(exports, "parseEntries", ({ enumerable: true, get: function () { return action_core_1.parseEntries; } }));
+const core_1 = __nccwpck_require__(15796);
+Object.defineProperty(exports, "activateMiseTool", ({ enumerable: true, get: function () { return core_1.activateMiseTool; } }));
+Object.defineProperty(exports, "ensureBoringCache", ({ enumerable: true, get: function () { return core_1.ensureBoringCache; } }));
+Object.defineProperty(exports, "exportMiseEnv", ({ enumerable: true, get: function () { return core_1.exportMiseEnv; } }));
+Object.defineProperty(exports, "execBoringCache", ({ enumerable: true, get: function () { return core_1.execBoringCache; } }));
+Object.defineProperty(exports, "getMiseInstallsDir", ({ enumerable: true, get: function () { return core_1.getMiseInstallsDir; } }));
+Object.defineProperty(exports, "hasMiseToolVersion", ({ enumerable: true, get: function () { return core_1.hasMiseToolVersion; } }));
+Object.defineProperty(exports, "hasToolVersionOnPath", ({ enumerable: true, get: function () { return core_1.hasToolVersionOnPath; } }));
+Object.defineProperty(exports, "installMise", ({ enumerable: true, get: function () { return core_1.installMise; } }));
+Object.defineProperty(exports, "installMiseTool", ({ enumerable: true, get: function () { return core_1.installMiseTool; } }));
+Object.defineProperty(exports, "parseEntries", ({ enumerable: true, get: function () { return core_1.parseEntries; } }));
 const modes_1 = __nccwpck_require__(76310);
 const TOOL_LABELS = {
     bazel: 'Bazel',
@@ -46014,7 +46021,7 @@ function normalizeToolVersionScope(value) {
 function resolveWorkspace(workspace) {
     const resolved = workspace
         ? workspace.includes('/') ? workspace : `default/${workspace}`
-        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || (0, action_core_1.getInputsWorkspace)({}));
+        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || (0, core_1.getInputsWorkspace)({}));
     if (!resolved.includes('/')) {
         return `default/${resolved}`;
     }
@@ -46306,7 +46313,7 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
     if (!entries.trim()) {
         return;
     }
-    for (const entry of (0, action_core_1.parseEntries)(entries, 'restore')) {
+    for (const entry of (0, core_1.parseEntries)(entries, 'restore')) {
         specs.push({
             tag: entry.tag,
             noPlatform,
@@ -46463,7 +46470,7 @@ async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirec
 }
 async function detectProjectTools(workingDirectory) {
     const tools = new Map();
-    for (const tool of await (0, action_core_1.readProjectMiseTools)(workingDirectory)) {
+    for (const tool of await (0, core_1.readProjectMiseTools)(workingDirectory)) {
         const normalizedName = normalizeToolName(tool.name);
         tools.set(normalizedName, {
             name: normalizedName,
@@ -46638,11 +46645,11 @@ async function detectRubyVersion(workingDirectory) {
     if (rubyVersion) {
         return rubyVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'ruby');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'ruby');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'ruby');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'ruby');
 }
 async function detectNodeVersion(workingDirectory) {
     const nodeVersion = await readFirstLine(path.join(workingDirectory, '.node-version'));
@@ -46653,84 +46660,84 @@ async function detectNodeVersion(workingDirectory) {
     if (nvmVersion) {
         return nvmVersion.replace(/^v/, '');
     }
-    const toolVersion = (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'nodejs'))
-        || (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'node'));
+    const toolVersion = (await (0, core_1.readToolVersionsValue)(workingDirectory, 'nodejs'))
+        || (await (0, core_1.readToolVersionsValue)(workingDirectory, 'node'));
     if (toolVersion) {
         return toolVersion;
     }
-    return (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'node'))
-        || (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'nodejs'));
+    return (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'node'))
+        || (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'nodejs'));
 }
 async function detectBazelVersion(workingDirectory) {
     const bazelVersion = await readFirstLine(path.join(workingDirectory, '.bazelversion'));
     if (bazelVersion) {
         return bazelVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'bazel');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'bazel');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'bazel');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'bazel');
 }
 async function detectPythonVersion(workingDirectory) {
     const pythonVersion = await readFirstLine(path.join(workingDirectory, '.python-version'));
     if (pythonVersion) {
         return pythonVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'python');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'python');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'python');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'python');
 }
 async function detectGoVersion(workingDirectory) {
     const goVersion = await readFirstLine(path.join(workingDirectory, '.go-version'));
     if (goVersion) {
         return goVersion;
     }
-    const toolVersion = (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'go'))
-        || (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'golang'));
+    const toolVersion = (await (0, core_1.readToolVersionsValue)(workingDirectory, 'go'))
+        || (await (0, core_1.readToolVersionsValue)(workingDirectory, 'golang'));
     if (toolVersion) {
         return toolVersion;
     }
-    return (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'go'))
-        || (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'golang'));
+    return (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'go'))
+        || (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'golang'));
 }
 async function detectUvVersion(workingDirectory) {
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'uv');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'uv');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'uv');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'uv');
 }
 async function detectPhpVersion(workingDirectory) {
     const phpVersion = await readFirstLine(path.join(workingDirectory, '.php-version'));
     if (phpVersion) {
         return phpVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'php');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'php');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'php');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'php');
 }
 async function detectComposerVersion(workingDirectory) {
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'composer');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'composer');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'composer');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'composer');
 }
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
     if (javaVersion) {
         return javaVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'java');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'java');
     if (toolVersion) {
         return toolVersion;
     }
-    const miseVersion = await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'java');
+    const miseVersion = await (0, core_1.readMiseTomlVersion)(workingDirectory, 'java');
     if (miseVersion) {
         return miseVersion;
     }
@@ -46752,11 +46759,11 @@ async function detectMavenVersion(workingDirectory) {
             return match[1];
         }
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'maven');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'maven');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'maven');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'maven');
 }
 async function detectRustVersion(workingDirectory) {
     const rustToolchainToml = await readFile(path.join(workingDirectory, 'rust-toolchain.toml'));
@@ -46770,11 +46777,11 @@ async function detectRustVersion(workingDirectory) {
     if (rustToolchain) {
         return rustToolchain;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'rust');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'rust');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'rust');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'rust');
 }
 async function detectToolFromProjectFiles(workingDirectory, toolName, detector) {
     const version = await detector(workingDirectory);
@@ -46933,14 +46940,14 @@ function buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionSco
     if (runtimeCacheTag.trim()) {
         return runtimeCacheTag.trim();
     }
-    return (0, action_core_1.buildMiseRuntimeTag)(cacheTagPrefix, tools, versionScope);
+    return (0, core_1.buildMiseRuntimeTag)(cacheTagPrefix, tools, versionScope);
 }
 function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
     const runtimeTag = buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope);
     if (!runtimeTag) {
         return null;
     }
-    return `${runtimeTag}:${(0, action_core_1.getMiseInstallsDir)()}`;
+    return `${runtimeTag}:${(0, core_1.getMiseInstallsDir)()}`;
 }
 function normalizeEntriesInput(entries) {
     return entries
@@ -47222,7 +47229,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
     const fallbackWorkspace = resolveWorkspace(inputs.workspace);
     const cliWorkspaceInput = inputs.workspace.trim();
     const cliToolTagSuffix = inputs.setup === 'mise'
-        ? (0, action_core_1.buildMiseToolTag)(runtimeTools, inputs.toolVersionScope)
+        ? (0, core_1.buildMiseToolTag)(runtimeTools, inputs.toolVersionScope)
         : null;
     const mergeCliPlan = (plan) => {
         var _a, _b;
@@ -47231,7 +47238,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             const firstEntry = (_a = plan.archive_entries) === null || _a === void 0 ? void 0 : _a[0];
             const firstPair = plan.tag_path_pairs[0];
             cacheTagPrefix = (firstEntry === null || firstEntry === void 0 ? void 0 : firstEntry.resolved_tag) || (firstEntry === null || firstEntry === void 0 ? void 0 : firstEntry.tag)
-                || (firstPair ? (_b = (0, action_core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0]) === null || _b === void 0 ? void 0 : _b.tag : undefined);
+                || (firstPair ? (_b = (0, core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0]) === null || _b === void 0 ? void 0 : _b.tag : undefined);
         }
         Object.assign(envVars, plan.env_vars);
         if (!resolvedWorkspace && plan.workspace) {
@@ -47260,7 +47267,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             }));
         }
         for (const entryToken of rawEntries) {
-            const parsedEntry = (0, action_core_1.parseEntries)(entryToken, 'restore', { resolvePaths: false })[0];
+            const parsedEntry = (0, core_1.parseEntries)(entryToken, 'restore', { resolvePaths: false })[0];
             if (!parsedEntry) {
                 continue;
             }
@@ -47453,7 +47460,7 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     }
     const pathAvailable = new Map();
     for (const tool of runtimeTools) {
-        const available = await (0, action_core_1.hasToolVersionOnPath)(tool.name, tool.version);
+        const available = await (0, core_1.hasToolVersionOnPath)(tool.name, tool.version);
         pathAvailable.set(`${tool.name}@${tool.version}`, available);
         if (available) {
             core.info(`Using existing ${tool.label} ${tool.version} from PATH`);
@@ -47463,17 +47470,17 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     if (unresolvedTools.length === 0) {
         return false;
     }
-    await (0, action_core_1.installMise)();
+    await (0, core_1.installMise)();
     for (const tool of unresolvedTools) {
-        if (await (0, action_core_1.hasMiseToolVersion)(tool.name, tool.version)) {
-            await (0, action_core_1.activateMiseTool)(tool.name, tool.version, { label: tool.label });
+        if (await (0, core_1.hasMiseToolVersion)(tool.name, tool.version)) {
+            await (0, core_1.activateMiseTool)(tool.name, tool.version, { label: tool.label });
         }
         else {
-            await (0, action_core_1.installMiseTool)(tool.name, tool.version, { label: tool.label });
+            await (0, core_1.installMiseTool)(tool.name, tool.version, { label: tool.label });
         }
     }
-    await (0, action_core_1.reshimMise)();
-    await (0, action_core_1.exportMiseEnv)(cwd);
+    await (0, core_1.reshimMise)();
+    await (0, core_1.exportMiseEnv)(cwd);
     return true;
 }
 function resolveCacheEnvPath(workingDirectory, configuredPath) {

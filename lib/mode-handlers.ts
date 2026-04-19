@@ -14,7 +14,7 @@ import {
   pathExists,
   startRegistryProxy,
   stopRegistryProxy,
-} from '@boringcache/action-core';
+} from './core';
 import {
   detectNodePackageManager,
   type OneInputs,

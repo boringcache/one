@@ -40,7 +40,7 @@ const exec = __importStar(require("@actions/exec"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const action_core_1 = require("@boringcache/action-core");
+const core_1 = require("./core");
 const utils_1 = require("./utils");
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
@@ -298,7 +298,7 @@ async function shutdownBazelServer() {
     });
 }
 async function execBoringCache(args, options) {
-    return (0, action_core_1.execBoringCache)(args, options);
+    return (0, core_1.execBoringCache)(args, options);
 }
 function emitCliPlannerWarnings(stderr) {
     for (const line of stderr.split('\n').map((value) => value.trim()).filter(Boolean)) {
@@ -417,8 +417,8 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     return plan;
 }
 async function restoreSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!(0, action_core_1.hasRestoreToken)()) {
-        core.notice(`Skipping cache restore (${(0, action_core_1.missingRestoreTokenMessage)()})`);
+    if (!(0, core_1.hasRestoreToken)()) {
+        core.notice(`Skipping cache restore (${(0, core_1.missingRestoreTokenMessage)()})`);
         return;
     }
     const args = ['restore', workspace, `${cacheKey}:${cacheDir}`];
@@ -428,8 +428,8 @@ async function restoreSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     await execBoringCache(args);
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!(0, action_core_1.hasSaveToken)()) {
-        core.notice(`Skipping cache save (${(0, action_core_1.missingSaveTokenMessage)()})`);
+    if (!(0, core_1.hasSaveToken)()) {
+        core.notice(`Skipping cache save (${(0, core_1.missingSaveTokenMessage)()})`);
         return;
     }
     if (!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0) {
@@ -1007,7 +1007,7 @@ async function startSccacheServer() {
 }
 async function installSccache(versionInput = '0.14.0') {
     addLocalBinPaths();
-    if (await (0, action_core_1.hasToolVersionOnPath)('sccache', versionInput)) {
+    if (await (0, core_1.hasToolVersionOnPath)('sccache', versionInput)) {
         core.info(`Using existing sccache ${versionInput} from PATH`);
         return;
     }
@@ -1094,7 +1094,7 @@ async function stopSccacheServer() {
     return summarizeSccacheStats(output);
 }
 async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag,
@@ -1319,7 +1319,7 @@ async function runDockerRestore(plan, inputs) {
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
         const cacheTag = dockerPlan.tag;
-        const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+        const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
             workspace: dockerPlan.workspace,
             tag: cacheTag,
@@ -1422,7 +1422,7 @@ async function runDockerSave() {
     try {
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
-            await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+            await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
             return;
         }
         const workspace = getModeState('workspace');
@@ -1508,7 +1508,7 @@ async function runBuildkitRestore(plan, inputs) {
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG);
         const cacheTag = dockerPlan.tag;
-        const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+        const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
             workspace: dockerPlan.workspace,
             tag: cacheTag,
@@ -1611,7 +1611,7 @@ async function runBuildkitRestore(plan, inputs) {
 async function runBuildkitSave() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
-        await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+        await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
         return;
     }
     const workspace = getModeState('workspace');
@@ -1632,7 +1632,7 @@ async function runBazelRestore(plan, inputs) {
     const bazelrcLines = core.getInput('bazelrc-lines') || '';
     const runtimeVersion = ((_a = plan.runtimeTools.find((tool) => tool.name === 'bazel')) === null || _a === void 0 ? void 0 : _a.version) || '';
     const bazelVersion = inputVersion || runtimeVersion;
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
     const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
@@ -1640,7 +1640,7 @@ async function runBazelRestore(plan, inputs) {
     if (bazelVersion) {
         core.exportVariable('USE_BAZEL_VERSION', bazelVersion);
     }
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
@@ -1670,13 +1670,13 @@ async function runBazelRestore(plan, inputs) {
 }
 async function runGradleRestore(plan, inputs) {
     var _a;
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
     const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const gradleHome = resolveGradleHome(core.getInput('gradle-home') || '');
     const enableBuildCache = parseBoolean(core.getInput('enable-build-cache'), true);
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
@@ -1709,7 +1709,7 @@ async function runGradleRestore(plan, inputs) {
 }
 async function runMavenRestore(plan, inputs) {
     var _a;
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
     const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
@@ -1719,7 +1719,7 @@ async function runMavenRestore(plan, inputs) {
     const localRepo = resolveUserPath(core.getInput('maven-local-repo') || '~/.m2/repository', workingDirectory);
     const extensionVersion = core.getInput('maven-build-cache-extension-version') || '1.2.2';
     const cacheId = core.getInput('maven-build-cache-id') || 'boringcache';
-    const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
@@ -1778,7 +1778,7 @@ async function runTurboProxyRestore(plan, inputs) {
         proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     catch {
-        proxy = await startPortableCacheProxy(workspace, await (0, action_core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
+        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -1913,13 +1913,13 @@ async function runRustRestore(plan, inputs) {
     if (useSccache && sccacheEntry) {
         await installSccache(sccacheVersion);
         if (sccacheMode === 'proxy') {
-            const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, action_core_1.findAvailablePort)();
+            const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
             const proxyPlan = await resolveAdapterCliPlan('sccache', workspace, workingDir, sccacheEntry.tag, requestedPort, true, true, inputs.readOnly);
             sccacheRestored = await checkRustTagHit(proxyPlan.workspace, proxyPlan.tag, {
                 noPlatform: proxyPlan.proxy.no_platform,
                 noGit: proxyPlan.proxy.no_git,
             });
-            const proxy = await (0, action_core_1.startRegistryProxy)(actionProxyOptions({
+            const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
                 command: 'cache-registry',
                 workspace: proxyPlan.workspace,
                 tag: proxyPlan.tag,
@@ -2016,12 +2016,12 @@ async function runRustSave() {
     if (!workspace) {
         return;
     }
-    if (!(0, action_core_1.hasSaveToken)()) {
+    if (!(0, core_1.hasSaveToken)()) {
         if (useSccache && sccacheMode === 'proxy') {
             await stopSccacheServer();
             await stopProxyFromState();
         }
-        core.notice(`Save skipped: ${(0, action_core_1.missingSaveTokenMessage)()}`);
+        core.notice(`Save skipped: ${(0, core_1.missingSaveTokenMessage)()}`);
         return;
     }
     if (cacheCargo) {
@@ -2103,6 +2103,6 @@ async function runRustSave() {
 async function stopProxyFromState() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
-        await (0, action_core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+        await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
     }
 }

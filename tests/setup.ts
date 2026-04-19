@@ -54,8 +54,8 @@ jest.mock('@actions/tool-cache', () => ({
   extractZip: jest.fn().mockResolvedValue('/tmp/mock-extract'),
 }));
 
-jest.mock('@boringcache/action-core', () => {
-  const actual = jest.requireActual('@boringcache/action-core');
+jest.mock('../lib/core', () => {
+  const actual = jest.requireActual('../lib/core');
   return {
     ...actual,
     ensureBoringCache: mockEnsureBoringCache,

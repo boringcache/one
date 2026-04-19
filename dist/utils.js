@@ -80,17 +80,17 @@ const exec = __importStar(require("@actions/exec"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const action_core_1 = require("@boringcache/action-core");
-Object.defineProperty(exports, "activateMiseTool", { enumerable: true, get: function () { return action_core_1.activateMiseTool; } });
-Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return action_core_1.ensureBoringCache; } });
-Object.defineProperty(exports, "exportMiseEnv", { enumerable: true, get: function () { return action_core_1.exportMiseEnv; } });
-Object.defineProperty(exports, "execBoringCache", { enumerable: true, get: function () { return action_core_1.execBoringCache; } });
-Object.defineProperty(exports, "getMiseInstallsDir", { enumerable: true, get: function () { return action_core_1.getMiseInstallsDir; } });
-Object.defineProperty(exports, "hasMiseToolVersion", { enumerable: true, get: function () { return action_core_1.hasMiseToolVersion; } });
-Object.defineProperty(exports, "hasToolVersionOnPath", { enumerable: true, get: function () { return action_core_1.hasToolVersionOnPath; } });
-Object.defineProperty(exports, "installMise", { enumerable: true, get: function () { return action_core_1.installMise; } });
-Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: function () { return action_core_1.installMiseTool; } });
-Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return action_core_1.parseEntries; } });
+const core_1 = require("./core");
+Object.defineProperty(exports, "activateMiseTool", { enumerable: true, get: function () { return core_1.activateMiseTool; } });
+Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return core_1.ensureBoringCache; } });
+Object.defineProperty(exports, "exportMiseEnv", { enumerable: true, get: function () { return core_1.exportMiseEnv; } });
+Object.defineProperty(exports, "execBoringCache", { enumerable: true, get: function () { return core_1.execBoringCache; } });
+Object.defineProperty(exports, "getMiseInstallsDir", { enumerable: true, get: function () { return core_1.getMiseInstallsDir; } });
+Object.defineProperty(exports, "hasMiseToolVersion", { enumerable: true, get: function () { return core_1.hasMiseToolVersion; } });
+Object.defineProperty(exports, "hasToolVersionOnPath", { enumerable: true, get: function () { return core_1.hasToolVersionOnPath; } });
+Object.defineProperty(exports, "installMise", { enumerable: true, get: function () { return core_1.installMise; } });
+Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: function () { return core_1.installMiseTool; } });
+Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return core_1.parseEntries; } });
 const modes_1 = require("./modes");
 const TOOL_LABELS = {
     bazel: 'Bazel',
@@ -353,7 +353,7 @@ function normalizeToolVersionScope(value) {
 function resolveWorkspace(workspace) {
     const resolved = workspace
         ? workspace.includes('/') ? workspace : `default/${workspace}`
-        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || (0, action_core_1.getInputsWorkspace)({}));
+        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || (0, core_1.getInputsWorkspace)({}));
     if (!resolved.includes('/')) {
         return `default/${resolved}`;
     }
@@ -645,7 +645,7 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
     if (!entries.trim()) {
         return;
     }
-    for (const entry of (0, action_core_1.parseEntries)(entries, 'restore')) {
+    for (const entry of (0, core_1.parseEntries)(entries, 'restore')) {
         specs.push({
             tag: entry.tag,
             noPlatform,
@@ -802,7 +802,7 @@ async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirec
 }
 async function detectProjectTools(workingDirectory) {
     const tools = new Map();
-    for (const tool of await (0, action_core_1.readProjectMiseTools)(workingDirectory)) {
+    for (const tool of await (0, core_1.readProjectMiseTools)(workingDirectory)) {
         const normalizedName = normalizeToolName(tool.name);
         tools.set(normalizedName, {
             name: normalizedName,
@@ -977,11 +977,11 @@ async function detectRubyVersion(workingDirectory) {
     if (rubyVersion) {
         return rubyVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'ruby');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'ruby');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'ruby');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'ruby');
 }
 async function detectNodeVersion(workingDirectory) {
     const nodeVersion = await readFirstLine(path.join(workingDirectory, '.node-version'));
@@ -992,84 +992,84 @@ async function detectNodeVersion(workingDirectory) {
     if (nvmVersion) {
         return nvmVersion.replace(/^v/, '');
     }
-    const toolVersion = (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'nodejs'))
-        || (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'node'));
+    const toolVersion = (await (0, core_1.readToolVersionsValue)(workingDirectory, 'nodejs'))
+        || (await (0, core_1.readToolVersionsValue)(workingDirectory, 'node'));
     if (toolVersion) {
         return toolVersion;
     }
-    return (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'node'))
-        || (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'nodejs'));
+    return (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'node'))
+        || (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'nodejs'));
 }
 async function detectBazelVersion(workingDirectory) {
     const bazelVersion = await readFirstLine(path.join(workingDirectory, '.bazelversion'));
     if (bazelVersion) {
         return bazelVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'bazel');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'bazel');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'bazel');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'bazel');
 }
 async function detectPythonVersion(workingDirectory) {
     const pythonVersion = await readFirstLine(path.join(workingDirectory, '.python-version'));
     if (pythonVersion) {
         return pythonVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'python');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'python');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'python');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'python');
 }
 async function detectGoVersion(workingDirectory) {
     const goVersion = await readFirstLine(path.join(workingDirectory, '.go-version'));
     if (goVersion) {
         return goVersion;
     }
-    const toolVersion = (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'go'))
-        || (await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'golang'));
+    const toolVersion = (await (0, core_1.readToolVersionsValue)(workingDirectory, 'go'))
+        || (await (0, core_1.readToolVersionsValue)(workingDirectory, 'golang'));
     if (toolVersion) {
         return toolVersion;
     }
-    return (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'go'))
-        || (await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'golang'));
+    return (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'go'))
+        || (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'golang'));
 }
 async function detectUvVersion(workingDirectory) {
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'uv');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'uv');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'uv');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'uv');
 }
 async function detectPhpVersion(workingDirectory) {
     const phpVersion = await readFirstLine(path.join(workingDirectory, '.php-version'));
     if (phpVersion) {
         return phpVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'php');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'php');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'php');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'php');
 }
 async function detectComposerVersion(workingDirectory) {
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'composer');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'composer');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'composer');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'composer');
 }
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
     if (javaVersion) {
         return javaVersion;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'java');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'java');
     if (toolVersion) {
         return toolVersion;
     }
-    const miseVersion = await (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'java');
+    const miseVersion = await (0, core_1.readMiseTomlVersion)(workingDirectory, 'java');
     if (miseVersion) {
         return miseVersion;
     }
@@ -1091,11 +1091,11 @@ async function detectMavenVersion(workingDirectory) {
             return match[1];
         }
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'maven');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'maven');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'maven');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'maven');
 }
 async function detectRustVersion(workingDirectory) {
     const rustToolchainToml = await readFile(path.join(workingDirectory, 'rust-toolchain.toml'));
@@ -1109,11 +1109,11 @@ async function detectRustVersion(workingDirectory) {
     if (rustToolchain) {
         return rustToolchain;
     }
-    const toolVersion = await (0, action_core_1.readToolVersionsValue)(workingDirectory, 'rust');
+    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'rust');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, action_core_1.readMiseTomlVersion)(workingDirectory, 'rust');
+    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'rust');
 }
 async function detectToolFromProjectFiles(workingDirectory, toolName, detector) {
     const version = await detector(workingDirectory);
@@ -1272,14 +1272,14 @@ function buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionSco
     if (runtimeCacheTag.trim()) {
         return runtimeCacheTag.trim();
     }
-    return (0, action_core_1.buildMiseRuntimeTag)(cacheTagPrefix, tools, versionScope);
+    return (0, core_1.buildMiseRuntimeTag)(cacheTagPrefix, tools, versionScope);
 }
 function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
     const runtimeTag = buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope);
     if (!runtimeTag) {
         return null;
     }
-    return `${runtimeTag}:${(0, action_core_1.getMiseInstallsDir)()}`;
+    return `${runtimeTag}:${(0, core_1.getMiseInstallsDir)()}`;
 }
 function normalizeEntriesInput(entries) {
     return entries
@@ -1561,7 +1561,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
     const fallbackWorkspace = resolveWorkspace(inputs.workspace);
     const cliWorkspaceInput = inputs.workspace.trim();
     const cliToolTagSuffix = inputs.setup === 'mise'
-        ? (0, action_core_1.buildMiseToolTag)(runtimeTools, inputs.toolVersionScope)
+        ? (0, core_1.buildMiseToolTag)(runtimeTools, inputs.toolVersionScope)
         : null;
     const mergeCliPlan = (plan) => {
         var _a, _b;
@@ -1570,7 +1570,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             const firstEntry = (_a = plan.archive_entries) === null || _a === void 0 ? void 0 : _a[0];
             const firstPair = plan.tag_path_pairs[0];
             cacheTagPrefix = (firstEntry === null || firstEntry === void 0 ? void 0 : firstEntry.resolved_tag) || (firstEntry === null || firstEntry === void 0 ? void 0 : firstEntry.tag)
-                || (firstPair ? (_b = (0, action_core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0]) === null || _b === void 0 ? void 0 : _b.tag : undefined);
+                || (firstPair ? (_b = (0, core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0]) === null || _b === void 0 ? void 0 : _b.tag : undefined);
         }
         Object.assign(envVars, plan.env_vars);
         if (!resolvedWorkspace && plan.workspace) {
@@ -1599,7 +1599,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             }));
         }
         for (const entryToken of rawEntries) {
-            const parsedEntry = (0, action_core_1.parseEntries)(entryToken, 'restore', { resolvePaths: false })[0];
+            const parsedEntry = (0, core_1.parseEntries)(entryToken, 'restore', { resolvePaths: false })[0];
             if (!parsedEntry) {
                 continue;
             }
@@ -1792,7 +1792,7 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     }
     const pathAvailable = new Map();
     for (const tool of runtimeTools) {
-        const available = await (0, action_core_1.hasToolVersionOnPath)(tool.name, tool.version);
+        const available = await (0, core_1.hasToolVersionOnPath)(tool.name, tool.version);
         pathAvailable.set(`${tool.name}@${tool.version}`, available);
         if (available) {
             core.info(`Using existing ${tool.label} ${tool.version} from PATH`);
@@ -1802,17 +1802,17 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     if (unresolvedTools.length === 0) {
         return false;
     }
-    await (0, action_core_1.installMise)();
+    await (0, core_1.installMise)();
     for (const tool of unresolvedTools) {
-        if (await (0, action_core_1.hasMiseToolVersion)(tool.name, tool.version)) {
-            await (0, action_core_1.activateMiseTool)(tool.name, tool.version, { label: tool.label });
+        if (await (0, core_1.hasMiseToolVersion)(tool.name, tool.version)) {
+            await (0, core_1.activateMiseTool)(tool.name, tool.version, { label: tool.label });
         }
         else {
-            await (0, action_core_1.installMiseTool)(tool.name, tool.version, { label: tool.label });
+            await (0, core_1.installMiseTool)(tool.name, tool.version, { label: tool.label });
         }
     }
-    await (0, action_core_1.reshimMise)();
-    await (0, action_core_1.exportMiseEnv)(cwd);
+    await (0, core_1.reshimMise)();
+    await (0, core_1.exportMiseEnv)(cwd);
     return true;
 }
 function resolveCacheEnvPath(workingDirectory, configuredPath) {

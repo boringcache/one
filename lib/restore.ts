@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import { hasRestoreToken, hasSaveToken, isUsingLegacyApiTokenOnly } from '@boringcache/action-core';
+import { hasRestoreToken, hasSaveToken, isUsingLegacyApiTokenOnly } from './core';
 import {
   applySaveTokenPolicy,
   applyPresetCacheEnv,
