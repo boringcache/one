@@ -42483,6 +42483,7 @@ const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
+const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function normalizeProxyTags(tagInput) {
     const tags = [];
     const seen = new Set();
@@ -42633,8 +42634,8 @@ async function startRegistryProxy(options) {
             args.push('--oci-prefetch-ref', trimmed);
         }
     }
-    const ociHydration = (options.ociHydration || 'metadata-only').trim();
-    if (ociHydration && ociHydration !== 'metadata-only') {
+    const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
+    if (ociHydration) {
         args.push('--oci-hydration', ociHydration);
     }
     for (const [key, value] of Object.entries(options.metadataHints || {})) {
@@ -42658,7 +42659,7 @@ async function startRegistryProxy(options) {
     if ((_a = options.ociPrefetchRefs) === null || _a === void 0 ? void 0 : _a.length) {
         core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
     }
-    if (ociHydration !== 'metadata-only') {
+    if (ociHydration) {
         core.info(`Registry proxy OCI hydration: ${ociHydration}`);
     }
     const logFile = proxyLogPath(options.port);
@@ -43309,7 +43310,7 @@ function actionProxyOptions(options, proxyPlan) {
         ...options,
         onDemand: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.startup_mode) === 'on-demand',
         ociPrefetchRefs: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_prefetch_refs) || [],
-        ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || 'metadata-only',
+        ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || utils_1.DEFAULT_OCI_HYDRATION_POLICY,
         metadataHints: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {},
     };
 }
@@ -43641,7 +43642,7 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
         args.push('--cache-ref-tag', trimmedCacheRefTag);
     }
     const trimmedOciHydration = ociHydration.trim();
-    if (trimmedOciHydration && trimmedOciHydration !== 'metadata-only') {
+    if (trimmedOciHydration) {
         args.push('--oci-hydration', trimmedOciHydration);
     }
     args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
@@ -45713,7 +45714,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
+exports.DEFAULT_OCI_HYDRATION_POLICY = exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
 exports.isPullRequestEvent = isPullRequestEvent;
 exports.saveConfigured = saveConfigured;
@@ -45773,6 +45774,7 @@ Object.defineProperty(exports, "installMise", ({ enumerable: true, get: function
 Object.defineProperty(exports, "installMiseTool", ({ enumerable: true, get: function () { return core_1.installMiseTool; } }));
 Object.defineProperty(exports, "parseEntries", ({ enumerable: true, get: function () { return core_1.parseEntries; } }));
 const modes_1 = __nccwpck_require__(76310);
+exports.DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
@@ -45925,11 +45927,11 @@ function normalizeDiagnosticsLogLines(value) {
     return parsed;
 }
 function normalizeOciHydrationPolicy(value) {
-    switch ((value || 'metadata-only').trim().toLowerCase()) {
+    switch ((value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
         case 'metadata-only':
         case 'bodies-before-ready':
         case 'bodies-background':
-            return (value || 'metadata-only').trim().toLowerCase();
+            return (value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase();
         default:
             throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only, bodies-before-ready, or bodies-background.`);
     }

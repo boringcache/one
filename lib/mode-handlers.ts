@@ -16,6 +16,7 @@ import {
   stopRegistryProxy,
 } from './core';
 import {
+  DEFAULT_OCI_HYDRATION_POLICY,
   detectNodePackageManager,
   type OneInputs,
   resolveCliArchiveEntries,
@@ -77,7 +78,7 @@ function actionProxyOptions<T extends RegistryProxyOptions>(
     ...options,
     onDemand: proxyPlan?.startup_mode === 'on-demand',
     ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
-    ociHydration: proxyPlan?.oci_hydration || options.ociHydration || 'metadata-only',
+    ociHydration: proxyPlan?.oci_hydration || options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY,
     metadataHints: proxyPlan?.metadata_hints || {},
   };
 }
@@ -562,7 +563,7 @@ async function resolveDockerCliPlan(
     args.push('--cache-ref-tag', trimmedCacheRefTag);
   }
   const trimmedOciHydration = ociHydration.trim();
-  if (trimmedOciHydration && trimmedOciHydration !== 'metadata-only') {
+  if (trimmedOciHydration) {
     args.push('--oci-hydration', trimmedOciHydration);
   }
   args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');

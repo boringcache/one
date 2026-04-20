@@ -53,6 +53,7 @@ export type VerifyMode = 'none' | 'check' | 'wait' | 'warn';
 export type DiagnosticsInputMode = 'auto' | 'off' | 'summary' | 'verbose';
 export type DiagnosticsLevel = 'off' | 'summary' | 'verbose';
 export type OciHydrationPolicy = 'metadata-only' | 'bodies-before-ready' | 'bodies-background';
+export const DEFAULT_OCI_HYDRATION_POLICY: OciHydrationPolicy = 'metadata-only';
 
 export interface ToolSpec {
   name: string;
@@ -333,11 +334,11 @@ export function normalizeDiagnosticsLogLines(value: string): number {
 }
 
 export function normalizeOciHydrationPolicy(value: string): OciHydrationPolicy {
-  switch ((value || 'metadata-only').trim().toLowerCase()) {
+  switch ((value || DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
     case 'metadata-only':
     case 'bodies-before-ready':
     case 'bodies-background':
-      return (value || 'metadata-only').trim().toLowerCase() as OciHydrationPolicy;
+      return (value || DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase() as OciHydrationPolicy;
     default:
       throw new Error(
         `Unsupported oci-hydration "${value}". Expected metadata-only, bodies-before-ready, or bodies-background.`,

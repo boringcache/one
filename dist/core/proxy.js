@@ -48,6 +48,7 @@ const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
+const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function normalizeProxyTags(tagInput) {
     const tags = [];
     const seen = new Set();
@@ -198,8 +199,8 @@ async function startRegistryProxy(options) {
             args.push('--oci-prefetch-ref', trimmed);
         }
     }
-    const ociHydration = (options.ociHydration || 'metadata-only').trim();
-    if (ociHydration && ociHydration !== 'metadata-only') {
+    const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
+    if (ociHydration) {
         args.push('--oci-hydration', ociHydration);
     }
     for (const [key, value] of Object.entries(options.metadataHints || {})) {
@@ -223,7 +224,7 @@ async function startRegistryProxy(options) {
     if ((_a = options.ociPrefetchRefs) === null || _a === void 0 ? void 0 : _a.length) {
         core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
     }
-    if (ociHydration !== 'metadata-only') {
+    if (ociHydration) {
         core.info(`Registry proxy OCI hydration: ${ociHydration}`);
     }
     const logFile = proxyLogPath(options.port);

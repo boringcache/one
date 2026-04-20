@@ -54,7 +54,7 @@ function actionProxyOptions(options, proxyPlan) {
         ...options,
         onDemand: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.startup_mode) === 'on-demand',
         ociPrefetchRefs: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_prefetch_refs) || [],
-        ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || 'metadata-only',
+        ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || utils_1.DEFAULT_OCI_HYDRATION_POLICY,
         metadataHints: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {},
     };
 }
@@ -386,7 +386,7 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
         args.push('--cache-ref-tag', trimmedCacheRefTag);
     }
     const trimmedOciHydration = ociHydration.trim();
-    if (trimmedOciHydration && trimmedOciHydration !== 'metadata-only') {
+    if (trimmedOciHydration) {
         args.push('--oci-hydration', trimmedOciHydration);
     }
     args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
+exports.DEFAULT_OCI_HYDRATION_POLICY = exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
 exports.isPullRequestEvent = isPullRequestEvent;
 exports.saveConfigured = saveConfigured;
@@ -93,6 +93,7 @@ Object.defineProperty(exports, "installMise", { enumerable: true, get: function 
 Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: function () { return core_1.installMiseTool; } });
 Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return core_1.parseEntries; } });
 const modes_1 = require("./modes");
+exports.DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
@@ -245,11 +246,11 @@ function normalizeDiagnosticsLogLines(value) {
     return parsed;
 }
 function normalizeOciHydrationPolicy(value) {
-    switch ((value || 'metadata-only').trim().toLowerCase()) {
+    switch ((value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
         case 'metadata-only':
         case 'bodies-before-ready':
         case 'bodies-background':
-            return (value || 'metadata-only').trim().toLowerCase();
+            return (value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase();
         default:
             throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only, bodies-before-ready, or bodies-background.`);
     }

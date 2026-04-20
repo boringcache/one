@@ -164,7 +164,7 @@ inputs:
     default: 'buildcache'
     required: false
   oci-hydration:
-    description: 'Docker or BuildKit registry proxy hydration policy: metadata-only, bodies-before-ready, or bodies-background.'
+    description: 'Expert Docker or BuildKit registry proxy hydration policy: metadata-only, bodies-background, or bodies-before-ready.'
     default: 'metadata-only'
     required: false
   buildkit-host:
