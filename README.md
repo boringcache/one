@@ -9,7 +9,7 @@ If you are starting fresh, the preferred path is:
 3. commit `.boringcache.toml` when it helps
 4. use `boringcache/one@v1` in GitHub Actions
 
-That keeps local runs, Dockerfiles, and GitHub Actions on the same workspace, cache names, and trust model.
+That keeps local runs, Docker builds, and GitHub Actions on the same workspace, cache names, and trust model.
 
 If you are migrating an existing workflow and do not want repo config yet, raw `entries` plus `actions/cache` compatibility inputs such as `path`, `key`, and `restore-keys` still work.
 
@@ -51,34 +51,9 @@ For Docker or native remote-cache flows, set the mode you need and keep the same
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-Most Docker workflows only need the registry layer cache outputs. The helper options below are for advanced Dockerfiles that already bind-mount a `boringcache` helper inside `RUN` steps.
+Most Docker workflows only need the registry layer cache path. Do not add BoringCache commands inside Dockerfile `RUN` steps for new workflows.
 
-Keep that helper stable unless you deliberately want the helper binary to be part of the Docker cache key:
-
-```yaml
-- uses: boringcache/one@v1
-  id: bc
-  with:
-    mode: docker
-    workspace: my-org/my-project
-    docker-command: setup
-    docker-internal-cache: off
-    docker-helper-path: boringcache-bin
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
-
-- run: |
-    docker buildx build \
-      --builder "${{ steps.bc.outputs.buildx-name }}" \
-      --cache-from "${{ steps.bc.outputs.cache-from }}" \
-      --cache-to "${{ steps.bc.outputs.cache-to }}" \
-      --build-arg BORINGCACHE_INTERNAL_RESTORE_ENABLED="${{ steps.bc.outputs.docker-internal-restore-enabled }}" \
-      --build-arg BORINGCACHE_INTERNAL_SAVE_ENABLED="${{ steps.bc.outputs.docker-internal-save-enabled }}" \
-      .
-```
-
-`docker-internal-cache: off` is the registry-layer path: `one` disables Dockerfile-internal BoringCache calls and, when `docker-helper-path` is set, writes a stable no-op executable under the Docker context for bind mounts such as `RUN --mount=type=bind,source=boringcache-bin,target=/usr/local/bin/boringcache`. Set `docker-internal-cache: on` only when you intentionally want the real CLI inside the Dockerfile; that makes a CLI binary release a Docker graph input, so the first same-branch run after the binary changes is a reseed. BoringCache maintainers use separate benchmark-only `cli_ref` diagnostics for registry-proxy development; application workflows should use released action and CLI versions.
+Older advanced Dockerfiles may still bind-mount a `boringcache` helper inside `RUN` steps. Treat that as compatibility, not the recommended path. `docker-internal-cache: off` disables Dockerfile-internal BoringCache calls and can write a stable no-op helper for those legacy bind mounts. Avoid `docker-internal-cache: on` for normal application workflows; it intentionally puts the real CLI inside the Dockerfile and makes a CLI binary release a Docker graph input, so the first same-branch run after the binary changes is a reseed. BoringCache maintainers use separate benchmark-only `cli_ref` diagnostics for registry-proxy development; application workflows should use released action and CLI versions.
 
 ## What it handles
 

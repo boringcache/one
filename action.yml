@@ -7,7 +7,7 @@ inputs:
     default: 'v1.12.40'
     required: false
   cli-platform:
-    description: 'Optional CLI target/platform override for Docker benchmark binary copy and similar cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
+    description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
     required: false
   setup:
     description: 'Runtime setup owner: mise, external, or none. mise auto-detects project tools from mise.toml, .tool-versions, and common version files.'
@@ -107,11 +107,11 @@ inputs:
     description: 'Build arguments as newline-separated KEY=VALUE pairs.'
     required: false
   docker-internal-cache:
-    description: 'Advanced Dockerfiles only: controls BoringCache calls inside Dockerfile RUN steps. Default off keeps registry layer cache as the Docker cache path; on intentionally enables a real in-Dockerfile helper; manual leaves build args and helper files untouched.'
+    description: 'Legacy compatibility for older advanced Dockerfiles that already contain BoringCache RUN hooks. Default off keeps registry layer cache as the Docker cache path; on intentionally enables the old in-Dockerfile helper; manual leaves build args and helper files untouched.'
     default: 'off'
     required: false
   docker-helper-path:
-    description: 'Advanced Dockerfiles only: optional path under the Docker or BuildKit context to materialize a bind-mount helper. With docker-internal-cache=off this writes a stable no-op helper; with on it copies the installed boringcache CLI.'
+    description: 'Legacy compatibility for older advanced Dockerfiles only: optional path under the Docker or BuildKit context to materialize a bind-mount helper. With docker-internal-cache=off this writes a stable no-op helper; on intentionally materializes the real CLI.'
     required: false
   target:
     description: 'Target build stage.'
