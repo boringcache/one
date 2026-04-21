@@ -111,6 +111,22 @@ describe('one utils', () => {
     expect(inputs.ociHydration).toBe(match![1]);
   });
 
+  it('keeps verify defaults aligned between action.yml and runtime fallback', async () => {
+    const actionYamlPath = path.join(__dirname, '..', 'action.yml');
+    const actionYaml = await fs.readFile(actionYamlPath, 'utf8');
+    const match = actionYaml.match(
+      /\n  verify:[\s\S]*?default:\s*['"]([^'"]+)['"]/,
+    );
+    expect(match).not.toBeNull();
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+
+    const inputs = getInputs();
+    expect(inputs.verify).toBe(match![1]);
+    expect(inputs.verify).toBe('none');
+  });
+
   it('accepts verify=warn from action inputs', () => {
     mockGetInput({ verify: 'warn' });
     mockGetBooleanInput({});

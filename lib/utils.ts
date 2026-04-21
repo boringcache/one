@@ -413,12 +413,13 @@ export function readLogTail(filePath: string, maxLines: number): string[] {
 }
 
 export function normalizeVerifyMode(value: string): VerifyMode {
-  switch ((value || 'wait').trim().toLowerCase()) {
+  const normalized = (value || 'none').trim().toLowerCase();
+  switch (normalized) {
     case 'none':
     case 'check':
     case 'wait':
     case 'warn':
-      return (value || 'wait').trim().toLowerCase() as VerifyMode;
+      return normalized as VerifyMode;
     default:
       throw new Error(`Unsupported verify mode "${value}". Expected none, check, wait, or warn.`);
   }

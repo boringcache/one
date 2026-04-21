@@ -308,12 +308,13 @@ function readLogTail(filePath, maxLines) {
     }
 }
 function normalizeVerifyMode(value) {
-    switch ((value || 'wait').trim().toLowerCase()) {
+    const normalized = (value || 'none').trim().toLowerCase();
+    switch (normalized) {
         case 'none':
         case 'check':
         case 'wait':
         case 'warn':
-            return (value || 'wait').trim().toLowerCase();
+            return normalized;
         default:
             throw new Error(`Unsupported verify mode "${value}". Expected none, check, wait, or warn.`);
     }

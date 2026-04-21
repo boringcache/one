@@ -157,13 +157,12 @@ describe('save action', () => {
     );
   });
 
-  it('waits for deferred save tags after saving even when verify mode is check', async () => {
-    jest.useFakeTimers();
+  it('does not wait for deferred save tags when verify mode is check', async () => {
     let checkAttempts = 0;
     (exec.exec as jest.Mock).mockImplementation(async (command: string, args?: string[]) => {
       if (command === 'boringcache' && args?.[0] === 'check') {
         checkAttempts += 1;
-        return checkAttempts === 1 ? 1 : 0;
+        return 1;
       }
       return 0;
     });
@@ -181,17 +180,15 @@ describe('save action', () => {
       'verify-save-tags': 'deps',
     });
 
-    try {
-      const runPromise = saveRun();
-      await Promise.resolve();
-      await jest.advanceTimersByTimeAsync(2000);
-      await runPromise;
+    await saveRun();
 
-      expect(checkAttempts).toBe(2);
-      expect(core.info).toHaveBeenCalledWith('Waiting for tags to become visible (1): deps');
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(checkAttempts).toBe(1);
+    expect(core.info).not.toHaveBeenCalledWith(
+      expect.stringContaining('Waiting for tags to become visible'),
+    );
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Verification failed for tags deps'),
+    );
   });
 
   it('uses warn mode for deferred post-save verification without failing the save step', async () => {
@@ -219,7 +216,7 @@ describe('save action', () => {
         ]),
         expect.objectContaining({
           mode: 'warn',
-          timeoutSeconds: 180,
+          timeoutSeconds: 30,
           requireServerSignature: false,
           verbose: false,
         }),
@@ -349,17 +346,8 @@ describe('save action', () => {
     expect(core.info).toHaveBeenCalledWith(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
   });
 
-  it('extends post-save verification beyond the requested timeout floor', async () => {
-    jest.useFakeTimers();
-    let checkAttempts = 0;
-    (exec.exec as jest.Mock).mockImplementation(async (command: string, args?: string[]) => {
-      if (command === 'boringcache' && args?.[0] === 'check') {
-        checkAttempts += 1;
-        return checkAttempts <= 40 ? 1 : 0;
-      }
-      return 0;
-    });
-
+  it('uses the requested timeout for explicit post-save wait verification', async () => {
+    const verifySpy = jest.spyOn(utils, 'verifyVerificationSpecs').mockResolvedValue(undefined);
     mockGetInput({});
     mockGetBooleanInput({});
     mockGetState({
@@ -367,22 +355,29 @@ describe('save action', () => {
       'generic-cache-entries': 'deps:node_modules',
       'generic-cache-workspace': 'my-org/my-project',
       'cli-version': 'skip',
-      'verify-mode': 'check',
-      'verify-timeout-seconds': '60',
+      'verify-mode': 'wait',
+      'verify-timeout-seconds': '30',
       'verify-require-server-signature': 'false',
       'verify-save-tags': 'deps',
     });
 
     try {
-      const runPromise = saveRun();
-      await Promise.resolve();
-      await jest.runAllTimersAsync();
-      await runPromise;
+      await saveRun();
 
-      expect(checkAttempts).toBe(41);
-      expect(core.setFailed).not.toHaveBeenCalled();
+      expect(verifySpy).toHaveBeenCalledWith(
+        'my-org/my-project',
+        expect.arrayContaining([
+          expect.objectContaining({ tag: 'deps', noPlatform: true, noGit: true }),
+        ]),
+        expect.objectContaining({
+          mode: 'wait',
+          timeoutSeconds: 30,
+          requireServerSignature: false,
+          verbose: false,
+        }),
+      );
     } finally {
-      jest.useRealTimers();
+      verifySpy.mockRestore();
     }
   });
 

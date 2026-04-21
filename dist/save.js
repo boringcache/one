@@ -39,7 +39,6 @@ const fs = __importStar(require("fs"));
 const core_1 = require("./core");
 const utils_1 = require("./utils");
 const mode_handlers_1 = require("./mode-handlers");
-const MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS = 180;
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
         return '';
@@ -115,12 +114,6 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
         saveExpected: true,
     }));
 }
-function resolvePostSaveVerifyMode(verifyMode) {
-    return verifyMode === 'check' ? 'wait' : verifyMode;
-}
-function resolvePostSaveVerifyTimeoutSeconds(timeoutSeconds) {
-    return Math.max(timeoutSeconds, MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS);
-}
 async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
     await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
@@ -161,9 +154,7 @@ async function run() {
         let force = core.getState('force') === 'true';
         let verbose = core.getState('verbose') === 'true';
         const verifyMode = (core.getState('verify-mode') || inputs.verify);
-        const postSaveVerifyMode = resolvePostSaveVerifyMode(verifyMode);
         const verifyTimeoutSeconds = Number.parseInt(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds), 10);
-        const postSaveVerifyTimeoutSeconds = resolvePostSaveVerifyTimeoutSeconds(verifyTimeoutSeconds);
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
         const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
@@ -242,8 +233,8 @@ async function run() {
         if (!genericEntries || !genericWorkspace) {
             if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {
                 await (0, utils_1.verifyVerificationSpecs)(genericWorkspace, verifySaveSpecs, {
-                    mode: postSaveVerifyMode,
-                    timeoutSeconds: postSaveVerifyTimeoutSeconds,
+                    mode: verifyMode,
+                    timeoutSeconds: verifyTimeoutSeconds,
                     requireServerSignature: verifyRequireServerSignature,
                     verbose,
                 });
@@ -264,15 +255,13 @@ async function run() {
         if (exclude) {
             args.push('--exclude', exclude);
         }
-        if (verifyMode !== 'none') {
-            args.push('--fail-on-cache-error');
-        }
+        args.push('--fail-on-cache-error');
         await (0, utils_1.execBoringCache)(args);
         const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
         if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
             await (0, utils_1.verifyVerificationSpecs)(genericWorkspace, verifiableSaveSpecs, {
-                mode: postSaveVerifyMode,
-                timeoutSeconds: postSaveVerifyTimeoutSeconds,
+                mode: verifyMode,
+                timeoutSeconds: verifyTimeoutSeconds,
                 requireServerSignature: verifyRequireServerSignature,
                 verbose,
             });

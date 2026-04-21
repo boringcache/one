@@ -22,8 +22,6 @@ import {
 import { runModeSave } from './mode-handlers';
 import type { ResolvedMode } from './modes';
 
-const MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS = 180;
-
 function toSaveEntries(entriesString: string): string {
   if (!entriesString.trim()) {
     return '';
@@ -113,14 +111,6 @@ function buildLegacyVerificationSpecs(
   }));
 }
 
-function resolvePostSaveVerifyMode(verifyMode: VerifyMode): VerifyMode {
-  return verifyMode === 'check' ? 'wait' : verifyMode;
-}
-
-function resolvePostSaveVerifyTimeoutSeconds(timeoutSeconds: number): number {
-  return Math.max(timeoutSeconds, MIN_POST_SAVE_VERIFY_TIMEOUT_SECONDS);
-}
-
 async function emitPostStepDiagnostics(
   inputs: ReturnType<typeof getInputs>,
   resolvedMode: ResolvedMode | '',
@@ -173,12 +163,10 @@ export async function run(): Promise<void> {
     let force = core.getState('force') === 'true';
     let verbose = core.getState('verbose') === 'true';
     const verifyMode = (core.getState('verify-mode') || inputs.verify) as VerifyMode;
-    const postSaveVerifyMode = resolvePostSaveVerifyMode(verifyMode);
     const verifyTimeoutSeconds = Number.parseInt(
       core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds),
       10,
     );
-    const postSaveVerifyTimeoutSeconds = resolvePostSaveVerifyTimeoutSeconds(verifyTimeoutSeconds);
     const verifyRequireServerSignature =
       core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
     const saveConfigured = readSavedSaveConfiguration(inputs, core.getState('save-configured'));
@@ -293,8 +281,8 @@ export async function run(): Promise<void> {
     if (!genericEntries || !genericWorkspace) {
       if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {
         await verifyVerificationSpecs(genericWorkspace, verifySaveSpecs, {
-          mode: postSaveVerifyMode,
-          timeoutSeconds: postSaveVerifyTimeoutSeconds,
+          mode: verifyMode,
+          timeoutSeconds: verifyTimeoutSeconds,
           requireServerSignature: verifyRequireServerSignature,
           verbose,
         });
@@ -324,9 +312,7 @@ export async function run(): Promise<void> {
     if (exclude) {
       args.push('--exclude', exclude);
     }
-    if (verifyMode !== 'none') {
-      args.push('--fail-on-cache-error');
-    }
+    args.push('--fail-on-cache-error');
 
     await execBoringCache(args);
 
@@ -334,8 +320,8 @@ export async function run(): Promise<void> {
 
     if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
       await verifyVerificationSpecs(genericWorkspace, verifiableSaveSpecs, {
-        mode: postSaveVerifyMode,
-        timeoutSeconds: postSaveVerifyTimeoutSeconds,
+        mode: verifyMode,
+        timeoutSeconds: verifyTimeoutSeconds,
         requireServerSignature: verifyRequireServerSignature,
         verbose,
       });

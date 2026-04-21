@@ -93,7 +93,7 @@ That keeps the step restore-only by configuration instead of emitting missing-sa
 - `preset` is for archive-oriented defaults plus tool detection
 - `mode` selects the primary adapter when you need Docker or a native remote-cache flow; proxy/build modes stay pure remote unless you also set `entries`
 - `setup` defaults to `mise`
-- `verify` defaults to `wait` with a 180s timeout so tag visibility is checked automatically after restore/save
+- `verify` defaults to `none`; set `check` for one-shot tag checks or `wait`/`warn` when you explicitly want polling
 
 In most workflows, set `workspace` and then one of:
 
