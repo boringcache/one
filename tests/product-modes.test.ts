@@ -127,9 +127,98 @@ describe('product modes', () => {
       expect(core.setOutput).toHaveBeenCalledWith('docker-internal-cache', 'off');
       expect(core.setOutput).toHaveBeenCalledWith('docker-internal-restore-enabled', '0');
       expect(core.setOutput).toHaveBeenCalledWith('docker-internal-save-enabled', '0');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-run-ref', '');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'buildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-promotion-refs', '');
       const cacheTagCalls = (core.setOutput as jest.Mock).mock.calls.filter(([name]) => name === 'cache-tag');
       expect(cacheTagCalls.at(-1)).toEqual(['cache-tag', 'ghcr-io-boringcache-demo']);
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'docker');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('surfaces provider-neutral Docker run refs from CLI dry-run planning', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+      });
+      mockGetBooleanInput({});
+
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            adapter: 'docker',
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag: 'ghcr-io-boringcache-demo',
+            command: [],
+            archive_entries: [],
+            env_vars: {},
+            proxy: {
+              host: '0.0.0.0',
+              endpoint_host: '172.17.0.1',
+              port: 5000,
+              no_platform: false,
+              no_git: false,
+              read_only: false,
+              startup_mode: 'warm',
+              oci_prefetch_refs: ['cache@branch-main', 'cache@default', 'cache@buildcache'],
+              oci_hydration: 'metadata-only',
+              metadata_hints: {
+                docker_immutable_run_ref: 'run-example-42-attempt-1',
+                docker_alias_promotion_refs: 'branch-main',
+                ci_provider: 'example-ci',
+              },
+            },
+            oci_cache: {
+              registry_ref: '172.17.0.1:5000/cache:run-example-42-attempt-1',
+              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:branch-main',
+              cache_from_refs: [
+                'type=registry,ref=172.17.0.1:5000/cache:branch-main',
+                'type=registry,ref=172.17.0.1:5000/cache:default',
+                'type=registry,ref=172.17.0.1:5000/cache:buildcache',
+              ],
+              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:run-example-42-attempt-1,mode=max',
+              ref_tag: 'run-example-42-attempt-1',
+              immutable_run_ref_tag: 'run-example-42-attempt-1',
+              promotion_ref_tags: ['branch-main'],
+              run_metadata: {
+                provider: 'example-ci',
+                run_uid: '42',
+                run_attempt: '1',
+                source_ref_type: 'branch',
+                source_ref_name: 'main',
+                run_started_at: '2026-04-21T10:00:00Z',
+              },
+            },
+          })));
+          return 0;
+        }
+        return 0;
+      });
+
+      await restoreRun();
+
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-run-ref', 'run-example-42-attempt-1');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'branch-main\ndefault\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-promotion-refs', 'branch-main');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-ci-provider', 'example-ci');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-ci-run-id', '42');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-ci-run-attempt', '1');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-ci-ref-type', 'branch');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-ci-ref-name', 'main');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-ci-run-started-at', '2026-04-21T10:00:00Z');
     } finally {
       await removeTempProject(project);
     }

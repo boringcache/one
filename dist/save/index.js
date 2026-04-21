@@ -43648,8 +43648,18 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
     let stdout = '';
     let stderr = '';
+    const env = {};
+    for (const [key, value] of Object.entries(process.env)) {
+        if (value !== undefined) {
+            env[key] = value;
+        }
+    }
+    if (env.GITHUB_ACTIONS === 'true' && !env.BORINGCACHE_CI_RUN_STARTED_AT) {
+        env.BORINGCACHE_CI_RUN_STARTED_AT = new Date().toISOString();
+    }
     const exitCode = await exec.exec('boringcache', args, {
         cwd: workingDirectory,
+        env,
         ignoreReturnCode: true,
         silent: true,
         listeners: {
@@ -43715,10 +43725,46 @@ function getRegistryCacheFlags(ref, cacheMode) {
         to: `type=registry,ref=${ref},mode=${cacheMode},registry.insecure=true`,
     };
 }
+function extractRegistryCacheRefTag(cacheFrom) {
+    var _a;
+    const refMatch = cacheFrom.match(/(?:^|,)ref=([^,]+)/);
+    const ref = (_a = refMatch === null || refMatch === void 0 ? void 0 : refMatch[1]) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!ref) {
+        return null;
+    }
+    const lastSlash = ref.lastIndexOf('/');
+    const lastColon = ref.lastIndexOf(':');
+    if (lastColon <= lastSlash || lastColon === ref.length - 1) {
+        return null;
+    }
+    return ref.slice(lastColon + 1);
+}
+function registryCacheFromRefTags(ociCache) {
+    var _a;
+    if (!ociCache) {
+        return [];
+    }
+    if ((_a = ociCache.cache_from_ref_tags) === null || _a === void 0 ? void 0 : _a.length) {
+        return ociCache.cache_from_ref_tags;
+    }
+    return (ociCache.cache_from_refs || [])
+        .map(extractRegistryCacheRefTag)
+        .filter((tag) => Boolean(tag));
+}
 function setRegistryCacheOutputs(spec) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
     core.setOutput('registry-ref', spec.ref);
     core.setOutput('cache-from', spec.from);
     core.setOutput('cache-to', spec.to || '');
+    core.setOutput('docker-cache-run-ref', ((_a = spec.ociCache) === null || _a === void 0 ? void 0 : _a.immutable_run_ref_tag) || '');
+    core.setOutput('docker-cache-from-refs', registryCacheFromRefTags(spec.ociCache).join('\n'));
+    core.setOutput('docker-cache-promotion-refs', (((_b = spec.ociCache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join('\n'));
+    core.setOutput('docker-ci-provider', ((_d = (_c = spec.ociCache) === null || _c === void 0 ? void 0 : _c.run_metadata) === null || _d === void 0 ? void 0 : _d.provider) || '');
+    core.setOutput('docker-ci-run-id', ((_f = (_e = spec.ociCache) === null || _e === void 0 ? void 0 : _e.run_metadata) === null || _f === void 0 ? void 0 : _f.run_uid) || '');
+    core.setOutput('docker-ci-run-attempt', ((_h = (_g = spec.ociCache) === null || _g === void 0 ? void 0 : _g.run_metadata) === null || _h === void 0 ? void 0 : _h.run_attempt) || '');
+    core.setOutput('docker-ci-ref-type', ((_k = (_j = spec.ociCache) === null || _j === void 0 ? void 0 : _j.run_metadata) === null || _k === void 0 ? void 0 : _k.source_ref_type) || '');
+    core.setOutput('docker-ci-ref-name', ((_m = (_l = spec.ociCache) === null || _l === void 0 ? void 0 : _l.run_metadata) === null || _m === void 0 ? void 0 : _m.source_ref_name) || '');
+    core.setOutput('docker-ci-run-started-at', ((_p = (_o = spec.ociCache) === null || _o === void 0 ? void 0 : _o.run_metadata) === null || _p === void 0 ? void 0 : _p.run_started_at) || '');
     core.setOutput('cache-dir', '');
     core.setOutput('save-cache-dir', '');
 }
@@ -43726,6 +43772,15 @@ function setLocalCacheOutputs(cacheDirFrom, cacheDirTo, cacheMode) {
     core.setOutput('registry-ref', '');
     core.setOutput('cache-from', `type=local,src=${cacheDirFrom}`);
     core.setOutput('cache-to', `type=local,dest=${cacheDirTo},mode=${cacheMode}`);
+    core.setOutput('docker-cache-run-ref', '');
+    core.setOutput('docker-cache-from-refs', '');
+    core.setOutput('docker-cache-promotion-refs', '');
+    core.setOutput('docker-ci-provider', '');
+    core.setOutput('docker-ci-run-id', '');
+    core.setOutput('docker-ci-run-attempt', '');
+    core.setOutput('docker-ci-ref-type', '');
+    core.setOutput('docker-ci-ref-name', '');
+    core.setOutput('docker-ci-run-started-at', '');
     core.setOutput('cache-dir', cacheDirFrom);
     core.setOutput('save-cache-dir', cacheDirTo);
 }
@@ -44609,6 +44664,7 @@ async function runDockerRestore(plan, inputs) {
             to: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,
+            ociCache: dockerPlan.oci_cache,
         });
         if (shouldBuild) {
             await buildDockerImage({
@@ -44798,6 +44854,7 @@ async function runBuildkitRestore(plan, inputs) {
             to: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,
+            ociCache: dockerPlan.oci_cache,
         });
         await buildWithBuildctl({
             addr: buildkitHost,
@@ -45881,7 +45938,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.12.41',
+        cliVersion: core.getInput('cli-version') || 'v1.12.42',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),

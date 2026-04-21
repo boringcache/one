@@ -134,8 +134,20 @@ interface CliAdapterDryRunPlan {
   oci_cache?: {
     registry_ref: string;
     cache_from: string;
+    cache_from_refs?: string[];
     cache_to?: string;
     ref_tag: string;
+    immutable_run_ref_tag?: string;
+    cache_from_ref_tags?: string[];
+    promotion_ref_tags?: string[];
+    run_metadata?: {
+      provider: string;
+      run_uid: string;
+      run_attempt?: string;
+      source_ref_type?: string;
+      source_ref_name?: string;
+      run_started_at?: string;
+    };
   };
 }
 
@@ -854,6 +866,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     ociCache = {
       registry_ref: registryRef,
       cache_from: `type=registry,ref=${registryRef}`,
+      cache_from_refs: [`type=registry,ref=${registryRef}`],
       cache_to: resolvedReadOnly ? undefined : `type=registry,ref=${registryRef},mode=${resolvedCacheMode}`,
       ref_tag: dockerTarget.refTag,
     };

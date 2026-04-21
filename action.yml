@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.12.41'
+    default: 'v1.12.42'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -386,6 +386,24 @@ outputs:
     description: 'Resolved Docker --cache-from or BuildKit --import-cache value for Docker or BuildKit modes'
   cache-to:
     description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
+  docker-cache-run-ref:
+    description: 'Provider-neutral immutable Docker or BuildKit OCI cache run ref tag when CI run-ref derivation is active'
+  docker-cache-from-refs:
+    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags'
+  docker-cache-promotion-refs:
+    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache alias ref tags requested for promotion'
+  docker-ci-provider:
+    description: 'Provider-neutral CI provider name used for Docker or BuildKit cache run-ref derivation'
+  docker-ci-run-id:
+    description: 'Provider-neutral CI run id used for Docker or BuildKit cache run-ref derivation'
+  docker-ci-run-attempt:
+    description: 'Provider-neutral CI run attempt used for Docker or BuildKit cache run-ref derivation'
+  docker-ci-ref-type:
+    description: 'Provider-neutral CI ref type used for Docker or BuildKit cache run-ref derivation'
+  docker-ci-ref-name:
+    description: 'Provider-neutral CI ref name used for Docker or BuildKit cache run-ref derivation'
+  docker-ci-run-started-at:
+    description: 'Provider-neutral CI run start timestamp used for Docker or BuildKit alias promotion ordering when available'
   cache-dir:
     description: 'Resolved local cache import directory for Docker or BuildKit local backend'
   save-cache-dir:

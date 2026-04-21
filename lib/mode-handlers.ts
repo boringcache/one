@@ -90,8 +90,20 @@ interface CliAdapterDryRunPlan {
   oci_cache?: {
     registry_ref: string;
     cache_from: string;
+    cache_from_refs?: string[];
     cache_to?: string;
     ref_tag: string;
+    immutable_run_ref_tag?: string;
+    cache_from_ref_tags?: string[];
+    promotion_ref_tags?: string[];
+    run_metadata?: {
+      provider: string;
+      run_uid: string;
+      run_attempt?: string;
+      source_ref_type?: string;
+      source_ref_name?: string;
+      run_started_at?: string;
+    };
   };
 }
 
@@ -570,8 +582,18 @@ async function resolveDockerCliPlan(
 
   let stdout = '';
   let stderr = '';
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  if (env.GITHUB_ACTIONS === 'true' && !env.BORINGCACHE_CI_RUN_STARTED_AT) {
+    env.BORINGCACHE_CI_RUN_STARTED_AT = new Date().toISOString();
+  }
   const exitCode = await exec.exec('boringcache', args, {
     cwd: workingDirectory,
+    env,
     ignoreReturnCode: true,
     silent: true,
     listeners: {
@@ -652,10 +674,47 @@ function getRegistryCacheFlags(ref: string, cacheMode: string): { from: string; 
   };
 }
 
-function setRegistryCacheOutputs(spec: { ref: string; from: string; to?: string }): void {
+function extractRegistryCacheRefTag(cacheFrom: string): string | null {
+  const refMatch = cacheFrom.match(/(?:^|,)ref=([^,]+)/);
+  const ref = refMatch?.[1]?.trim();
+  if (!ref) {
+    return null;
+  }
+
+  const lastSlash = ref.lastIndexOf('/');
+  const lastColon = ref.lastIndexOf(':');
+  if (lastColon <= lastSlash || lastColon === ref.length - 1) {
+    return null;
+  }
+
+  return ref.slice(lastColon + 1);
+}
+
+function registryCacheFromRefTags(ociCache?: CliAdapterDryRunPlan['oci_cache']): string[] {
+  if (!ociCache) {
+    return [];
+  }
+  if (ociCache.cache_from_ref_tags?.length) {
+    return ociCache.cache_from_ref_tags;
+  }
+  return (ociCache.cache_from_refs || [])
+    .map(extractRegistryCacheRefTag)
+    .filter((tag): tag is string => Boolean(tag));
+}
+
+function setRegistryCacheOutputs(spec: { ref: string; from: string; to?: string; ociCache?: CliAdapterDryRunPlan['oci_cache'] }): void {
   core.setOutput('registry-ref', spec.ref);
   core.setOutput('cache-from', spec.from);
   core.setOutput('cache-to', spec.to || '');
+  core.setOutput('docker-cache-run-ref', spec.ociCache?.immutable_run_ref_tag || '');
+  core.setOutput('docker-cache-from-refs', registryCacheFromRefTags(spec.ociCache).join('\n'));
+  core.setOutput('docker-cache-promotion-refs', (spec.ociCache?.promotion_ref_tags || []).join('\n'));
+  core.setOutput('docker-ci-provider', spec.ociCache?.run_metadata?.provider || '');
+  core.setOutput('docker-ci-run-id', spec.ociCache?.run_metadata?.run_uid || '');
+  core.setOutput('docker-ci-run-attempt', spec.ociCache?.run_metadata?.run_attempt || '');
+  core.setOutput('docker-ci-ref-type', spec.ociCache?.run_metadata?.source_ref_type || '');
+  core.setOutput('docker-ci-ref-name', spec.ociCache?.run_metadata?.source_ref_name || '');
+  core.setOutput('docker-ci-run-started-at', spec.ociCache?.run_metadata?.run_started_at || '');
   core.setOutput('cache-dir', '');
   core.setOutput('save-cache-dir', '');
 }
@@ -664,6 +723,15 @@ function setLocalCacheOutputs(cacheDirFrom: string, cacheDirTo: string, cacheMod
   core.setOutput('registry-ref', '');
   core.setOutput('cache-from', `type=local,src=${cacheDirFrom}`);
   core.setOutput('cache-to', `type=local,dest=${cacheDirTo},mode=${cacheMode}`);
+  core.setOutput('docker-cache-run-ref', '');
+  core.setOutput('docker-cache-from-refs', '');
+  core.setOutput('docker-cache-promotion-refs', '');
+  core.setOutput('docker-ci-provider', '');
+  core.setOutput('docker-ci-run-id', '');
+  core.setOutput('docker-ci-run-attempt', '');
+  core.setOutput('docker-ci-ref-type', '');
+  core.setOutput('docker-ci-ref-name', '');
+  core.setOutput('docker-ci-run-started-at', '');
   core.setOutput('cache-dir', cacheDirFrom);
   core.setOutput('save-cache-dir', cacheDirTo);
 }
@@ -1712,6 +1780,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       to: dockerPlan.oci_cache!.cache_to
         ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
         : undefined,
+      ociCache: dockerPlan.oci_cache,
     });
 
     if (shouldBuild) {
@@ -1930,6 +1999,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       to: dockerPlan.oci_cache!.cache_to
         ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
         : undefined,
+      ociCache: dockerPlan.oci_cache,
     });
     await buildWithBuildctl({
       addr: buildkitHost,
