@@ -57,6 +57,23 @@ type RegistryProxyOptions = Parameters<typeof startRegistryProxy>[0] & {
   metadataHints?: Record<string, string>;
 };
 
+const MAX_PROXY_METADATA_HINTS = 8;
+const MAX_PROXY_METADATA_HINT_KEY_BYTES = 32;
+const MAX_PROXY_METADATA_HINT_VALUE_BYTES = 64;
+const PROXY_METADATA_HINT_PRIORITY = [
+  'docker_cache_ref_tag',
+  'docker_immutable_run_ref',
+  'docker_alias_promotion_refs',
+  'ci_provider',
+  'ci_run_uid',
+  'ci_run_attempt',
+  'ci_ref_type',
+  'ci_pr_number',
+  'ci_ref_name',
+  'ci_commit_sha',
+  'ci_run_started_at',
+];
+
 interface CliProxyDryRunPlan {
   host: string;
   endpoint_host: string;
@@ -79,8 +96,68 @@ function actionProxyOptions<T extends RegistryProxyOptions>(
     onDemand: proxyPlan?.startup_mode === 'on-demand',
     ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
     ociHydration: proxyPlan?.oci_hydration || options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY,
-    metadataHints: proxyPlan?.metadata_hints || {},
+    metadataHints: commandLineSafeMetadataHints(proxyPlan?.metadata_hints || {}),
   };
+}
+
+function commandLineSafeMetadataHints(rawHints: Record<string, string>): Record<string, string> {
+  const orderedKeys = Object.keys(rawHints).sort((left, right) => {
+    const leftPriority = PROXY_METADATA_HINT_PRIORITY.indexOf(normalizeMetadataHintKey(left) || left);
+    const rightPriority = PROXY_METADATA_HINT_PRIORITY.indexOf(normalizeMetadataHintKey(right) || right);
+    const normalizedLeft = leftPriority === -1 ? Number.MAX_SAFE_INTEGER : leftPriority;
+    const normalizedRight = rightPriority === -1 ? Number.MAX_SAFE_INTEGER : rightPriority;
+
+    if (normalizedLeft !== normalizedRight) {
+      return normalizedLeft - normalizedRight;
+    }
+    return left.localeCompare(right);
+  });
+
+  const hints: Record<string, string> = {};
+  for (const rawKey of orderedKeys) {
+    const key = normalizeMetadataHintKey(rawKey);
+    if (!key || Object.prototype.hasOwnProperty.call(hints, key)) {
+      continue;
+    }
+
+    const value = normalizeMetadataHintValue(key, rawHints[rawKey]);
+    if (!value) {
+      core.debug(`Skipping proxy metadata hint ${rawKey}: value is not command-line safe`);
+      continue;
+    }
+
+    hints[key] = value;
+    if (Object.keys(hints).length >= MAX_PROXY_METADATA_HINTS) {
+      break;
+    }
+  }
+
+  return hints;
+}
+
+function normalizeMetadataHintKey(rawKey: string): string | null {
+  const normalized = rawKey.trim().toLowerCase().replace(/-/g, '_');
+  if (!normalized || Buffer.byteLength(normalized, 'utf8') > MAX_PROXY_METADATA_HINT_KEY_BYTES) {
+    return null;
+  }
+  return /^[a-z0-9_]+$/.test(normalized) ? normalized : null;
+}
+
+function normalizeMetadataHintValue(key: string, rawValue: string): string | null {
+  let value = String(rawValue || '');
+  if (key === 'docker_alias_promotion_refs') {
+    value = value
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join('/');
+  }
+
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, '-');
+  if (!normalized || Buffer.byteLength(normalized, 'utf8') > MAX_PROXY_METADATA_HINT_VALUE_BYTES) {
+    return null;
+  }
+  return /^[a-z0-9_.:/-]+$/.test(normalized) ? normalized : null;
 }
 
 interface CliAdapterDryRunPlan {
