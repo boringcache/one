@@ -18,6 +18,11 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
+## First Reads
+
+- Start at `docs/comprehension/README.md` for durable action context.
+- Keep the repository boundary in `docs/comprehension/repository-boundary.md` aligned with this file.
+
 ## Key Features
 
 - **Mise-powered**: Can detect and install runtimes via `mise`
