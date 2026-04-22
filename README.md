@@ -65,7 +65,7 @@ Older advanced Dockerfiles may still bind-mount a `boringcache` helper inside `R
 
 ## Maintainer model
 
-`boringcache/one` owns its GitHub Actions support code directly under `lib/core/`. That code used to ship as the separate `@boringcache/action-core` npm package; keeping it in this repository makes a release of `one` self-contained and avoids a second package version becoming part of the product action's behavior.
+`boringcache/one` owns its GitHub Actions support code directly under `lib/core/`. Releases are self-contained: this action does not depend on the retired `@boringcache/action-core` npm package, and maintained behavior should not be split across a second package version.
 
 ## Trust model
 

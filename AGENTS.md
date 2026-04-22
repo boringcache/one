@@ -59,13 +59,13 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 - `lib/save.ts` - Post phase: save cache entries
 - `lib/modes.ts` - Mode registry and compatibility-wrapper mapping
 - `lib/utils.ts` - Shared utilities (CLI install, exec, cache helpers)
-- `lib/core/` - Internalized GitHub Actions core helpers formerly published through `@boringcache/action-core`
+- `lib/core/` - Self-contained GitHub Actions helpers used directly by this action
 
 ## Repository Boundary
 
-`boringcache/one` is now the canonical repository for maintained GitHub Actions implementation work. Keep shared action helpers under `lib/core/` so product changes ship with the action that consumes them.
+`boringcache/one` is the standalone repository for maintained GitHub Actions implementation work. Keep action helpers under `lib/core/` so product changes ship with the action that consumes them.
 
-The standalone `@boringcache/action-core` package is legacy compatibility only. Do not add new product behavior there first, and do not reintroduce it as a dependency of `one`; doing so splits release reasoning across npm and the action bundle again.
+Do not depend on the retired `@boringcache/action-core` package. New product behavior belongs here, in the CLI, or in Rails.
 
 ## Build
 

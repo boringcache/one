@@ -1,6 +1,6 @@
 # Repository Boundary
 
-`boringcache/one` owns the maintained GitHub Action product surface:
+`boringcache/one` owns the standalone maintained GitHub Action product surface:
 
 - action inputs, outputs, defaults, and validation;
 - mode orchestration for archive, Docker, BuildKit, Bazel, Gradle, Turbo, and Rust sccache flows;
@@ -12,4 +12,4 @@ The CLI owns cache protocol behavior, registry proxy semantics, local adapters, 
 
 Rails owns workspace, token, storage, publish, restore, session, billing, and API truth. Action changes that need a new API contract should update the web ADR/comprehension path and the CLI request path in the same rollout.
 
-The standalone `@boringcache/action-core` package is legacy compatibility only. New product behavior should land here or in CLI/Rails, not in a separate npm release path.
+The retired `@boringcache/action-core` package is not part of the maintained action path. Do not add it as a dependency or route new behavior through a separate npm release. New product behavior should land here, in CLI, or in Rails.
