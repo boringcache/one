@@ -23,3 +23,5 @@ Pull request runs are restore-only by default. A PR-scoped Docker or BuildKit re
 The old Dockerfile-internal helper surface is removed before launch. The action should not reintroduce `docker-internal-cache`, `docker-helper-path`, helper build args, helper outputs, or helper-writing code as a documented or discoverable product path. Docker support should stay on the outer BuildKit registry-cache path through CLI-planned `--cache-from` and `--cache-to` refs.
 
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
+
+Release alignment note: `boringcache/one` `v1.12.62` updates the default CLI install version to `v1.12.44` so `one@v1` can exercise the receipt-strict publish, live session-summary, and provider-neutral CI ordering fixes released in the CLI. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps.
