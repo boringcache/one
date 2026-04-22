@@ -54,7 +54,7 @@ inputs:
     default: 'auto'
     required: false
   save-on-pull-request:
-    description: 'Allow save-capable tokens to publish cache updates on pull_request events. Defaults to false so pull requests stay restore-only unless you opt in.'
+    description: 'Allow save-capable tokens to publish cache updates on pull_request events. Defaults to false so pull requests stay restore-only; missing PR-scoped Docker cache refs should fall back to branch/default/stable imports, not require PR writes.'
     default: 'false'
     required: false
   verify:
@@ -153,7 +153,7 @@ inputs:
     description: 'Optional human-readable proxy cache tag for Docker or BuildKit registry backends. Generated OCI refs use the canonical /cache:<registry-ref-tag> shape while this tag controls the proxy cache namespace.'
     required: false
   registry-ref-tag:
-    description: 'Optional OCI tag suffix for proxy-backed Docker or BuildKit cache refs. Defaults to buildcache.'
+    description: 'Optional stable OCI tag suffix for proxy-backed Docker or BuildKit cache refs. Defaults to buildcache; CI may also import PR/branch/default refs before this stable fallback.'
     default: 'buildcache'
     required: false
   oci-hydration:
@@ -376,7 +376,7 @@ outputs:
   registry-ref:
     description: 'Resolved registry cache ref for Docker or BuildKit registry backends (for example 127.0.0.1:5000/cache:buildcache)'
   cache-from:
-    description: 'Resolved Docker --cache-from or BuildKit --import-cache values for Docker or BuildKit modes, newline-separated when the CLI plan includes fallback refs'
+    description: 'Resolved Docker --cache-from or BuildKit --import-cache values for Docker or BuildKit modes, newline-separated when the CLI plan includes fallback refs. PR-scoped refs may be absent on restore-only PR runs.'
   cache-to:
     description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
   docker-cache-run-ref:

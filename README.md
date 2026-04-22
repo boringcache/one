@@ -54,6 +54,11 @@ For Docker or native remote-cache flows, set the mode you need and keep the same
 Docker workflows should use the outer registry cache path. Do not add BoringCache commands, helper binaries, token mounts, build args, or secret mounts inside Dockerfile `RUN` steps.
 The old Dockerfile-internal helper inputs were removed before launch. If a workflow still has BoringCache hooks inside its Dockerfile, remove those hooks and use `mode: docker` instead.
 
+For Docker and BuildKit registry caches, the action follows the CLI's ref plan.
+Pull request runs are restore-only by default, so a PR-scoped ref such as `/cache:pr-3208` may legitimately 404, especially on the first PR run.
+That miss should not make the build cold: the action also forwards the branch, default, and stable fallback imports, ending with the default `/cache:buildcache` ref.
+If a repo deliberately wants PR-scoped Docker cache writes, provide a save-capable token and set `save-on-pull-request: true`; the default derived promotion for a PR is the PR alias, while branch and default aliases remain trusted-branch outputs.
+
 ## What it handles
 
 - archive caching for repeated directories
@@ -71,7 +76,7 @@ The old Dockerfile-internal helper inputs were removed before launch. If a workf
 - every job that should read cache gets `BORINGCACHE_RESTORE_TOKEN`
 - only trusted jobs get `BORINGCACHE_SAVE_TOKEN`
 - `pull_request` jobs stay restore-only by default; set `save-on-pull-request: true` only when the write scope is intentionally isolated
-- pull requests can stay restore-only
+- missing PR-scoped Docker refs on restore-only PRs are expected cache misses, not a reason to grant write access by themselves
 - new workflows should avoid broad `BORINGCACHE_API_TOKEN` use in CI
 
 For bootstrap or setup-only steps that should never publish cache, set:
