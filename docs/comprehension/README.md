@@ -7,6 +7,7 @@ Start here when changing action inputs, outputs, modes, bundled helper behavior,
 ## Map
 
 - [Repository Boundary](repository-boundary.md) records what belongs in this repo and what must stay in CLI or Rails.
+- [ADR 0001](../adr/0001-cli-plan-owned-action-contract.md) records the launch contract: the action orchestrates CLI dry-run plans, should not become a second planner, and keeps the old Dockerfile-internal helper surface removed before launch.
 
 ## Update Rule
 

@@ -115,18 +115,11 @@ describe('product modes', () => {
       );
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=0',
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_SAVE_ENABLED=0',
         '--cache-from',
         expect.stringContaining('/cache:buildcache,registry.insecure=true'),
         '--cache-to',
         expect.stringContaining('/cache:buildcache,mode=max,registry.insecure=true'),
       ]));
-      expect(core.setOutput).toHaveBeenCalledWith('docker-internal-cache', 'off');
-      expect(core.setOutput).toHaveBeenCalledWith('docker-internal-restore-enabled', '0');
-      expect(core.setOutput).toHaveBeenCalledWith('docker-internal-save-enabled', '0');
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-run-ref', '');
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'buildcache');
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-promotion-refs', '');
@@ -229,15 +222,99 @@ describe('product modes', () => {
       expect(core.setOutput).toHaveBeenCalledWith('docker-ci-run-started-at', '2026-04-21T10:00:00Z');
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         metadataHints: {
-          docker_cache_ref_tag: 'run-example-42-attempt-1',
           docker_immutable_run_ref: 'run-example-42-attempt-1',
           docker_alias_promotion_refs: 'branch-main/default',
           ci_provider: 'example-ci',
           ci_run_uid: '42',
+          ci_run_started_at: '2026-04-21t10:00:00z',
           ci_run_attempt: '1',
           ci_ref_type: 'branch',
-          ci_ref_name: 'main',
+          docker_cache_ref_tag: 'run-example-42-attempt-1',
         },
+      }));
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('passes one GitHub run start timestamp through the CLI plan and proxy process', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+    let dryRunEnv: Record<string, string> | undefined;
+
+    try {
+      process.env.GITHUB_ACTIONS = 'true';
+      process.env.GITHUB_RUN_ID = '42';
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+      });
+      mockGetBooleanInput({});
+
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { env?: Record<string, string>; listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
+          dryRunEnv = options?.env;
+          const runStartedAt = dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT || '';
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            adapter: 'docker',
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag: 'ghcr-io-boringcache-demo',
+            command: [],
+            archive_entries: [],
+            env_vars: {},
+            proxy: {
+              host: '0.0.0.0',
+              endpoint_host: '172.17.0.1',
+              port: 5000,
+              no_platform: false,
+              no_git: false,
+              read_only: false,
+              startup_mode: 'warm',
+              oci_prefetch_refs: ['cache@run-42'],
+              oci_hydration: 'metadata-only',
+              metadata_hints: {
+                docker_immutable_run_ref: 'run-42',
+                docker_alias_promotion_refs: 'branch-main',
+                ci_provider: 'github-actions',
+                ci_run_uid: '42',
+                ci_run_started_at: runStartedAt,
+              },
+            },
+            oci_cache: {
+              registry_ref: '172.17.0.1:5000/cache:run-42',
+              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:branch-main',
+              cache_from_refs: ['type=registry,ref=172.17.0.1:5000/cache:branch-main'],
+              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:run-42,mode=max',
+              ref_tag: 'run-42',
+              immutable_run_ref_tag: 'run-42',
+              promotion_ref_tags: ['branch-main'],
+              run_metadata: {
+                provider: 'github-actions',
+                run_uid: '42',
+                run_started_at: runStartedAt,
+              },
+            },
+          })));
+          return 0;
+        }
+        return 0;
+      });
+
+      await restoreRun();
+
+      expect(dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(process.env.BORINGCACHE_CI_RUN_STARTED_AT).toBe(dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT);
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        metadataHints: expect.objectContaining({
+          ci_run_started_at: dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT.toLowerCase(),
+        }),
       }));
     } finally {
       await removeTempProject(project);
@@ -338,10 +415,6 @@ describe('product modes', () => {
         'cache-to',
         expect.stringContaining('/cache:buildcache,mode=max,registry.insecure=true'),
       );
-      expect(core.setOutput).toHaveBeenCalledWith(
-        'docker-internal-build-args',
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=0\nBORINGCACHE_INTERNAL_SAVE_ENABLED=0',
-      );
       const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
         ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
       );
@@ -350,129 +423,6 @@ describe('product modes', () => {
         'verify-save-specs',
         expect.stringContaining('"tag":"bench-registry"'),
       );
-    } finally {
-      await removeTempProject(project);
-    }
-  });
-
-  it('writes a stable no-op helper under the Docker context for registry-only Dockerfile cache paths', async () => {
-    const project = await makeTempProject({ 'app/Dockerfile': 'FROM scratch\n' });
-    const helperPath = path.join(project, 'app', 'boringcache-bin');
-
-    try {
-      mockGetInput({
-        mode: 'docker',
-        setup: 'none',
-        'working-directory': project,
-        context: 'app',
-        workspace: 'boringcache/test-workspace',
-        'docker-command': 'setup',
-        'docker-helper-path': 'boringcache-bin',
-      });
-      mockGetBooleanInput({});
-
-      await restoreRun();
-
-      const helper = await fs.readFile(helperPath, 'utf8');
-      const helperStat = await fs.stat(helperPath);
-      expect(helper).toContain('Stable no-op helper');
-      expect(helperStat.mode & 0o111).not.toBe(0);
-      expect(core.setOutput).toHaveBeenCalledWith('docker-helper-path', helperPath);
-      expect(core.setOutput).toHaveBeenCalledWith('docker-internal-cache', 'off');
-    } finally {
-      await removeTempProject(project);
-    }
-  });
-
-  it('warns when an unmanaged boringcache-bin remains in the Docker context', async () => {
-    const project = await makeTempProject({
-      Dockerfile: 'FROM scratch\n',
-      'boringcache-bin': '#!/usr/bin/env sh\nexit 0\n',
-    });
-
-    try {
-      mockGetInput({
-        mode: 'docker',
-        setup: 'none',
-        'working-directory': project,
-        workspace: 'boringcache/test-workspace',
-        'docker-command': 'setup',
-      });
-      mockGetBooleanInput({});
-
-      await restoreRun();
-
-      expect(core.warning).toHaveBeenCalledWith(
-        'Found boringcache-bin in the Docker context while docker-internal-cache=off; if your Dockerfile bind-mounts it, set docker-helper-path: boringcache-bin so boringcache/one replaces it with a stable no-op helper.',
-      );
-    } finally {
-      await removeTempProject(project);
-    }
-  });
-
-  it('can intentionally enable Dockerfile-internal BoringCache calls', async () => {
-    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
-
-    try {
-      mockGetInput({
-        mode: 'docker',
-        setup: 'none',
-        workspace: 'boringcache/test-workspace',
-        'working-directory': project,
-        image: 'ghcr.io/boringcache/demo',
-        'docker-internal-cache': 'on',
-      });
-      mockGetBooleanInput({});
-
-      await restoreRun();
-
-      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
-        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
-      );
-      expect(dockerBuildCall).toBeTruthy();
-      expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=1',
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_SAVE_ENABLED=1',
-      ]));
-      expect(core.setOutput).toHaveBeenCalledWith('docker-internal-cache', 'on');
-      expect(core.warning).toHaveBeenCalledWith(
-        'docker-internal-cache=on makes the boringcache helper binary a Docker build input; the first run after a CLI binary change is a cache reseed.',
-      );
-    } finally {
-      await removeTempProject(project);
-    }
-  });
-
-  it('leaves Dockerfile-internal cache build args alone in manual mode', async () => {
-    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
-
-    try {
-      mockGetInput({
-        mode: 'docker',
-        setup: 'none',
-        workspace: 'boringcache/test-workspace',
-        'working-directory': project,
-        image: 'ghcr.io/boringcache/demo',
-        'docker-internal-cache': 'manual',
-      });
-      mockGetBooleanInput({});
-
-      await restoreRun();
-
-      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
-        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
-      );
-      expect(dockerBuildCall).toBeTruthy();
-      expect(dockerBuildCall?.[1]).not.toEqual(expect.arrayContaining([
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=0',
-      ]));
-      expect(dockerBuildCall?.[1]).not.toEqual(expect.arrayContaining([
-        'BORINGCACHE_INTERNAL_SAVE_ENABLED=0',
-      ]));
-      expect(core.setOutput).toHaveBeenCalledWith('docker-internal-cache', 'manual');
-      expect(core.setOutput).toHaveBeenCalledWith('docker-internal-build-args', '');
     } finally {
       await removeTempProject(project);
     }
@@ -499,10 +449,6 @@ describe('product modes', () => {
       );
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=0',
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_SAVE_ENABLED=0',
         '--cache-from',
         expect.stringContaining('/cache:buildcache,registry.insecure=true'),
         '--cache-to',
@@ -535,10 +481,6 @@ describe('product modes', () => {
       );
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=0',
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_SAVE_ENABLED=0',
         '--cache-from',
         expect.stringContaining('/cache:cache-main,registry.insecure=true'),
         '--cache-to',
@@ -570,10 +512,6 @@ describe('product modes', () => {
       );
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=0',
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_SAVE_ENABLED=0',
         '--cache-from',
         expect.stringContaining('/cache:cache-main,registry.insecure=true'),
         '--cache-to',
@@ -609,10 +547,6 @@ describe('product modes', () => {
       );
       expect(dockerBuildCall).toBeTruthy();
       expect(dockerBuildCall?.[1]).toEqual(expect.arrayContaining([
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_RESTORE_ENABLED=0',
-        '--build-arg',
-        'BORINGCACHE_INTERNAL_SAVE_ENABLED=0',
         '--cache-from',
         expect.stringContaining('/cache:cache-main,registry.insecure=true'),
         '--cache-to',
@@ -692,10 +626,6 @@ describe('product modes', () => {
         '--addr',
         'tcp://buildkit:1234',
         'build',
-        '--opt',
-        'build-arg:BORINGCACHE_INTERNAL_RESTORE_ENABLED=0',
-        '--opt',
-        'build-arg:BORINGCACHE_INTERNAL_SAVE_ENABLED=0',
         '--import-cache',
         expect.stringContaining('/cache:buildcache,registry.insecure=true'),
         '--export-cache',

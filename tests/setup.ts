@@ -907,6 +907,7 @@ beforeEach(() => {
   process.env = { ...originalEnv };
   delete process.env.BORINGCACHE_DEFAULT_WORKSPACE;
   delete process.env.BORINGCACHE_DEFAULT_BRANCH;
+  delete process.env.BORINGCACHE_CI_RUN_STARTED_AT;
   delete process.env.BORINGCACHE_GIT_BRANCH;
   delete process.env.BORINGCACHE_GIT_SHA;
   delete process.env.CI;
@@ -916,6 +917,7 @@ beforeEach(() => {
   delete process.env.GITHUB_REF;
   delete process.env.GITHUB_REF_NAME;
   delete process.env.GITHUB_REPOSITORY;
+  delete process.env.GITHUB_RUN_ID;
   delete process.env.GITHUB_SHA;
   process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
   (core.isDebug as jest.Mock).mockReturnValue(false);

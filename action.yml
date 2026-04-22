@@ -106,13 +106,6 @@ inputs:
   build-args:
     description: 'Build arguments as newline-separated KEY=VALUE pairs.'
     required: false
-  docker-internal-cache:
-    description: 'Legacy compatibility for older advanced Dockerfiles that already contain BoringCache RUN hooks. Default off keeps registry layer cache as the Docker cache path; on intentionally enables the old in-Dockerfile helper; manual leaves build args and helper files untouched.'
-    default: 'off'
-    required: false
-  docker-helper-path:
-    description: 'Legacy compatibility for older advanced Dockerfiles only: optional path under the Docker or BuildKit context to materialize a bind-mount helper. With docker-internal-cache=off this writes a stable no-op helper; on intentionally materializes the real CLI.'
-    required: false
   target:
     description: 'Target build stage.'
     required: false
@@ -416,16 +409,6 @@ outputs:
     description: 'Docker buildx builder name'
   buildx-platforms:
     description: 'Available platforms for the Docker buildx builder'
-  docker-internal-cache:
-    description: 'Effective Dockerfile-internal BoringCache mode: off, on, or manual'
-  docker-internal-restore-enabled:
-    description: 'Build-arg value for BORINGCACHE_INTERNAL_RESTORE_ENABLED when managed by boringcache/one'
-  docker-internal-save-enabled:
-    description: 'Build-arg value for BORINGCACHE_INTERNAL_SAVE_ENABLED when managed by boringcache/one'
-  docker-internal-build-args:
-    description: 'Newline-separated Docker build args that external setup-only scripts can forward'
-  docker-helper-path:
-    description: 'Resolved Docker helper path when docker-helper-path was configured'
   rust-version:
     description: 'Resolved Rust version'
   cargo-tag:

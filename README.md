@@ -51,9 +51,8 @@ For Docker or native remote-cache flows, set the mode you need and keep the same
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-Most Docker workflows only need the registry layer cache path. Do not add BoringCache commands inside Dockerfile `RUN` steps for new workflows.
-
-Older advanced Dockerfiles may still bind-mount a `boringcache` helper inside `RUN` steps. Treat that as compatibility, not the recommended path. `docker-internal-cache: off` disables Dockerfile-internal BoringCache calls and can write a stable no-op helper for those legacy bind mounts. Avoid `docker-internal-cache: on` for normal application workflows; it intentionally puts the real CLI inside the Dockerfile and makes a CLI binary release a Docker graph input, so the first same-branch run after the binary changes is a reseed. BoringCache maintainers use separate benchmark-only `cli_ref` diagnostics for registry-proxy development; application workflows should use released action and CLI versions.
+Docker workflows should use the outer registry cache path. Do not add BoringCache commands, helper binaries, token mounts, build args, or secret mounts inside Dockerfile `RUN` steps.
+The old Dockerfile-internal helper inputs were removed before launch. If a workflow still has BoringCache hooks inside its Dockerfile, remove those hooks and use `mode: docker` instead.
 
 ## What it handles
 
