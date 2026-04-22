@@ -23,6 +23,7 @@ export interface ProxyOptions {
   readOnly?: boolean;
   onDemand?: boolean;
   ociPrefetchRefs?: string[];
+  ociAliasPromotionRefs?: string[];
   ociHydration?: string;
   metadataHints?: Record<string, string>;
 }
@@ -216,6 +217,12 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
       args.push('--oci-prefetch-ref', trimmed);
     }
   }
+  for (const ref of options.ociAliasPromotionRefs || []) {
+    const trimmed = ref.trim();
+    if (trimmed) {
+      args.push('--oci-alias-promotion-ref', trimmed);
+    }
+  }
   const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
   if (ociHydration) {
     args.push('--oci-hydration', ociHydration);
@@ -241,6 +248,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
   if (options.ociPrefetchRefs?.length) {
     core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
+  }
+  if (options.ociAliasPromotionRefs?.length) {
+    core.info(`Registry proxy OCI alias promotion refs: ${options.ociAliasPromotionRefs.join(', ')}`);
   }
   if (ociHydration) {
     core.info(`Registry proxy OCI hydration: ${ociHydration}`);

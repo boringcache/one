@@ -42583,7 +42583,7 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function startRegistryProxy(options) {
-    var _a;
+    var _a, _b;
     (0, auth_1.warnIfUsingLegacyApiToken)();
     const { restoreToken, saveToken } = (0, auth_1.getAuthTokens)();
     let effectiveReadOnly = options.readOnly === true;
@@ -42634,6 +42634,12 @@ async function startRegistryProxy(options) {
             args.push('--oci-prefetch-ref', trimmed);
         }
     }
+    for (const ref of options.ociAliasPromotionRefs || []) {
+        const trimmed = ref.trim();
+        if (trimmed) {
+            args.push('--oci-alias-promotion-ref', trimmed);
+        }
+    }
     const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
     if (ociHydration) {
         args.push('--oci-hydration', ociHydration);
@@ -42658,6 +42664,9 @@ async function startRegistryProxy(options) {
     core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
     if ((_a = options.ociPrefetchRefs) === null || _a === void 0 ? void 0 : _a.length) {
         core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
+    }
+    if ((_b = options.ociAliasPromotionRefs) === null || _b === void 0 ? void 0 : _b.length) {
+        core.info(`Registry proxy OCI alias promotion refs: ${options.ociAliasPromotionRefs.join(', ')}`);
     }
     if (ociHydration) {
         core.info(`Registry proxy OCI hydration: ${ociHydration}`);
@@ -44543,7 +44552,7 @@ function toolEnabled(plan, toolName) {
     return plan.runtimeTools.some((tool) => tool.name === toolName);
 }
 async function runDockerRestore(plan, inputs) {
-    var _a;
+    var _a, _b;
     const context = path.resolve(plan.workingDirectory, core.getInput('context') || '.');
     const dockerfile = core.getInput('dockerfile') || 'Dockerfile';
     const dockerCommand = core.getInput('docker-command') || 'build';
@@ -44606,6 +44615,7 @@ async function runDockerRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
@@ -44692,7 +44702,7 @@ async function runDockerRestore(plan, inputs) {
                 pathHint: plan.workingDirectory,
                 // docker-command=setup defers the build to later workflow steps, so treat
                 // this as save-expected in write-capable runs and verify after post-save.
-                saveExpected: (_a = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _a !== void 0 ? _a : !inputs.readOnly,
+                saveExpected: (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly,
             }],
     };
 }
@@ -44721,7 +44731,7 @@ async function runDockerSave() {
     }
 }
 async function runBuildkitRestore(plan, inputs) {
-    var _a;
+    var _a, _b;
     const workspaceRoot = process.env.GITHUB_WORKSPACE || plan.workingDirectory;
     const contextInput = core.getInput('context') || '.';
     const contextPath = path.resolve(plan.workingDirectory, contextInput);
@@ -44796,6 +44806,7 @@ async function runBuildkitRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
@@ -44884,7 +44895,7 @@ async function runBuildkitRestore(plan, inputs) {
                 noPlatform: (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noPlatform) || false,
                 noGit: (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noGit) || false,
                 pathHint: plan.workingDirectory,
-                saveExpected: (_a = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _a !== void 0 ? _a : !inputs.readOnly,
+                saveExpected: (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly,
             }],
     };
 }

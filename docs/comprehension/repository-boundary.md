@@ -18,6 +18,8 @@ ADR note: [docs/adr/0001-cli-plan-owned-action-contract.md](../adr/0001-cli-plan
 
 Docker and BuildKit registry modes must consume the complete CLI-planned OCI import list. If the CLI dry-run returns multiple `oci_cache.cache_from_refs` such as PR, branch, default, and stable fallback refs, the action should pass each one as its own `--cache-from` or `--import-cache` flag instead of rebuilding or narrowing that list.
 
+Docker and BuildKit registry modes must also forward CLI-planned `oci_cache.promotion_ref_tags` to `cache-registry` as real `--oci-alias-promotion-ref` arguments. The `docker_alias_promotion_refs` metadata hint is diagnostic only; it does not cause the proxy to bind branch, PR, default, or stable OCI aliases after an immutable run-ref export.
+
 Pull request runs are restore-only by default. A PR-scoped Docker or BuildKit ref such as `/cache:pr-3208` may legitimately be missing, because the action does not publish it unless `save-on-pull-request` is explicitly enabled. That miss should be handled by the CLI-planned branch/default/stable fallback imports. If PR saving is enabled, the normal derived promotion target is the PR alias; the action should not turn a missing PR alias into branch/default write permission.
 
 The old Dockerfile-internal helper surface is removed before launch. The action should not reintroduce `docker-internal-cache`, `docker-helper-path`, helper build args, helper outputs, or helper-writing code as a documented or discoverable product path. Docker support should stay on the outer BuildKit registry-cache path through CLI-planned `--cache-from` and `--cache-to` refs.

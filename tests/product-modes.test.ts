@@ -254,6 +254,7 @@ describe('product modes', () => {
         'type=registry,ref=172.17.0.1:5000/cache:run-example-42-attempt-1,mode=max,registry.insecure=true',
       ]));
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        ociAliasPromotionRefs: ['branch-main'],
         metadataHints: {
           docker_immutable_run_ref: 'run-example-42-attempt-1',
           docker_alias_promotion_refs: 'branch-main/default',
@@ -345,6 +346,7 @@ describe('product modes', () => {
       expect(dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(process.env.BORINGCACHE_CI_RUN_STARTED_AT).toBe(dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT);
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        ociAliasPromotionRefs: ['branch-main'],
         metadataHints: expect.objectContaining({
           ci_run_started_at: dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT.toLowerCase(),
         }),
@@ -755,6 +757,9 @@ describe('product modes', () => {
         '--export-cache',
         'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
       ]));
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        ociAliasPromotionRefs: ['pr-3208'],
+      }));
     } finally {
       await removeTempProject(project);
     }

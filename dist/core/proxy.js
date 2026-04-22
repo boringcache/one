@@ -148,7 +148,7 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function startRegistryProxy(options) {
-    var _a;
+    var _a, _b;
     (0, auth_1.warnIfUsingLegacyApiToken)();
     const { restoreToken, saveToken } = (0, auth_1.getAuthTokens)();
     let effectiveReadOnly = options.readOnly === true;
@@ -199,6 +199,12 @@ async function startRegistryProxy(options) {
             args.push('--oci-prefetch-ref', trimmed);
         }
     }
+    for (const ref of options.ociAliasPromotionRefs || []) {
+        const trimmed = ref.trim();
+        if (trimmed) {
+            args.push('--oci-alias-promotion-ref', trimmed);
+        }
+    }
     const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
     if (ociHydration) {
         args.push('--oci-hydration', ociHydration);
@@ -223,6 +229,9 @@ async function startRegistryProxy(options) {
     core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
     if ((_a = options.ociPrefetchRefs) === null || _a === void 0 ? void 0 : _a.length) {
         core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
+    }
+    if ((_b = options.ociAliasPromotionRefs) === null || _b === void 0 ? void 0 : _b.length) {
+        core.info(`Registry proxy OCI alias promotion refs: ${options.ociAliasPromotionRefs.join(', ')}`);
     }
     if (ociHydration) {
         core.info(`Registry proxy OCI hydration: ${ociHydration}`);

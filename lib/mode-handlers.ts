@@ -54,6 +54,7 @@ interface CacheFlags {
 
 type RegistryProxyOptions = Parameters<typeof startRegistryProxy>[0] & {
   ociPrefetchRefs?: string[];
+  ociAliasPromotionRefs?: string[];
   metadataHints?: Record<string, string>;
 };
 
@@ -1680,6 +1681,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
+      ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
     }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -1897,6 +1899,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       noPlatform: dockerPlan.proxy.no_platform,
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
+      ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
     }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);

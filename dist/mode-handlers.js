@@ -1287,7 +1287,7 @@ function toolEnabled(plan, toolName) {
     return plan.runtimeTools.some((tool) => tool.name === toolName);
 }
 async function runDockerRestore(plan, inputs) {
-    var _a;
+    var _a, _b;
     const context = path.resolve(plan.workingDirectory, core.getInput('context') || '.');
     const dockerfile = core.getInput('dockerfile') || 'Dockerfile';
     const dockerCommand = core.getInput('docker-command') || 'build';
@@ -1350,6 +1350,7 @@ async function runDockerRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
@@ -1436,7 +1437,7 @@ async function runDockerRestore(plan, inputs) {
                 pathHint: plan.workingDirectory,
                 // docker-command=setup defers the build to later workflow steps, so treat
                 // this as save-expected in write-capable runs and verify after post-save.
-                saveExpected: (_a = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _a !== void 0 ? _a : !inputs.readOnly,
+                saveExpected: (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly,
             }],
     };
 }
@@ -1465,7 +1466,7 @@ async function runDockerSave() {
     }
 }
 async function runBuildkitRestore(plan, inputs) {
-    var _a;
+    var _a, _b;
     const workspaceRoot = process.env.GITHUB_WORKSPACE || plan.workingDirectory;
     const contextInput = core.getInput('context') || '.';
     const contextPath = path.resolve(plan.workingDirectory, contextInput);
@@ -1540,6 +1541,7 @@ async function runBuildkitRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
@@ -1628,7 +1630,7 @@ async function runBuildkitRestore(plan, inputs) {
                 noPlatform: (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noPlatform) || false,
                 noGit: (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noGit) || false,
                 pathHint: plan.workingDirectory,
-                saveExpected: (_a = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _a !== void 0 ? _a : !inputs.readOnly,
+                saveExpected: (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly,
             }],
     };
 }
