@@ -26,4 +26,4 @@ The old Dockerfile-internal helper surface is removed before launch. The action 
 
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
 
-Release alignment note: `boringcache/one` `v1.12.62` updates the default CLI install version to `v1.12.44` so `one@v1` can exercise the receipt-strict publish, live session-summary, and provider-neutral CI ordering fixes released in the CLI. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps.
+Release alignment note: `boringcache/one` `v1.12.64` updates the default CLI install version to `v1.12.46` so `one@v1` can exercise the Docker/BuildKit fallback-cache alias promotion fix. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps.
