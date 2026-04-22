@@ -99,7 +99,7 @@ jobs:
           entries: |
             marker:restore=>marker.txt
           save-on-pull-request: true
-          verify: wait
+          verify: check
           verify-require-server-signature: true
           verbose: true
 

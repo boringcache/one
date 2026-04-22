@@ -213,7 +213,7 @@ jobs:
           key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
           restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
           save-on-pull-request: true
-          verify: wait
+          verify: check
           verbose: true
 
       - name: Seed fixture
@@ -543,7 +543,7 @@ jobs:
           sccache-mode: ${{ matrix.sccache_mode }}
           cache-target: ${{ matrix.cache_target }}
           save-on-pull-request: true
-          verify: wait
+          verify: check
           verbose: true
 
       - name: Seed product mode
