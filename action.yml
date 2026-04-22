@@ -376,7 +376,7 @@ outputs:
   registry-ref:
     description: 'Resolved registry cache ref for Docker or BuildKit registry backends (for example 127.0.0.1:5000/cache:buildcache)'
   cache-from:
-    description: 'Resolved Docker --cache-from or BuildKit --import-cache value for Docker or BuildKit modes'
+    description: 'Resolved Docker --cache-from or BuildKit --import-cache values for Docker or BuildKit modes, newline-separated when the CLI plan includes fallback refs'
   cache-to:
     description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
   docker-cache-run-ref:

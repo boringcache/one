@@ -452,10 +452,23 @@ function registryCacheFromRefTags(ociCache) {
         .map(extractRegistryCacheRefTag)
         .filter((tag) => Boolean(tag));
 }
+function registryCacheImportSpecs(ociCache) {
+    var _a;
+    const imports = ((_a = ociCache.cache_from_refs) === null || _a === void 0 ? void 0 : _a.length) ? ociCache.cache_from_refs : [ociCache.cache_from];
+    return imports
+        .map((cacheFrom) => cacheFrom.trim())
+        .filter(Boolean)
+        .map((cacheFrom) => {
+        if (cacheFrom.includes('registry.insecure=')) {
+            return cacheFrom;
+        }
+        return `${cacheFrom},registry.insecure=true`;
+    });
+}
 function setRegistryCacheOutputs(spec) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
     core.setOutput('registry-ref', spec.ref);
-    core.setOutput('cache-from', spec.from);
+    core.setOutput('cache-from', spec.from.join('\n'));
     core.setOutput('cache-to', spec.to || '');
     core.setOutput('docker-cache-run-ref', ((_a = spec.ociCache) === null || _a === void 0 ? void 0 : _a.immutable_run_ref_tag) || '');
     core.setOutput('docker-cache-from-refs', registryCacheFromRefTags(spec.ociCache).join('\n'));
@@ -602,6 +615,7 @@ async function getBuilderPlatforms(builderName) {
     return line ? line.replace('Platforms:', '').trim() : '';
 }
 async function buildDockerImage(opts) {
+    var _a;
     const args = ['buildx', 'build', '--builder', opts.builder, '-f', opts.dockerfile];
     for (const tag of opts.tags) {
         args.push('-t', `${opts.image}:${tag}`);
@@ -627,8 +641,10 @@ async function buildDockerImage(opts) {
     if (opts.noCache) {
         args.push('--no-cache');
     }
-    if (opts.cacheFrom) {
-        args.push('--cache-from', opts.cacheFrom);
+    if ((_a = opts.cacheFrom) === null || _a === void 0 ? void 0 : _a.length) {
+        for (const cacheFrom of opts.cacheFrom) {
+            args.push('--cache-from', cacheFrom);
+        }
         if (opts.cacheTo) {
             args.push('--cache-to', opts.cacheTo);
         }
@@ -716,7 +732,7 @@ async function installBuildctl() {
     }
 }
 async function buildWithBuildctl(opts) {
-    var _a;
+    var _a, _b;
     const args = ['--addr', opts.addr];
     if (opts.tlsCa || opts.tlsCert || opts.tlsKey) {
         if (opts.tlsCa) {
@@ -754,8 +770,10 @@ async function buildWithBuildctl(opts) {
     for (const ssh of opts.sshSpecs) {
         args.push('--ssh', ssh);
     }
-    if (opts.importCache) {
-        args.push('--import-cache', opts.importCache);
+    if ((_a = opts.importCache) === null || _a === void 0 ? void 0 : _a.length) {
+        for (const importCache of opts.importCache) {
+            args.push('--import-cache', importCache);
+        }
         if (opts.exportCache) {
             args.push('--export-cache', opts.exportCache);
         }
@@ -764,7 +782,7 @@ async function buildWithBuildctl(opts) {
         args.push('--import-cache', `type=local,src=${opts.cacheDirFrom}`);
         args.push('--export-cache', `type=local,dest=${opts.cacheDirTo},mode=${opts.cacheMode}`);
     }
-    if ((_a = opts.output) === null || _a === void 0 ? void 0 : _a.trim()) {
+    if ((_b = opts.output) === null || _b === void 0 ? void 0 : _b.trim()) {
         args.push('--output', opts.output.trim());
     }
     else {
@@ -1345,9 +1363,10 @@ async function runDockerRestore(plan, inputs) {
             noGit: dockerPlan.proxy.no_git,
             saveExpected: !dockerPlan.proxy.read_only,
         };
+        const cacheFrom = registryCacheImportSpecs(dockerPlan.oci_cache);
         setRegistryCacheOutputs({
             ref: dockerPlan.oci_cache.registry_ref,
-            from: `${dockerPlan.oci_cache.cache_from},registry.insecure=true`,
+            from: cacheFrom,
             to: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,
@@ -1368,7 +1387,7 @@ async function runDockerRestore(plan, inputs) {
                 noCache,
                 builder: builderName,
                 cacheMode,
-                cacheFrom: `${dockerPlan.oci_cache.cache_from},registry.insecure=true`,
+                cacheFrom,
                 cacheTo: dockerPlan.oci_cache.cache_to
                     ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                     : undefined,
@@ -1534,9 +1553,10 @@ async function runBuildkitRestore(plan, inputs) {
             noGit: dockerPlan.proxy.no_git,
             saveExpected: !dockerPlan.proxy.read_only,
         };
+        const importCache = registryCacheImportSpecs(dockerPlan.oci_cache);
         setRegistryCacheOutputs({
             ref: dockerPlan.oci_cache.registry_ref,
-            from: `${dockerPlan.oci_cache.cache_from},registry.insecure=true`,
+            from: importCache,
             to: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,
@@ -1557,7 +1577,7 @@ async function runBuildkitRestore(plan, inputs) {
             target,
             platforms,
             cacheMode,
-            importCache: `${dockerPlan.oci_cache.cache_from},registry.insecure=true`,
+            importCache,
             exportCache: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,

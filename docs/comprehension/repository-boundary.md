@@ -16,6 +16,8 @@ The retired `@boringcache/action-core` package is not part of the maintained act
 
 ADR note: [docs/adr/0001-cli-plan-owned-action-contract.md](../adr/0001-cli-plan-owned-action-contract.md) is the current launch-readiness boundary. It keeps `.boringcache.toml`, Docker ref derivation, and adapter planning owned by the CLI, with the action acting as GitHub Actions orchestration around CLI dry-run JSON.
 
+Docker and BuildKit registry modes must consume the complete CLI-planned OCI import list. If the CLI dry-run returns multiple `oci_cache.cache_from_refs` such as PR, branch, default, and stable fallback refs, the action should pass each one as its own `--cache-from` or `--import-cache` flag instead of rebuilding or narrowing that list.
+
 The old Dockerfile-internal helper surface is removed before launch. The action should not reintroduce `docker-internal-cache`, `docker-helper-path`, helper build args, helper outputs, or helper-writing code as a documented or discoverable product path. Docker support should stay on the outer BuildKit registry-cache path through CLI-planned `--cache-from` and `--cache-to` refs.
 
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
