@@ -9,3 +9,4 @@ The action can describe what it needs from the CLI or Rails, but the CLI owns lo
 | ADR | Status | Active Role |
 | --- | --- | --- |
 | [0001](0001-cli-plan-owned-action-contract.md) | accepted launch-readiness decision | Keep the action as orchestration around CLI dry-run plans, split tokens, provider metadata seeding, launch benchmark evidence, and the removed Docker helper boundary |
+| [0002](0002-launch-action-readiness-and-legacy-retirement.md) | accepted launch-readiness review | Current action launch audit for helper retirement, CLI/action/web contract alignment, release version coupling, and performance guardrails |
