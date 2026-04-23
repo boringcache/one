@@ -51,6 +51,26 @@ For Docker or native remote-cache flows, set the mode you need and keep the same
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
+If you want dashboard sessions and misses grouped by an explicit low-cardinality label, pass `metadata-hints` on the action itself:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    mode: bazel
+    workspace: my-org/my-project
+    cache-tag: bazel-main
+    metadata-hints: |
+      tool=bazel
+      phase=ci
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+```
+
+Use short stable labels such as `project=web`, `phase=seed`, `phase=warm`, `tool=gradle`, or `benchmark=grpc-bazel`. These hints are replayable proxy arguments, so keep them low-cardinality and avoid commit SHAs, run ids, or other per-run values.
+
+If the repo already defines shared proxy labels in `.boringcache.toml`, `boringcache/one` inherits them through the CLI dry-run plan. Prefer repo config for durable defaults and use the action-level `metadata-hints` input only when a workflow needs an explicit override.
+
 Docker workflows should use the outer registry cache path. Do not add BoringCache commands, helper binaries, token mounts, build args, or secret mounts inside Dockerfile `RUN` steps.
 The old Dockerfile-internal helper inputs were removed before launch. If a workflow still has BoringCache hooks inside its Dockerfile, remove those hooks and use `mode: docker` instead.
 

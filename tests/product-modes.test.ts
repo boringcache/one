@@ -356,6 +356,89 @@ describe('product modes', () => {
     }
   });
 
+  it('merges explicit metadata-hints into proxy metadata hints', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'metadata-hints': 'benchmark=grpc-bazel\nphase=seed\ntool=bazel',
+      });
+      mockGetBooleanInput({});
+
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'run' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag_path_pairs: [],
+            archive_entries: [],
+            archive_restore_candidates: [],
+            env_vars: {},
+          })));
+          return 0;
+        }
+        if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            adapter: 'docker',
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag: 'ghcr-io-boringcache-demo',
+            command: [],
+            archive_entries: [],
+            env_vars: {},
+            proxy: {
+              host: '0.0.0.0',
+              endpoint_host: '172.17.0.1',
+              port: 5000,
+              no_platform: false,
+              no_git: false,
+              read_only: false,
+              startup_mode: 'warm',
+              oci_prefetch_refs: ['cache@buildcache'],
+              oci_hydration: 'metadata-only',
+              metadata_hints: {
+                project: 'demo',
+                ci_provider: 'github-actions',
+                ci_run_uid: '42',
+              },
+            },
+            oci_cache: {
+              registry_ref: '172.17.0.1:5000/cache:buildcache',
+              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:buildcache',
+              cache_from_refs: ['type=registry,ref=172.17.0.1:5000/cache:buildcache'],
+              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:buildcache,mode=max',
+              ref_tag: 'buildcache',
+            },
+          })));
+          return 0;
+        }
+        return 0;
+      });
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        metadataHints: expect.objectContaining({
+          benchmark: 'grpc-bazel',
+          phase: 'seed',
+          tool: 'bazel',
+          project: 'demo',
+        }),
+      }));
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('passes docker OCI hydration policy to the registry proxy', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 

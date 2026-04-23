@@ -118,7 +118,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.12.46',
+        cliVersion: core.getInput('cli-version') || 'v1.12.47',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),
@@ -142,6 +142,7 @@ function getInputs() {
         verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
         diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
         diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
+        metadataHints: core.getInput('metadata-hints'),
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),

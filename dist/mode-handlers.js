@@ -53,6 +53,11 @@ const MAX_PROXY_METADATA_HINTS = 8;
 const MAX_PROXY_METADATA_HINT_KEY_BYTES = 32;
 const MAX_PROXY_METADATA_HINT_VALUE_BYTES = 64;
 const PROXY_METADATA_HINT_PRIORITY = [
+    'project',
+    'benchmark',
+    'phase',
+    'tool',
+    'scenario',
     'docker_immutable_run_ref',
     'docker_alias_promotion_refs',
     'ci_provider',
@@ -65,14 +70,38 @@ const PROXY_METADATA_HINT_PRIORITY = [
     'ci_ref_name',
     'ci_commit_sha',
 ];
-function actionProxyOptions(options, proxyPlan) {
+function actionProxyOptions(options, proxyPlan, metadataHintsInput = '') {
+    const explicitMetadataHints = parseMetadataHintsInput(metadataHintsInput);
     return {
         ...options,
         onDemand: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.startup_mode) === 'on-demand',
         ociPrefetchRefs: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_prefetch_refs) || [],
         ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || utils_1.DEFAULT_OCI_HYDRATION_POLICY,
-        metadataHints: commandLineSafeMetadataHints((proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {}),
+        metadataHints: commandLineSafeMetadataHints({
+            ...((proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {}),
+            ...explicitMetadataHints,
+        }),
     };
+}
+function parseMetadataHintsInput(input) {
+    const hints = {};
+    for (const rawPart of parseList(input)) {
+        const [rawKey, ...rawValueParts] = rawPart.split('=');
+        const rawValue = rawValueParts.join('=');
+        if (!rawKey || rawValueParts.length === 0) {
+            throw new Error(`Invalid metadata-hints entry "${rawPart}". Use short KEY=VALUE labels such as phase=seed or benchmark=grpc-bazel.`);
+        }
+        const key = normalizeMetadataHintKey(rawKey);
+        if (!key) {
+            throw new Error(`Invalid metadata-hints key "${rawKey}". Use lowercase letters, digits, underscores, or hyphens.`);
+        }
+        const value = normalizeMetadataHintValue(key, rawValue);
+        if (!value) {
+            throw new Error(`Invalid metadata-hints value "${rawValue}". Use short ASCII labels such as seed, warm, grpc-bazel, or ci.`);
+        }
+        hints[key] = value;
+    }
+    return hints;
 }
 function commandLineSafeMetadataHints(rawHints) {
     const orderedKeys = Object.keys(rawHints).sort((left, right) => {
@@ -1115,7 +1144,7 @@ async function stopSccacheServer() {
     }
     return summarizeSccacheStats(output);
 }
-async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
+async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan, metadataHintsInput = '') {
     const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -1125,7 +1154,7 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false, p
         noPlatform: true,
         noGit: true,
         readOnly,
-    }, proxyPlan));
+    }, proxyPlan, metadataHintsInput));
     return proxy;
 }
 function parseSccacheIntegerStat(output, label) {
@@ -1351,7 +1380,7 @@ async function runDockerRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
             ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
-        }, dockerPlan.proxy));
+        }, dockerPlan.proxy, inputs.metadataHints));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('workspace', dockerPlan.workspace);
@@ -1542,7 +1571,7 @@ async function runBuildkitRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
             ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
-        }, dockerPlan.proxy));
+        }, dockerPlan.proxy, inputs.metadataHints));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('workspace', dockerPlan.workspace);
@@ -1676,7 +1705,7 @@ async function runBazelRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy));
+    }, proxyPlan.proxy, inputs.metadataHints));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : proxyPlan.proxy.read_only, bazelrcLines);
@@ -1712,7 +1741,7 @@ async function runGradleRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy));
+    }, proxyPlan.proxy, inputs.metadataHints));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     writeGradleInitScript(gradleHome, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : proxyPlan.proxy.read_only);
@@ -1755,7 +1784,7 @@ async function runMavenRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy));
+    }, proxyPlan.proxy, inputs.metadataHints));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);
@@ -1801,10 +1830,10 @@ async function runTurboProxyRestore(plan, inputs) {
     }
     let proxy;
     try {
-        proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
+        proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy, inputs.metadataHints);
     }
     catch {
-        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
+        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy, inputs.metadataHints);
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -1955,7 +1984,7 @@ async function runRustRestore(plan, inputs) {
                 noPlatform: proxyPlan.proxy.no_platform,
                 verbose: inputs.verbose,
                 readOnly: proxyPlan.proxy.read_only,
-            }, proxyPlan.proxy));
+            }, proxyPlan.proxy, inputs.metadataHints));
             configureSccacheProxyEnv(proxy.port);
             await startSccacheServer();
             saveModeState('proxy-pid', String(proxy.pid));

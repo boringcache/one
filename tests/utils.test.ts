@@ -60,6 +60,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     verifyRequireServerSignature: false,
     diagnostics: 'auto',
     diagnosticsLogLines: 40,
+    metadataHints: '',
     proxyPort: '',
     proxyNoGit: false,
     proxyNoPlatform: false,
@@ -141,6 +142,14 @@ describe('one utils', () => {
 
     const inputs = getInputs();
     expect(inputs.ociHydration).toBe('bodies-background');
+  });
+
+  it('reads metadata-hints from action inputs', () => {
+    mockGetInput({ 'metadata-hints': 'phase=seed\nbenchmark=grpc-bazel' });
+    mockGetBooleanInput({});
+
+    const inputs = getInputs();
+    expect(inputs.metadataHints).toBe('phase=seed\nbenchmark=grpc-bazel');
   });
 
   it('keeps diagnostics off by default when step debug is disabled', () => {

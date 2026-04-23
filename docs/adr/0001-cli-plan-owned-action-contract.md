@@ -27,9 +27,14 @@ It may:
 - select/install a CLI version;
 - choose read-only versus save-capable execution from available tokens;
 - collect GitHub Actions provider metadata;
+- accept explicit low-cardinality `metadata-hints` from workflow authors;
 - invoke the CLI dry-run plan;
 - start the CLI proxy with replayable metadata hints from that plan;
 - publish concise outputs for workflow steps.
+
+Shared proxy metadata defaults belong in `.boringcache.toml` and should arrive
+through the CLI dry-run plan. Action-level `metadata-hints` are the workflow
+override path when a job needs to add or replace labels.
 
 It must not:
 
@@ -83,6 +88,7 @@ For Docker alias promotion, GitHub Actions run-start time is a contract field fo
 - Cache a parsed plan inside the step rather than re-running the CLI for restore and save halves when the plan is unchanged.
 - Keep generated `dist` bundles in sync with source changes before release.
 - Keep metadata hints capped and replayable; do not stuff unbounded CI context into proxy arguments.
+- When the action accepts explicit `metadata-hints`, prioritize user-facing grouping labels such as `project`, `benchmark`, `phase`, and `tool` ahead of per-run diagnostic labels when the replayable proxy hint cap is tight.
 
 ## Legacy Surfaces
 

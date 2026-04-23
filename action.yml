@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.12.46'
+    default: 'v1.12.47'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -76,6 +76,9 @@ inputs:
   diagnostics-log-lines:
     description: 'When diagnostics includes logs, tail up to this many proxy log lines.'
     default: '40'
+    required: false
+  metadata-hints:
+    description: 'Low-cardinality proxy session labels as KEY=VALUE pairs, comma-separated or newline-separated. Use this for grouping hints such as phase=seed, project=web, tool=bazel, or benchmark=grpc-bazel.'
     required: false
   proxy-port:
     description: 'Proxy-backed modes: explicit proxy port.'

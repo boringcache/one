@@ -10,6 +10,8 @@
 
 The CLI owns cache protocol behavior, registry proxy semantics, local adapters, CI run-context detection for proxy save requests, and release binaries. The action may derive GitHub provider metadata, seed `BORINGCACHE_CI_*` environment values, and invoke the CLI, but it should not reimplement Rails API policy, Docker ref planning, or proxy protocol rules.
 
+The action owns the user-facing `metadata-hints` input. It may accept low-cardinality grouping labels from workflow authors and merge them into replayable proxy arguments, but it should still leave cache protocol rules, tag scoping, and provider-neutral save metadata to the CLI. Repo-configured proxy metadata from `.boringcache.toml` should flow through the CLI dry-run plan by default; action inputs are the override path, not a replacement config system.
+
 Rails owns workspace, token, storage, publish, restore, session, billing, and API truth. Action changes that need a new API contract should update the web ADR/comprehension path and the CLI request path in the same rollout.
 
 The retired `@boringcache/action-core` package is not part of the maintained action path. Do not add it as a dependency or route new behavior through a separate npm release. New product behavior should land here, in CLI, or in Rails.
@@ -26,4 +28,4 @@ The old Dockerfile-internal helper surface is removed before launch. The action 
 
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
 
-Release alignment note: `boringcache/one` `v1.12.64` updates the default CLI install version to `v1.12.46` so `one@v1` can exercise the Docker/BuildKit fallback-cache alias promotion fix. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps.
+Release alignment note: the current local release-alignment change moves `boringcache/one` from `v1.12.64` to `v1.12.65` and the default CLI install version from `v1.12.46` to `v1.12.47`. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps, and do not treat the bump as public until it is signed, tagged, and `one@v1` is moved.

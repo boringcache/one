@@ -95,6 +95,7 @@ export interface OneInputs {
   verifyRequireServerSignature: boolean;
   diagnostics: DiagnosticsInputMode;
   diagnosticsLogLines: number;
+  metadataHints: string;
   proxyPort: string;
   proxyNoGit: boolean;
   proxyNoPlatform: boolean;
@@ -177,7 +178,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 export function getInputs(): OneInputs {
   return {
-    cliVersion: core.getInput('cli-version') || 'v1.12.46',
+    cliVersion: core.getInput('cli-version') || 'v1.12.47',
     cliPlatform: core.getInput('cli-platform'),
     setup: normalizeSetup(core.getInput('setup')),
     mode: normalizeMode(core.getInput('mode')),
@@ -201,6 +202,7 @@ export function getInputs(): OneInputs {
     verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
     diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
     diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
+    metadataHints: core.getInput('metadata-hints'),
     proxyPort: core.getInput('proxy-port'),
     proxyNoGit: core.getBooleanInput('proxy-no-git'),
     proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
