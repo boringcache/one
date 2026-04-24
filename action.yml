@@ -385,7 +385,13 @@ outputs:
   docker-cache-run-ref:
     description: 'Provider-neutral immutable Docker or BuildKit OCI cache run ref tag when CI run-ref derivation is active'
   docker-cache-from-refs:
-    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags'
+    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags that were actually readable and used for restore'
+  docker-cache-requested-from-refs:
+    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags requested from the CLI plan before readability filtering'
+  docker-cache-unreadable-from-refs:
+    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags that were requested but not readable through the started proxy'
+  docker-cache-import-ready:
+    description: 'Whether every requested Docker or BuildKit OCI cache import ref was readable through the started proxy before the build began'
   docker-cache-promotion-refs:
     description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache alias ref tags requested for promotion'
   docker-ci-provider:

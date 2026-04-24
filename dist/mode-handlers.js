@@ -76,6 +76,7 @@ function actionProxyOptions(options, proxyPlan, metadataHintsInput = '') {
         ...options,
         onDemand: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.startup_mode) === 'on-demand',
         ociPrefetchRefs: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_prefetch_refs) || [],
+        ociRequiredReadableRefs: options.ociRequiredReadableRefs || [],
         ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || utils_1.DEFAULT_OCI_HYDRATION_POLICY,
         metadataHints: commandLineSafeMetadataHints({
             ...((proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {}),
@@ -481,33 +482,63 @@ function registryCacheFromRefTags(ociCache) {
         .map(extractRegistryCacheRefTag)
         .filter((tag) => Boolean(tag));
 }
-function registryCacheImportSpecs(ociCache) {
+function normalizeRegistryImportSpec(cacheFrom) {
+    if (cacheFrom.includes('registry.insecure=')) {
+        return cacheFrom;
+    }
+    return `${cacheFrom},registry.insecure=true`;
+}
+function registryCacheImportSpecs(ociCache, refTags) {
     var _a;
     const imports = ((_a = ociCache.cache_from_refs) === null || _a === void 0 ? void 0 : _a.length) ? ociCache.cache_from_refs : [ociCache.cache_from];
-    return imports
-        .map((cacheFrom) => cacheFrom.trim())
-        .filter(Boolean)
-        .map((cacheFrom) => {
-        if (cacheFrom.includes('registry.insecure=')) {
-            return cacheFrom;
+    const byRefTag = new Map();
+    for (const cacheFrom of imports) {
+        const refTag = extractRegistryCacheRefTag(cacheFrom);
+        if (refTag && !byRefTag.has(refTag)) {
+            byRefTag.set(refTag, cacheFrom.trim());
         }
-        return `${cacheFrom},registry.insecure=true`;
-    });
+    }
+    const selectedImports = refTags
+        ? refTags
+            .map((refTag) => byRefTag.get(refTag))
+            .filter((cacheFrom) => Boolean(cacheFrom))
+        : imports
+            .map((cacheFrom) => cacheFrom.trim())
+            .filter(Boolean);
+    return selectedImports.map(normalizeRegistryImportSpec);
+}
+function effectiveRegistryCacheImports(ociCache, proxy) {
+    var _a, _b, _c;
+    const requestedRefTags = registryCacheFromRefTags(ociCache);
+    const readableRefTags = (proxy === null || proxy === void 0 ? void 0 : proxy.ociImportReadiness)
+        ? proxy.ociImportReadiness.readableRefs
+        : requestedRefTags;
+    const unreadableRefTags = ((_a = proxy === null || proxy === void 0 ? void 0 : proxy.ociImportReadiness) === null || _a === void 0 ? void 0 : _a.unreadableRefs) || [];
+    return {
+        importSpecs: registryCacheImportSpecs(ociCache, readableRefTags),
+        readableRefTags,
+        requestedRefTags,
+        unreadableRefTags,
+        importReady: (_c = (_b = proxy === null || proxy === void 0 ? void 0 : proxy.ociImportReadiness) === null || _b === void 0 ? void 0 : _b.ready) !== null && _c !== void 0 ? _c : true,
+    };
 }
 function setRegistryCacheOutputs(spec) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
     core.setOutput('registry-ref', spec.ref);
     core.setOutput('cache-from', spec.from.join('\n'));
     core.setOutput('cache-to', spec.to || '');
     core.setOutput('docker-cache-run-ref', ((_a = spec.ociCache) === null || _a === void 0 ? void 0 : _a.immutable_run_ref_tag) || '');
-    core.setOutput('docker-cache-from-refs', registryCacheFromRefTags(spec.ociCache).join('\n'));
-    core.setOutput('docker-cache-promotion-refs', (((_b = spec.ociCache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join('\n'));
-    core.setOutput('docker-ci-provider', ((_d = (_c = spec.ociCache) === null || _c === void 0 ? void 0 : _c.run_metadata) === null || _d === void 0 ? void 0 : _d.provider) || '');
-    core.setOutput('docker-ci-run-id', ((_f = (_e = spec.ociCache) === null || _e === void 0 ? void 0 : _e.run_metadata) === null || _f === void 0 ? void 0 : _f.run_uid) || '');
-    core.setOutput('docker-ci-run-attempt', ((_h = (_g = spec.ociCache) === null || _g === void 0 ? void 0 : _g.run_metadata) === null || _h === void 0 ? void 0 : _h.run_attempt) || '');
-    core.setOutput('docker-ci-ref-type', ((_k = (_j = spec.ociCache) === null || _j === void 0 ? void 0 : _j.run_metadata) === null || _k === void 0 ? void 0 : _k.source_ref_type) || '');
-    core.setOutput('docker-ci-ref-name', ((_m = (_l = spec.ociCache) === null || _l === void 0 ? void 0 : _l.run_metadata) === null || _m === void 0 ? void 0 : _m.source_ref_name) || '');
-    core.setOutput('docker-ci-run-started-at', ((_p = (_o = spec.ociCache) === null || _o === void 0 ? void 0 : _o.run_metadata) === null || _p === void 0 ? void 0 : _p.run_started_at) || '');
+    core.setOutput('docker-cache-from-refs', (spec.usedRefTags || registryCacheFromRefTags(spec.ociCache)).join('\n'));
+    core.setOutput('docker-cache-requested-from-refs', registryCacheFromRefTags(spec.ociCache).join('\n'));
+    core.setOutput('docker-cache-unreadable-from-refs', (spec.unreadableRefTags || []).join('\n'));
+    core.setOutput('docker-cache-import-ready', String((_b = spec.importReady) !== null && _b !== void 0 ? _b : true));
+    core.setOutput('docker-cache-promotion-refs', (((_c = spec.ociCache) === null || _c === void 0 ? void 0 : _c.promotion_ref_tags) || []).join('\n'));
+    core.setOutput('docker-ci-provider', ((_e = (_d = spec.ociCache) === null || _d === void 0 ? void 0 : _d.run_metadata) === null || _e === void 0 ? void 0 : _e.provider) || '');
+    core.setOutput('docker-ci-run-id', ((_g = (_f = spec.ociCache) === null || _f === void 0 ? void 0 : _f.run_metadata) === null || _g === void 0 ? void 0 : _g.run_uid) || '');
+    core.setOutput('docker-ci-run-attempt', ((_j = (_h = spec.ociCache) === null || _h === void 0 ? void 0 : _h.run_metadata) === null || _j === void 0 ? void 0 : _j.run_attempt) || '');
+    core.setOutput('docker-ci-ref-type', ((_l = (_k = spec.ociCache) === null || _k === void 0 ? void 0 : _k.run_metadata) === null || _l === void 0 ? void 0 : _l.source_ref_type) || '');
+    core.setOutput('docker-ci-ref-name', ((_o = (_m = spec.ociCache) === null || _m === void 0 ? void 0 : _m.run_metadata) === null || _o === void 0 ? void 0 : _o.source_ref_name) || '');
+    core.setOutput('docker-ci-run-started-at', ((_q = (_p = spec.ociCache) === null || _p === void 0 ? void 0 : _p.run_metadata) === null || _q === void 0 ? void 0 : _q.run_started_at) || '');
     core.setOutput('cache-dir', '');
     core.setOutput('save-cache-dir', '');
 }
@@ -517,6 +548,9 @@ function setLocalCacheOutputs(cacheDirFrom, cacheDirTo, cacheMode) {
     core.setOutput('cache-to', `type=local,dest=${cacheDirTo},mode=${cacheMode}`);
     core.setOutput('docker-cache-run-ref', '');
     core.setOutput('docker-cache-from-refs', '');
+    core.setOutput('docker-cache-requested-from-refs', '');
+    core.setOutput('docker-cache-unreadable-from-refs', '');
+    core.setOutput('docker-cache-import-ready', 'true');
     core.setOutput('docker-cache-promotion-refs', '');
     core.setOutput('docker-ci-provider', '');
     core.setOutput('docker-ci-run-id', '');
@@ -674,9 +708,9 @@ async function buildDockerImage(opts) {
         for (const cacheFrom of opts.cacheFrom) {
             args.push('--cache-from', cacheFrom);
         }
-        if (opts.cacheTo) {
-            args.push('--cache-to', opts.cacheTo);
-        }
+    }
+    if (opts.cacheTo) {
+        args.push('--cache-to', opts.cacheTo);
     }
     else if (opts.cacheDirFrom) {
         args.push('--cache-from', `type=local,src=${opts.cacheDirFrom}`);
@@ -803,9 +837,9 @@ async function buildWithBuildctl(opts) {
         for (const importCache of opts.importCache) {
             args.push('--import-cache', importCache);
         }
-        if (opts.exportCache) {
-            args.push('--export-cache', opts.exportCache);
-        }
+    }
+    if (opts.exportCache) {
+        args.push('--export-cache', opts.exportCache);
     }
     else if (opts.cacheDirFrom) {
         args.push('--import-cache', `type=local,src=${opts.cacheDirFrom}`);
@@ -1368,6 +1402,7 @@ async function runDockerRestore(plan, inputs) {
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
+        const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
@@ -1379,6 +1414,7 @@ async function runDockerRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            ociRequiredReadableRefs: requestedImportRefTags,
             ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
         }, dockerPlan.proxy, inputs.metadataHints));
         saveModeState('proxy-pid', String(proxy.pid));
@@ -1393,14 +1429,17 @@ async function runDockerRestore(plan, inputs) {
             noGit: dockerPlan.proxy.no_git,
             saveExpected: !dockerPlan.proxy.read_only,
         };
-        const cacheFrom = registryCacheImportSpecs(dockerPlan.oci_cache);
+        const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache, proxy);
         setRegistryCacheOutputs({
             ref: dockerPlan.oci_cache.registry_ref,
-            from: cacheFrom,
+            from: effectiveImports.importSpecs,
             to: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,
             ociCache: dockerPlan.oci_cache,
+            usedRefTags: effectiveImports.readableRefTags,
+            unreadableRefTags: effectiveImports.unreadableRefTags,
+            importReady: effectiveImports.importReady,
         });
         if (shouldBuild) {
             await buildDockerImage({
@@ -1417,7 +1456,7 @@ async function runDockerRestore(plan, inputs) {
                 noCache,
                 builder: builderName,
                 cacheMode,
-                cacheFrom,
+                cacheFrom: effectiveImports.importSpecs,
                 cacheTo: dockerPlan.oci_cache.cache_to
                     ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                     : undefined,
@@ -1559,6 +1598,7 @@ async function runBuildkitRestore(plan, inputs) {
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
+        const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
             command: 'cache-registry',
@@ -1570,6 +1610,7 @@ async function runBuildkitRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            ociRequiredReadableRefs: requestedImportRefTags,
             ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
         }, dockerPlan.proxy, inputs.metadataHints));
         saveModeState('proxy-pid', String(proxy.pid));
@@ -1584,14 +1625,17 @@ async function runBuildkitRestore(plan, inputs) {
             noGit: dockerPlan.proxy.no_git,
             saveExpected: !dockerPlan.proxy.read_only,
         };
-        const importCache = registryCacheImportSpecs(dockerPlan.oci_cache);
+        const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache, proxy);
         setRegistryCacheOutputs({
             ref: dockerPlan.oci_cache.registry_ref,
-            from: importCache,
+            from: effectiveImports.importSpecs,
             to: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,
             ociCache: dockerPlan.oci_cache,
+            usedRefTags: effectiveImports.readableRefTags,
+            unreadableRefTags: effectiveImports.unreadableRefTags,
+            importReady: effectiveImports.importReady,
         });
         await buildWithBuildctl({
             addr: buildkitHost,
@@ -1608,7 +1652,7 @@ async function runBuildkitRestore(plan, inputs) {
             target,
             platforms,
             cacheMode,
-            importCache,
+            importCache: effectiveImports.importSpecs,
             exportCache: dockerPlan.oci_cache.cache_to
                 ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
                 : undefined,

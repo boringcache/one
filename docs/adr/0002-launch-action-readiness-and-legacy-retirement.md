@@ -51,6 +51,21 @@ The action should pass all CLI-planned OCI import refs and promotion refs
 through to BuildKit/proxy arguments. Metadata hints remain diagnostics; they do
 not replace first-class CLI plan fields or Rails ordering fields.
 
+For Docker and BuildKit setup flows, the action now owns the runtime truth for
+OCI import readiness. The setup step must not return solely on proxy
+`phase=ready`; it must also probe the CLI-planned import refs through the
+started proxy, surface which refs were requested versus actually readable, and
+fail closed in the emitted outputs. The build path should consume:
+
+- `cache-from` / `cache-to` as the actual action-owned build arguments;
+- `docker-cache-from-refs` as the readable ref set that was used;
+- `docker-cache-requested-from-refs` as the full CLI-planned import set;
+- `docker-cache-unreadable-from-refs` as the unreadable subset; and
+- `docker-cache-import-ready` as the all-refs-readable signal.
+
+Benchmark and product workflows should consume those outputs instead of
+re-implementing their own proxy-manifest readiness probes.
+
 Restore-only PR behavior is expected. Missing PR-scoped Docker refs should
 fall back to CLI-planned branch/default/stable imports. The action should not
 turn a missing PR cache into branch/default write permission.

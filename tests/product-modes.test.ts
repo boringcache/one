@@ -108,6 +108,7 @@ describe('product modes', () => {
         workspace: 'boringcache/test-workspace',
         onDemand: false,
         ociPrefetchRefs: ['cache@buildcache'],
+        ociRequiredReadableRefs: ['buildcache'],
         ociHydration: 'metadata-only',
       }));
       const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
@@ -255,6 +256,7 @@ describe('product modes', () => {
       ]));
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         ociAliasPromotionRefs: ['branch-main'],
+        ociRequiredReadableRefs: ['branch-main', 'default', 'buildcache'],
         metadataHints: {
           docker_immutable_run_ref: 'run-example-42-attempt-1',
           docker_alias_promotion_refs: 'branch-main/default',
@@ -266,6 +268,125 @@ describe('product modes', () => {
           docker_cache_ref_tag: 'run-example-42-attempt-1',
         },
       }));
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('filters unreadable docker import refs but still exports cache', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+      });
+      mockGetBooleanInput({});
+      actionCoreMocks.startRegistryProxy.mockResolvedValueOnce({
+        pid: 4321,
+        port: 5000,
+        readOnly: false,
+        ociImportReadiness: {
+          requestedRefs: ['pr-3208', 'default', 'buildcache'],
+          readableRefs: ['default', 'buildcache'],
+          unreadableRefs: ['pr-3208'],
+          ready: false,
+          phase: 'ready',
+          publishState: 'published',
+          publishSettled: true,
+          tagsVisible: true,
+        },
+      });
+
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'run' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag_path_pairs: [],
+            archive_entries: [],
+            archive_restore_candidates: [],
+            env_vars: {},
+          })));
+          return 0;
+        }
+        if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            adapter: 'docker',
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag: 'ghcr-io-boringcache-demo',
+            command: [],
+            archive_entries: [],
+            env_vars: {},
+            proxy: {
+              host: '127.0.0.1',
+              endpoint_host: '127.0.0.1',
+              port: 5000,
+              no_platform: false,
+              no_git: false,
+              read_only: false,
+              startup_mode: 'warm',
+              oci_prefetch_refs: ['cache@pr-3208', 'cache@default', 'cache@buildcache'],
+              oci_hydration: 'metadata-only',
+              metadata_hints: {},
+            },
+            oci_cache: {
+              registry_ref: '127.0.0.1:5000/cache:run-gha-24771923434-attempt-1',
+              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:pr-3208',
+              cache_from_refs: [
+                'type=registry,ref=127.0.0.1:5000/cache:pr-3208',
+                'type=registry,ref=127.0.0.1:5000/cache:default',
+                'type=registry,ref=127.0.0.1:5000/cache:buildcache',
+              ],
+              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max',
+              ref_tag: 'buildcache',
+              immutable_run_ref_tag: 'run-gha-24771923434-attempt-1',
+              promotion_ref_tags: ['pr-3208'],
+            },
+          })));
+          return 0;
+        }
+        return 0;
+      });
+
+      await restoreRun();
+
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'default\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-requested-from-refs', 'pr-3208\ndefault\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-unreadable-from-refs', 'pr-3208');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-import-ready', 'false');
+      expect(core.setOutput).toHaveBeenCalledWith(
+        'cache-from',
+        [
+          'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
+          'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
+        ].join('\n'),
+      );
+
+      const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker' && Array.isArray(args) && args[0] === 'buildx' && args[1] === 'build',
+      );
+      const dockerBuildArgs = dockerBuildCall?.[1] as string[] | undefined;
+      expect(dockerBuildArgs).toBeTruthy();
+      expect(dockerBuildArgs?.filter((arg) => arg === '--cache-from')).toHaveLength(2);
+      expect(dockerBuildArgs).toEqual(expect.arrayContaining([
+        '--cache-from',
+        'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
+        'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
+        '--cache-to',
+        'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
+      ]));
+      expect(dockerBuildArgs).not.toEqual(expect.arrayContaining([
+        'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
+      ]));
     } finally {
       await removeTempProject(project);
     }
@@ -735,6 +856,7 @@ describe('product modes', () => {
         command: 'cache-registry',
         onDemand: false,
         ociPrefetchRefs: ['cache@buildcache'],
+        ociRequiredReadableRefs: ['buildcache'],
       }));
       const buildctlCall = (exec.exec as jest.Mock).mock.calls.find(
         ([command, args]) => command === 'buildctl' && Array.isArray(args) && args.includes('build'),
@@ -842,7 +964,115 @@ describe('product modes', () => {
       ]));
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         ociAliasPromotionRefs: ['pr-3208'],
+        ociRequiredReadableRefs: ['pr-3208', 'default', 'buildcache'],
       }));
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('keeps buildkit export enabled when no planned import ref is readable', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'buildkit',
+        setup: 'none',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'buildkit-host': 'tcp://buildkit:1234',
+      });
+      mockGetBooleanInput({});
+      actionCoreMocks.startRegistryProxy.mockResolvedValueOnce({
+        pid: 4321,
+        port: 5000,
+        readOnly: false,
+        ociImportReadiness: {
+          requestedRefs: ['branch-main', 'default', 'buildcache'],
+          readableRefs: [],
+          unreadableRefs: ['branch-main', 'default', 'buildcache'],
+          ready: false,
+          phase: 'ready',
+          publishState: 'published',
+          publishSettled: true,
+          tagsVisible: true,
+        },
+      });
+
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'run' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag_path_pairs: [],
+            archive_entries: [],
+            archive_restore_candidates: [],
+            env_vars: {},
+          })));
+          return 0;
+        }
+        if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            adapter: 'docker',
+            workspace: 'boringcache/test-workspace',
+            workspace_source: 'explicit',
+            tag: 'ghcr-io-boringcache-demo',
+            command: [],
+            archive_entries: [],
+            env_vars: {},
+            proxy: {
+              host: '127.0.0.1',
+              endpoint_host: '127.0.0.1',
+              port: 5000,
+              no_platform: false,
+              no_git: false,
+              read_only: false,
+              startup_mode: 'warm',
+              oci_prefetch_refs: ['cache@branch-main', 'cache@default', 'cache@buildcache'],
+              oci_hydration: 'metadata-only',
+              metadata_hints: {},
+            },
+            oci_cache: {
+              registry_ref: '127.0.0.1:5000/cache:run-gha-24771923434-attempt-1',
+              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:branch-main',
+              cache_from_refs: [
+                'type=registry,ref=127.0.0.1:5000/cache:branch-main',
+                'type=registry,ref=127.0.0.1:5000/cache:default',
+                'type=registry,ref=127.0.0.1:5000/cache:buildcache',
+              ],
+              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max',
+              ref_tag: 'buildcache',
+              immutable_run_ref_tag: 'run-gha-24771923434-attempt-1',
+              promotion_ref_tags: ['branch-main'],
+            },
+          })));
+          return 0;
+        }
+        return 0;
+      });
+
+      await restoreRun();
+
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', '');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-requested-from-refs', 'branch-main\ndefault\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-unreadable-from-refs', 'branch-main\ndefault\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-import-ready', 'false');
+      expect(core.setOutput).toHaveBeenCalledWith('cache-from', '');
+
+      const buildctlCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'buildctl' && Array.isArray(args) && args.includes('build'),
+      );
+      const buildctlArgs = buildctlCall?.[1] as string[] | undefined;
+      expect(buildctlArgs).toBeTruthy();
+      expect(buildctlArgs?.filter((arg) => arg === '--import-cache')).toHaveLength(0);
+      expect(buildctlArgs).toEqual(expect.arrayContaining([
+        '--export-cache',
+        'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
+      ]));
     } finally {
       await removeTempProject(project);
     }

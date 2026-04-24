@@ -79,6 +79,18 @@ Pull request runs are restore-only by default, so a PR-scoped ref such as `/cach
 That miss should not make the build cold: the action also forwards the branch, default, and stable fallback imports, ending with the default `/cache:buildcache` ref.
 If a repo deliberately wants PR-scoped Docker cache writes, provide a save-capable token and set `save-on-pull-request: true`; the default derived promotion for a PR is the PR alias, while branch and default aliases remain trusted-branch outputs.
 
+For Docker and BuildKit setup flows, `boringcache/one` now treats proxy readiness and OCI import readability as one contract.
+The setup step waits for the started proxy to be reachable, probes each CLI-planned import ref through the proxy, and exposes both the requested and actually usable import refs.
+If some planned refs are unreadable, the action keeps the build path fail-safe:
+
+- `cache-from` / `cache-to` stay the action-owned source of truth for the actual build command.
+- `docker-cache-from-refs` reports the readable refs that were actually used.
+- `docker-cache-requested-from-refs` reports the full CLI-planned ref set.
+- `docker-cache-unreadable-from-refs` reports the refs that were planned but not readable through the started proxy.
+- `docker-cache-import-ready` is `true` only when every planned import ref was readable.
+
+Workflow authors should consume those outputs instead of polling `/_boringcache/status` or probing `/v2/cache/manifests/*` themselves.
+
 ## What it handles
 
 - archive caching for repeated directories

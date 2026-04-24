@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
@@ -24,20 +25,35 @@ export interface ProxyOptions {
   onDemand?: boolean;
   ociPrefetchRefs?: string[];
   ociAliasPromotionRefs?: string[];
+  ociRequiredReadableRefs?: string[];
   ociHydration?: string;
   metadataHints?: Record<string, string>;
+}
+
+export interface OciImportReadiness {
+  requestedRefs: string[];
+  readableRefs: string[];
+  unreadableRefs: string[];
+  ready: boolean;
+  phase?: string;
+  publishState?: string;
+  publishSettled?: boolean;
+  tagsVisible?: boolean;
 }
 
 export interface ProxyHandle {
   pid: number;
   port: number;
   readOnly: boolean;
+  ociImportReadiness?: OciImportReadiness;
 }
 
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
+const OCI_IMPORT_READY_TIMEOUT_MS = 15000;
+const OCI_IMPORT_READY_POLL_INTERVAL_MS = 1000;
 const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 
 export function normalizeProxyTags(tagInput: string): string {
@@ -155,6 +171,133 @@ async function waitForProxyReadyFile(
   throw new Error(`Registry proxy did not become ready within ${timeoutMs}ms${logs ? `:\n${logs}` : ''}`);
 }
 
+interface ProxyStatusResponse {
+  phase?: string;
+  publish_state?: string;
+  publish_settled?: boolean;
+  tags_visible?: boolean;
+}
+
+function httpRequest(
+  options: http.RequestOptions,
+): Promise<{ statusCode: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = http.request(options, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        body += chunk;
+      });
+      response.on('end', () => {
+        resolve({
+          statusCode: response.statusCode || 0,
+          body,
+        });
+      });
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+async function fetchProxyStatus(host: string, port: number): Promise<ProxyStatusResponse | null> {
+  try {
+    const response = await httpRequest({
+      host: proxyProbeHost(host),
+      port,
+      path: '/_boringcache/status',
+      method: 'GET',
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return null;
+    }
+    return JSON.parse(response.body) as ProxyStatusResponse;
+  } catch {
+    return null;
+  }
+}
+
+async function isManifestReadable(host: string, port: number, ref: string): Promise<boolean> {
+  try {
+    const response = await httpRequest({
+      host: proxyProbeHost(host),
+      port,
+      path: `/v2/cache/manifests/${encodeURIComponent(ref)}`,
+      method: 'HEAD',
+      headers: {
+        Accept: [
+          'application/vnd.oci.image.manifest.v1+json',
+          'application/vnd.oci.image.index.v1+json',
+          'application/vnd.docker.distribution.manifest.v2+json',
+          'application/vnd.docker.distribution.manifest.list.v2+json',
+        ].join(', '),
+      },
+    });
+    return response.statusCode >= 200 && response.statusCode < 300;
+  } catch {
+    return false;
+  }
+}
+
+export async function waitForOciImportReadiness(
+  host: string,
+  port: number,
+  requestedRefs: string[],
+  timeoutMs = OCI_IMPORT_READY_TIMEOUT_MS,
+): Promise<OciImportReadiness> {
+  const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
+  if (refs.length === 0) {
+    return {
+      requestedRefs: [],
+      readableRefs: [],
+      unreadableRefs: [],
+      ready: true,
+    };
+  }
+
+  const startedAt = Date.now();
+  let lastStatus: ProxyStatusResponse | null = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastStatus = await fetchProxyStatus(host, port);
+    const readability = await Promise.all(
+      refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })),
+    );
+    const readableRefs = readability.filter((entry) => entry.readable).map((entry) => entry.ref);
+    const unreadableRefs = readability.filter((entry) => !entry.readable).map((entry) => entry.ref);
+
+    if (unreadableRefs.length === 0) {
+      return {
+        requestedRefs: refs,
+        readableRefs,
+        unreadableRefs,
+        ready: true,
+        phase: lastStatus?.phase,
+        publishState: lastStatus?.publish_state,
+        publishSettled: lastStatus?.publish_settled,
+        tagsVisible: lastStatus?.tags_visible,
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, OCI_IMPORT_READY_POLL_INTERVAL_MS));
+  }
+
+  const readability = await Promise.all(
+    refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })),
+  );
+
+  return {
+    requestedRefs: refs,
+    readableRefs: readability.filter((entry) => entry.readable).map((entry) => entry.ref),
+    unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
+    ready: readability.every((entry) => entry.readable),
+    phase: lastStatus?.phase,
+    publishState: lastStatus?.publish_state,
+    publishSettled: lastStatus?.publish_settled,
+    tagsVisible: lastStatus?.tags_visible,
+  };
+}
+
 /**
  * Start the cache-registry proxy.
  * Spawns a detached boringcache process, writes PID file, returns handle.
@@ -249,6 +392,9 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   if (options.ociPrefetchRefs?.length) {
     core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
   }
+  if (options.ociRequiredReadableRefs?.length) {
+    core.info(`Registry proxy required readable refs: ${options.ociRequiredReadableRefs.join(', ')}`);
+  }
   if (options.ociAliasPromotionRefs?.length) {
     core.info(`Registry proxy OCI alias promotion refs: ${options.ociAliasPromotionRefs.join(', ')}`);
   }
@@ -280,6 +426,41 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
 
   try {
     await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
+    if (options.ociRequiredReadableRefs?.length) {
+      const ociImportReadiness = await waitForOciImportReadiness(
+        host,
+        options.port,
+        options.ociRequiredReadableRefs,
+      );
+
+      if (!ociImportReadiness.ready) {
+        const statusSuffix = [
+          ociImportReadiness.phase ? `phase=${ociImportReadiness.phase}` : '',
+          ociImportReadiness.publishState ? `publish=${ociImportReadiness.publishState}` : '',
+          typeof ociImportReadiness.publishSettled === 'boolean'
+            ? `publish_settled=${ociImportReadiness.publishSettled}`
+            : '',
+          typeof ociImportReadiness.tagsVisible === 'boolean'
+            ? `tags_visible=${ociImportReadiness.tagsVisible}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        core.warning(
+          `Registry proxy became ready before OCI import refs were fully readable. readable=[${ociImportReadiness.readableRefs.join(', ')}] unreadable=[${ociImportReadiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`,
+        );
+      } else {
+        core.info(
+          `Registry proxy OCI import refs are readable: ${ociImportReadiness.readableRefs.join(', ')}`,
+        );
+      }
+
+      return {
+        ...handle,
+        ociImportReadiness,
+      };
+    }
+
     return handle;
   } catch (error) {
     try {
