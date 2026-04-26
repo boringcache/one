@@ -1123,6 +1123,8 @@ async function detectModeTools(mode: OneMode, workingDirectory: string): Promise
       return detectNodeTurboTools(workingDirectory);
     case 'bazel':
       return detectBazelTools(workingDirectory);
+    case 'go':
+      return detectGoTools(workingDirectory);
     case 'gradle':
       return detectGradleTools(workingDirectory);
     case 'maven':

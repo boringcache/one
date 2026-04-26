@@ -209,6 +209,7 @@ function normalizeMetadataHintValue(key: string, rawValue: string): string | nul
 interface CliAdapterDryRunPlan {
   workspace: string;
   tag: string;
+  env_vars?: Record<string, string>;
   proxy: CliProxyDryRunPlan;
   oci_cache?: {
     registry_ref: string;
@@ -290,6 +291,8 @@ export async function runModeRestore(plan: ResolvedPlan, inputs: OneInputs): Pro
       return runBuildkitRestore(plan, inputs);
     case 'bazel':
       return runBazelRestore(plan, inputs);
+    case 'go':
+      return runGoRestore(plan, inputs);
     case 'gradle':
       return runGradleRestore(plan, inputs);
     case 'maven':
@@ -313,6 +316,9 @@ export async function runModeSave(mode: ResolvedPlan['mode']): Promise<void> {
       return;
     case 'bazel':
       await shutdownBazelServer();
+      await stopProxyFromState();
+      return;
+    case 'go':
       await stopProxyFromState();
       return;
     case 'gradle':
@@ -439,7 +445,7 @@ function emitCliPlannerWarnings(stderr: string): void {
 }
 
 async function resolveAdapterCliPlan(
-  adapter: 'bazel' | 'gradle' | 'maven' | 'sccache' | 'turbo',
+  adapter: 'bazel' | 'go' | 'gradle' | 'maven' | 'sccache' | 'turbo',
   workspace: string,
   workingDirectory: string,
   inputCacheTag: string,
@@ -2167,6 +2173,72 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   saveProxyModeState(proxy.port);
 
   writeBazelrc(proxy.port, proxy.readOnly ?? proxyPlan.proxy.read_only, bazelrcLines);
+  core.setOutput('cache-tag', cacheTag);
+  setProxyOutputs(proxy.port);
+  core.setOutput('workspace', workspace);
+  return {
+    cacheTag,
+    verificationSpecs: [{
+      tag: cacheTag,
+      noPlatform: proxyPlan.proxy.no_platform,
+      noGit: proxyPlan.proxy.no_git,
+      pathHint: plan.workingDirectory,
+      saveExpected: !proxyPlan.proxy.read_only,
+    }],
+  };
+}
+
+function configureGoProxyEnv(gocacheprog: string): void {
+  core.exportVariable('GOCACHEPROG', gocacheprog);
+}
+
+function goCacheProgForProxy(proxyPlan: CliAdapterDryRunPlan, port: number): string {
+  const endpoint = `http://${proxyPlan.proxy.endpoint_host}:${port}`;
+  const planned = proxyPlan.env_vars?.GOCACHEPROG?.trim();
+  if (!planned) {
+    return `boringcache go-cacheprog --endpoint ${endpoint}`;
+  }
+  if (planned.includes('--endpoint=')) {
+    return planned.replace(/--endpoint=\S+/, `--endpoint=${endpoint}`);
+  }
+  if (planned.includes('--endpoint')) {
+    return planned.replace(/--endpoint\s+\S+/, `--endpoint ${endpoint}`);
+  }
+  return `${planned} --endpoint ${endpoint}`;
+}
+
+async function runGoRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
+  const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await findAvailablePort();
+  const proxyPlan = await resolveAdapterCliPlan(
+    'go',
+    plan.workspace,
+    plan.workingDirectory,
+    inputs.cacheTag,
+    requestedPort,
+    inputs.proxyNoPlatform,
+    inputs.proxyNoGit,
+    inputs.readOnly,
+  );
+  const workspace = proxyPlan.workspace;
+  const cacheTag = proxyPlan.tag;
+
+  saveModeState('proxy-pid', '');
+  const proxy = await startRegistryProxy(actionProxyOptions({
+    command: 'cache-registry',
+    workspace,
+    tag: cacheTag,
+    host: '127.0.0.1',
+    port: proxyPlan.proxy.port,
+    noGit: proxyPlan.proxy.no_git,
+    noPlatform: proxyPlan.proxy.no_platform,
+    verbose: inputs.verbose,
+    readOnly: proxyPlan.proxy.read_only,
+  }, proxyPlan.proxy, inputs.metadataHints));
+  saveModeState('proxy-pid', String(proxy.pid));
+  saveProxyModeState(proxy.port);
+
+  configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
+
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
   core.setOutput('workspace', workspace);

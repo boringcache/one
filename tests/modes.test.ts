@@ -4,6 +4,7 @@ describe('mode registry', () => {
   it('normalizes supported modes', () => {
     expect(normalizeMode('docker')).toBe('docker');
     expect(normalizeMode('archive')).toBe('archive');
+    expect(normalizeMode('go')).toBe('go');
     expect(normalizeMode('maven')).toBe('maven');
   });
 
@@ -15,8 +16,10 @@ describe('mode registry', () => {
   });
 
   it('marks product modes as implemented', () => {
-    const spec = resolveModeSpec('docker');
-    expect(spec.implemented).toBe(true);
-    expect(() => assertImplementedMode(spec)).not.toThrow();
+    for (const mode of ['docker', 'go'] as const) {
+      const spec = resolveModeSpec(mode);
+      expect(spec.implemented).toBe(true);
+      expect(() => assertImplementedMode(spec)).not.toThrow();
+    }
   });
 });

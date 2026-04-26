@@ -441,6 +441,29 @@ describe('one utils', () => {
     }
   });
 
+  it('keeps go mode pure remote by default', async () => {
+    const project = await makeTempProject({
+      '.go-version': '1.25.0\n',
+      'go.mod': 'module example.com/demo\n',
+    });
+
+    try {
+      const plan = await buildPlan(buildInputs({
+        mode: 'go',
+        workingDirectory: project,
+        cacheTag: 'svc',
+        entries: '',
+      }));
+
+      expect(plan.runtimeTools).toEqual([
+        { name: 'go', version: '1.25.0', label: 'Go', source: 'project' },
+      ]);
+      expect(plan.archiveEntries).toBe('');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('allows explicit archive entries alongside turbo proxy mode', async () => {
     const project = await makeTempProject({
       '.node-version': '22.4.1\n',

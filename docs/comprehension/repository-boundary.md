@@ -3,7 +3,7 @@
 `boringcache/one` owns the standalone maintained GitHub Action product surface:
 
 - action inputs, outputs, defaults, and validation;
-- mode orchestration for archive, Docker, BuildKit, Bazel, Gradle, Turbo, and Rust sccache flows;
+- mode orchestration for archive, Docker, BuildKit, Bazel, Go, Gradle, Turbo, and Rust sccache flows;
 - bundled action helpers under `lib/core`;
 - generated `dist` bundles required by GitHub Actions;
 - action E2E workflows and release tag movement.
@@ -30,4 +30,4 @@ The old Dockerfile-internal helper surface is removed before launch. The action 
 
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
 
-Release alignment note: the current local release-alignment change moves `boringcache/one` from `v1.12.64` to `v1.12.65` and the default CLI install version from `v1.12.46` to `v1.12.47`. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps, and do not treat the bump as public until it is signed, tagged, and `one@v1` is moved.
+Release alignment note: the current released action is `v1.12.68` and the default CLI install version is `v1.12.50`. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps, and do not treat the bump as public until it is signed, tagged, and `one@v1` is moved.

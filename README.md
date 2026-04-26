@@ -96,7 +96,7 @@ Workflow authors should consume those outputs instead of polling `/_boringcache/
 - archive caching for repeated directories
 - `mise`-based tool setup by default
 - Docker and BuildKit cache flows
-- Bazel, Gradle, Maven, Turbo, and Rust plus `sccache` proxy-backed modes
+- Bazel, Go, Gradle, Maven, Turbo, and Rust plus `sccache` proxy-backed modes
 - repo-config-driven cache profiles after `boringcache onboard`
 
 ## Maintainer model

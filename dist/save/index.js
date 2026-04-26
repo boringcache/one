@@ -43565,6 +43565,8 @@ async function runModeRestore(plan, inputs) {
             return runBuildkitRestore(plan, inputs);
         case 'bazel':
             return runBazelRestore(plan, inputs);
+        case 'go':
+            return runGoRestore(plan, inputs);
         case 'gradle':
             return runGradleRestore(plan, inputs);
         case 'maven':
@@ -43587,6 +43589,9 @@ async function runModeSave(mode) {
             return;
         case 'bazel':
             await shutdownBazelServer();
+            await stopProxyFromState();
+            return;
+        case 'go':
             await stopProxyFromState();
             return;
         case 'gradle':
@@ -45165,6 +45170,58 @@ async function runBazelRestore(plan, inputs) {
             }],
     };
 }
+function configureGoProxyEnv(gocacheprog) {
+    core.exportVariable('GOCACHEPROG', gocacheprog);
+}
+function goCacheProgForProxy(proxyPlan, port) {
+    var _a, _b;
+    const endpoint = `http://${proxyPlan.proxy.endpoint_host}:${port}`;
+    const planned = (_b = (_a = proxyPlan.env_vars) === null || _a === void 0 ? void 0 : _a.GOCACHEPROG) === null || _b === void 0 ? void 0 : _b.trim();
+    if (!planned) {
+        return `boringcache go-cacheprog --endpoint ${endpoint}`;
+    }
+    if (planned.includes('--endpoint=')) {
+        return planned.replace(/--endpoint=\S+/, `--endpoint=${endpoint}`);
+    }
+    if (planned.includes('--endpoint')) {
+        return planned.replace(/--endpoint\s+\S+/, `--endpoint ${endpoint}`);
+    }
+    return `${planned} --endpoint ${endpoint}`;
+}
+async function runGoRestore(plan, inputs) {
+    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
+    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
+    const workspace = proxyPlan.workspace;
+    const cacheTag = proxyPlan.tag;
+    saveModeState('proxy-pid', '');
+    const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
+        command: 'cache-registry',
+        workspace,
+        tag: cacheTag,
+        host: '127.0.0.1',
+        port: proxyPlan.proxy.port,
+        noGit: proxyPlan.proxy.no_git,
+        noPlatform: proxyPlan.proxy.no_platform,
+        verbose: inputs.verbose,
+        readOnly: proxyPlan.proxy.read_only,
+    }, proxyPlan.proxy, inputs.metadataHints));
+    saveModeState('proxy-pid', String(proxy.pid));
+    saveProxyModeState(proxy.port);
+    configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
+    core.setOutput('cache-tag', cacheTag);
+    setProxyOutputs(proxy.port);
+    core.setOutput('workspace', workspace);
+    return {
+        cacheTag,
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: proxyPlan.proxy.no_platform,
+                noGit: proxyPlan.proxy.no_git,
+                pathHint: plan.workingDirectory,
+                saveExpected: !proxyPlan.proxy.read_only,
+            }],
+    };
+}
 async function runGradleRestore(plan, inputs) {
     var _a;
     const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
@@ -45637,6 +45694,11 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Bazel remote cache proxy integration.',
     },
+    go: {
+        resolved: 'go',
+        implemented: true,
+        description: 'Go GOCACHEPROG proxy integration.',
+    },
     gradle: {
         resolved: 'gradle',
         implemented: true,
@@ -45666,13 +45728,14 @@ function normalizeMode(value) {
         case 'docker':
         case 'buildkit':
         case 'bazel':
+        case 'go':
         case 'gradle':
         case 'maven':
         case 'rust-sccache':
         case 'turbo-proxy':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.`);
+            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, rust-sccache, or turbo-proxy.`);
     }
 }
 function resolveModeSpec(mode) {
@@ -46861,6 +46924,8 @@ async function detectModeTools(mode, workingDirectory) {
             return detectNodeTurboTools(workingDirectory);
         case 'bazel':
             return detectBazelTools(workingDirectory);
+        case 'go':
+            return detectGoTools(workingDirectory);
         case 'gradle':
             return detectGradleTools(workingDirectory);
         case 'maven':

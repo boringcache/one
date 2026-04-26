@@ -14,7 +14,7 @@ inputs:
     default: 'mise'
     required: false
   mode:
-    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy. Proxy/build modes are pure remote by default; add entries when you want explicit local archive caches too.'
+    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, go, gradle, maven, rust-sccache, or turbo-proxy. Proxy/build modes are pure remote by default; add entries when you want explicit local archive caches too.'
     default: 'auto'
     required: false
   preset:

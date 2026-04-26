@@ -4,6 +4,7 @@ export type OneMode =
   | 'docker'
   | 'buildkit'
   | 'bazel'
+  | 'go'
   | 'gradle'
   | 'maven'
   | 'rust-sccache'
@@ -39,6 +40,11 @@ const MODE_SPECS: Record<ResolvedMode, Omit<ModeSpec, 'requested'>> = {
     implemented: true,
     description: 'Bazel remote cache proxy integration.',
   },
+  go: {
+    resolved: 'go',
+    implemented: true,
+    description: 'Go GOCACHEPROG proxy integration.',
+  },
   gradle: {
     resolved: 'gradle',
     implemented: true,
@@ -69,6 +75,7 @@ export function normalizeMode(value: string): OneMode {
     case 'docker':
     case 'buildkit':
     case 'bazel':
+    case 'go':
     case 'gradle':
     case 'maven':
     case 'rust-sccache':
@@ -76,7 +83,7 @@ export function normalizeMode(value: string): OneMode {
       return normalized;
     default:
       throw new Error(
-        `Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, gradle, maven, rust-sccache, or turbo-proxy.`,
+        `Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, rust-sccache, or turbo-proxy.`,
       );
   }
 }

@@ -2,7 +2,7 @@
 
 ## What It Does
 
-Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Docker, BuildKit, Bazel, Gradle, and Rust `sccache` modes now live here.
+Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Docker, BuildKit, Bazel, Go, Gradle, and Rust `sccache` modes now live here.
 
 ## Quick Reference
 
@@ -27,7 +27,7 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 
 - **Mise-powered**: Can detect and install runtimes via `mise`
 - **Platform-aware**: OS/arch scoping by default (disable with `no-platform: true`)
-- **Mode-driven**: Archive, Turbo, Docker, BuildKit, Bazel, Gradle, and Rust `sccache` all route through the same action
+- **Mode-driven**: Archive, Turbo, Docker, BuildKit, Bazel, Go, Gradle, and Rust `sccache` all route through the same action
 - **Compatible modes**: Supports both `entries` format and `actions/cache` format (`path`/`key`/`restore-keys`)
 
 ## Inputs
@@ -35,7 +35,7 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 | Input | Description |
 |-------|-------------|
 | `setup` | Runtime setup owner: `mise`, `external`, or `none` |
-| `mode` | Product mode (`archive`, `turbo-proxy`, `docker`, `buildkit`, `bazel`, `gradle`, `rust-sccache`) |
+| `mode` | Product mode (`archive`, `turbo-proxy`, `docker`, `buildkit`, `bazel`, `go`, `gradle`, `rust-sccache`) |
 | `preset` | Workflow preset (`none`, `rails`, `node-turbo`) |
 | `workspace` | BoringCache workspace (`org/repo`) |
 | `entries` | Cache entries (`tag:path,tag2:path2`) |

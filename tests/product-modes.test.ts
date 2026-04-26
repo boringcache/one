@@ -1111,6 +1111,36 @@ describe('product modes', () => {
     }
   });
 
+  it('uses mise-detected go tooling for go mode and exports GOCACHEPROG', async () => {
+    const project = await makeTempProject({
+      '.go-version': '1.25.0\n',
+      'go.mod': 'module example.com/demo\n',
+    });
+
+    try {
+      mockGetInput({
+        mode: 'go',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('go', '1.25.0', { label: 'Go' });
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'cache-registry',
+        onDemand: false,
+      }));
+      expect(core.exportVariable).toHaveBeenCalledWith(
+        'GOCACHEPROG',
+        'boringcache go-cacheprog --endpoint http://127.0.0.1:5000',
+      );
+      expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'go');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('uses mise-detected java tooling for gradle mode', async () => {
     const project = await makeTempProject({ '.java-version': '21\n' });
 

@@ -856,6 +856,12 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       RUSTC_WRAPPER: 'sccache',
       SCCACHE_WEBDAV_ENDPOINT: `http://127.0.0.1:${resolvedPort}/`,
     };
+  } else if (adapterName === 'go') {
+    envVars = {
+      BORINGCACHE_PROXY_PORT: String(resolvedPort),
+      BORINGCACHE_CACHE_REF: '{CACHE_REF}',
+      GOCACHEPROG: `boringcache go-cacheprog --endpoint http://${resolvedEndpointHost}:${resolvedPort}`,
+    };
   }
 
   let finalTag = resolvedTag;
@@ -961,7 +967,7 @@ beforeEach(() => {
     if (
       command === 'boringcache'
       && args
-      && ['bazel', 'docker', 'gradle', 'maven', 'sccache', 'turbo'].includes(args[0])
+      && ['bazel', 'docker', 'go', 'gradle', 'maven', 'sccache', 'turbo'].includes(args[0])
       && args.includes('--dry-run')
       && args.includes('--json')
     ) {
