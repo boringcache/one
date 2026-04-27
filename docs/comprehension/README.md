@@ -7,8 +7,8 @@ Start here when changing action inputs, outputs, modes, bundled helper behavior,
 ## Map
 
 - [Repository Boundary](repository-boundary.md) records what belongs in this repo and what must stay in CLI or Rails.
-- [ADR 0001](../adr/0001-cli-plan-owned-action-contract.md) records the launch contract: the action orchestrates CLI dry-run plans, should not become a second planner, and keeps the old Dockerfile-internal helper surface removed before launch.
-- [ADR 0002](../adr/0002-launch-action-readiness-and-legacy-retirement.md) records the current launch audit: helper retirement, version coupling, split-token examples, release proof, action-side performance guardrails, and the current Docker/BuildKit readiness contract.
+- [ADR 0001](../adr/0001-cli-plan-owned-action-contract.md) records the launch contract: the action orchestrates CLI dry-run plans, should not become a second planner, and keeps Docker on CLI-planned BuildKit registry-cache refs.
+- [ADR 0002](../adr/0002-launch-action-readiness-and-legacy-retirement.md) records the current launch audit: Docker path alignment, version coupling, split-token examples, release proof, action-side performance guardrails, and the current Docker/BuildKit readiness contract.
 
 ## Update Rule
 

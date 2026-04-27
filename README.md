@@ -71,8 +71,7 @@ Use short stable labels such as `project=web`, `phase=seed`, `phase=warm`, `tool
 
 If the repo already defines shared proxy labels in `.boringcache.toml`, `boringcache/one` inherits them through the CLI dry-run plan. Prefer repo config for durable defaults and use the action-level `metadata-hints` input only when a workflow needs an explicit override.
 
-Docker workflows should use the outer registry cache path. Do not add BoringCache commands, helper binaries, token mounts, build args, or secret mounts inside Dockerfile `RUN` steps.
-The old Dockerfile-internal helper inputs were removed before launch. If a workflow still has BoringCache hooks inside its Dockerfile, remove those hooks and use `mode: docker` instead.
+Docker workflows should use `mode: docker` or `mode: buildkit`. The action follows the CLI dry-run plan and passes BuildKit registry cache refs to the build.
 
 For Docker and BuildKit registry caches, the action follows the CLI's ref plan.
 Pull request runs are restore-only by default, so a PR-scoped ref such as `/cache:pr-3208` may legitimately 404, especially on the first PR run.

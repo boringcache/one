@@ -13,7 +13,7 @@ The local sweep found the good path already exists:
 - Archive mode calls `boringcache run --dry-run --json`.
 - Registry proxy startup uses the maintained `cache-registry` command.
 - Split restore/save tokens are first-class, with `BORINGCACHE_API_TOKEN` retained as a legacy fallback.
-- The local sweep found no maintained examples or workflows that need the old Dockerfile-internal helper path. On 2026-04-22, the action removed the `docker-internal-cache` and `docker-helper-path` surface instead of carrying it as a launch compatibility path.
+- The local sweep found one maintained Docker path: CLI-planned BuildKit registry-cache refs through Docker/BuildKit mode.
 
 The remaining risk is drift: the action can accidentally become a second planner for `.boringcache.toml`, Docker refs, tag suffixes, or Rails policy.
 
@@ -41,7 +41,7 @@ It must not:
 - reimplement `.boringcache.toml` semantics;
 - derive Docker immutable run refs independently from the CLI;
 - guess Rails publish, restore, or stale-promotion policy;
-- promote Dockerfile-internal helpers as a product path;
+- create a second Docker adoption path apart from the CLI plan;
 - revive `@boringcache/action-core` as a maintained dependency.
 
 ## Token Boundary
@@ -61,17 +61,8 @@ The maintained Docker UX is the outer BuildKit registry cache path:
 - BuildKit talks OCI registry protocol to the local proxy;
 - Rails owns publish and tag pointer truth.
 
-The Dockerfile-internal helper surface is removed before launch. The action must not ship a promoted, documented, or discoverable path that puts the CLI/helper binary inside the Docker build graph, because CLI releases then become Docker cache inputs and cause same-branch reseeds.
-
-Removed scope:
-
-- delete inputs `docker-internal-cache` and `docker-helper-path`;
-- delete outputs `docker-internal-cache`, `docker-internal-restore-enabled`, `docker-internal-save-enabled`, `docker-internal-build-args`, and `docker-helper-path`;
-- delete helper planning/writing code such as `DockerInternalCacheConfig`, `normalizeDockerInternalCacheMode`, `resolveDockerHelperPath`, `writeDockerHelper`, warning-only unmanaged-helper checks, and helper build-arg injection;
-- delete source, dist, tests, docs, and runbook text that present the helper as maintained behavior;
-- keep only tests or docs that assert Docker mode stays outside the user's Dockerfile.
-
-If an external pre-launch user still has those hooks, the supported migration is to remove the hooks and use `mode: docker` / `boringcache docker`.
+The action should keep Docker support on this path. CLI releases must not become
+Docker cache inputs.
 
 ## Cross-Platform Boundary
 
@@ -96,7 +87,7 @@ For Docker alias promotion, GitHub Actions run-start time is a contract field fo
 
 `setup-boringcache` may remain compatibility bootstrap copy, but launch docs should lead with `boringcache/one@v1` plus the current CLI defaults.
 
-The old Docker helper path is removed from the action before launch. Do not preserve it as an "advanced" or "compatibility" UX unless a named customer migration is documented and time-boxed in a later ADR.
+Do not add an advanced or compatibility Docker path unless a named customer migration is documented and time-boxed in a later ADR.
 
 ## Benchmark Evidence Gate
 

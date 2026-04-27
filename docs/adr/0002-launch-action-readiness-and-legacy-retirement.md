@@ -6,8 +6,8 @@ Date: 2026-04-23
 ## Context
 
 ADR 0001 keeps `boringcache/one` as orchestration around CLI-owned plans. This
-review records the launch state after the sweep for legacy helper paths,
-contract drift, version alignment, and performance risks.
+review records the launch state after the sweep for Docker path drift, contract
+drift, version alignment, and performance risks.
 
 The action is the primary CI entry point for launch copy. It must make the
 simple path real without becoming a second planner.
@@ -27,23 +27,15 @@ The action must not:
 - implement `.boringcache.toml` merge rules;
 - derive Docker immutable refs separately from the CLI;
 - guess Rails restore, publish, billing, or stale-promotion policy;
-- restore the old Dockerfile-internal helper path;
+- create a second Docker adoption path apart from the CLI plan;
 - route new behavior through retired `@boringcache/action-core`.
 
-## Docker Helper Retirement
+## Docker Path
 
-The old Dockerfile-internal helper surface stays removed. Launch docs and
-action metadata must not expose:
-
-- `docker-internal-cache`;
-- `docker-helper-path`;
-- helper build args;
-- helper outputs;
-- generated helper binaries or unmanaged-helper warnings.
-
-If a pre-launch workflow has BoringCache hooks inside its Dockerfile, the
-supported migration is to remove them and use `mode: docker` or
-`boringcache docker`.
+Docker workflows use CLI-planned BuildKit registry-cache refs through
+`mode: docker`, `mode: buildkit`, or the CLI `boringcache docker` adapter.
+Launch docs and action metadata should keep that as the only Docker adoption
+path.
 
 ## Contract Alignment
 
