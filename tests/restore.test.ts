@@ -34,7 +34,10 @@ describe('restore action', () => {
 
     await restoreRun();
 
-    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({ version: 'v1.12.50' });
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
+      version: 'v1.12.51',
+      platform: undefined,
+    });
     expect(exec.exec).toHaveBeenCalledWith(
       'boringcache',
       ['restore', 'my-org/my-project', 'deps:node_modules,build:dist', '--no-platform'],
@@ -141,7 +144,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.50',
+      version: 'v1.12.51',
       platform: 'alpine-amd64',
     });
   });
@@ -155,7 +158,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.50',
+      version: 'v1.12.51',
       platform: 'linux-amd64',
     });
     expect(exec.exec).not.toHaveBeenCalledWith(
