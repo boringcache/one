@@ -40,4 +40,4 @@ Verification is action orchestration, not Rails policy. Normal restores inherit 
 
 Archive restore should happen before mise tool probes or installs. Tool discovery can execute language binaries in the project directory, and those binaries must not get a chance to populate archive cache targets before `boringcache restore` sees them.
 
-Release alignment note: the current launch release candidate is `v1.12.71` and the default CLI install version is `v1.12.51`. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps, and do not treat the bump as public until it is signed, tagged, and `one@v1` is moved.
+Release alignment note: the current action release candidate is `v1.12.74` and the default CLI install version is `v1.12.55`. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps, and do not treat the bump as public until it is signed, tagged, and `one@v1` is moved.
