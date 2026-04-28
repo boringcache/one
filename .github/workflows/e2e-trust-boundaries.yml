@@ -310,7 +310,8 @@ jobs:
           if [ "${{ matrix.mode }}" = "bazel" ]; then
             grep -- "--remote_upload_local_results=false" "$HOME/.bazelrc"
           else
-            grep "push = false" "$E2E_WORKDIR/.gradle-home/init.d/boringcache-cache.gradle"
+            test "${BORINGCACHE_GRADLE_CACHE_PUSH}" = "false"
+            grep "BORINGCACHE_GRADLE_CACHE_PUSH" "$E2E_WORKDIR/.gradle-home/init.d/boringcache-gradle-build-cache.init.gradle"
           fi
 
       - name: Run build under read-only config

@@ -143,7 +143,7 @@ run_gradle() {
   local gradle_home="${E2E_GRADLE_HOME:?E2E_GRADLE_HOME is required for gradle mode}"
   pushd "$workdir" >/dev/null
   gradle --no-daemon --gradle-user-home "$gradle_home" test
-  test -f "$gradle_home/init.d/boringcache-cache.gradle"
+  test -f "$gradle_home/init.d/boringcache-gradle-build-cache.init.gradle"
   popd >/dev/null
 }
 
