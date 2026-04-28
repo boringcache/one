@@ -46038,6 +46038,7 @@ function getInputs() {
         force: core.getBooleanInput('force'),
         verbose: core.getBooleanInput('verbose'),
         exclude: core.getInput('exclude'),
+        allowExternalSymlinks: core.getBooleanInput('allow-external-symlinks'),
     };
 }
 function isPullRequestEvent() {
@@ -47691,6 +47692,9 @@ function buildFlagArgs(inputs) {
     }
     if (inputs.exclude) {
         flagArgs.push('--exclude', inputs.exclude);
+    }
+    if (inputs.allowExternalSymlinks) {
+        flagArgs.push('--allow-external-symlinks');
     }
     return flagArgs;
 }

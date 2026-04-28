@@ -78,6 +78,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     force: false,
     verbose: false,
     exclude: '',
+    allowExternalSymlinks: false,
     ...overrides,
   };
 }

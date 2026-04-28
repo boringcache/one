@@ -354,6 +354,10 @@ inputs:
   exclude:
     description: 'Glob patterns to exclude from cache (comma-separated, e.g., "*.out,*.log"). Excludes files that produce non-deterministic content.'
     required: false
+  allow-external-symlinks:
+    description: 'Allow restoring symlinks whose targets escape the restore root (CLI --allow-external-symlinks flag). Disabled by default; opt in for archives with workspace-back symlinks (e.g. pnpm store layouts whose project entries point back to the workspace).'
+    default: 'false'
+    required: false
 outputs:
   cache-hit:
     description: 'A boolean value indicating an archive or mode-specific cache hit was found'

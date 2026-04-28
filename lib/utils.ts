@@ -113,6 +113,7 @@ export interface OneInputs {
   force: boolean;
   verbose: boolean;
   exclude: string;
+  allowExternalSymlinks: boolean;
 }
 
 export interface TagVerificationSpec {
@@ -221,6 +222,7 @@ export function getInputs(): OneInputs {
     force: core.getBooleanInput('force'),
     verbose: core.getBooleanInput('verbose'),
     exclude: core.getInput('exclude'),
+    allowExternalSymlinks: core.getBooleanInput('allow-external-symlinks'),
   };
 }
 
@@ -2367,6 +2369,9 @@ export function buildFlagArgs(inputs: OneInputs): string[] {
   }
   if (inputs.exclude) {
     flagArgs.push('--exclude', inputs.exclude);
+  }
+  if (inputs.allowExternalSymlinks) {
+    flagArgs.push('--allow-external-symlinks');
   }
   return flagArgs;
 }
