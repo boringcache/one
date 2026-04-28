@@ -152,7 +152,7 @@ describe('proxy OCI import readiness', () => {
     });
 
     expect(core.notice).toHaveBeenCalledWith(
-      'Registry proxy became ready before OCI import refs were fully readable. readable=[] unreadable=[branch-main, default, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true. Continuing without registry imports; this is expected for cold seed jobs.',
+      'BoringCache proxy became ready before OCI import refs were fully readable. readable=[] unreadable=[branch-main, default, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true. Continuing without registry imports; this is expected for cold seed jobs.',
     );
     expect(core.warning).not.toHaveBeenCalled();
   });
@@ -170,7 +170,7 @@ describe('proxy OCI import readiness', () => {
     });
 
     expect(core.warning).toHaveBeenCalledWith(
-      'Registry proxy became ready before OCI import refs were fully readable. readable=[default] unreadable=[branch-main, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true',
+      'BoringCache proxy became ready before OCI import refs were fully readable. readable=[default] unreadable=[branch-main, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true',
     );
     expect(core.notice).not.toHaveBeenCalled();
   });

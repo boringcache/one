@@ -148,14 +148,14 @@ async function waitForProxyReadyFile(
   while (Date.now() - start < timeoutMs) {
     if (fs.existsSync(readyFile)) {
       const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-      core.info(`Registry proxy is ready (${elapsed}s)`);
+      core.info(`BoringCache proxy is ready (${elapsed}s)`);
       clearProxyReadyFile(readyFile);
       return;
     }
 
     if (pid && pid > 0 && !isProcessAlive(pid)) {
       const logs = port ? readProxyLogs(port) : '';
-      throw new Error(`Registry proxy exited before becoming ready${logs ? `:\n${logs}` : ''}`);
+      throw new Error(`BoringCache proxy exited before becoming ready${logs ? `:\n${logs}` : ''}`);
     }
 
     const elapsed = Date.now() - start;
@@ -168,7 +168,7 @@ async function waitForProxyReadyFile(
   }
 
   const logs = port ? readProxyLogs(port) : '';
-  throw new Error(`Registry proxy did not become ready within ${timeoutMs}ms${logs ? `:\n${logs}` : ''}`);
+  throw new Error(`BoringCache proxy did not become ready within ${timeoutMs}ms${logs ? `:\n${logs}` : ''}`);
 }
 
 interface ProxyStatusResponse {
@@ -301,7 +301,7 @@ export async function waitForOciImportReadiness(
 export function logOciImportReadiness(readiness: OciImportReadiness): void {
   if (readiness.ready) {
     core.info(
-      `Registry proxy OCI import refs are readable: ${readiness.readableRefs.join(', ')}`,
+      `BoringCache proxy OCI import refs are readable: ${readiness.readableRefs.join(', ')}`,
     );
     return;
   }
@@ -318,7 +318,7 @@ export function logOciImportReadiness(readiness: OciImportReadiness): void {
   ]
     .filter(Boolean)
     .join(' ');
-  const message = `Registry proxy became ready before OCI import refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
+  const message = `BoringCache proxy became ready before OCI import refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
 
   if (readiness.readableRefs.length === 0) {
     core.notice(`${message}. Continuing without registry imports; this is expected for cold seed jobs.`);
@@ -329,7 +329,7 @@ export function logOciImportReadiness(readiness: OciImportReadiness): void {
 }
 
 /**
- * Start the cache-registry proxy.
+ * Start the BoringCache proxy.
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHandle> {
@@ -349,20 +349,18 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
 
   if (!authToken) {
     if (effectiveReadOnly) {
-      throw new Error(`${missingRestoreTokenMessage()} This is required for registry proxy mode.`);
+      throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
     }
-    throw new Error(`${missingSaveTokenMessage()} This is required for registry proxy mode.`);
+    throw new Error(`${missingSaveTokenMessage()} This is required for proxy mode.`);
   }
 
   const host = options.host || '127.0.0.1';
   const cliCommand = 'cache-registry';
   const normalizedTags = normalizeProxyTags(options.tag);
-  const tagList = normalizedTags.split(',');
-  const primaryTag = tagList[0];
   const readyFile = proxyReadyFilePath(options.port);
 
   if (await isProxyRunning(host, options.port)) {
-    core.info(`Registry proxy already running on port ${options.port}, reusing`);
+    core.info(`BoringCache proxy already running on port ${options.port}, reusing`);
     try {
       const pid = parseInt(fs.readFileSync(PROXY_PID_FILE, 'utf-8').trim(), 10);
       if (pid > 0) return { pid, port: options.port, readOnly: effectiveReadOnly };
@@ -410,28 +408,7 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
     args.push('--verbose');
   }
 
-  core.info(`Starting registry proxy on ${host}:${options.port}...`);
-  core.info(`Registry proxy primary tag: ${primaryTag}`);
-  if (tagList.length > 1) {
-    core.info(`Registry proxy alias tags: ${tagList.slice(1).join(', ')}`);
-  }
-  if (effectiveReadOnly) {
-    core.info('Registry proxy mode: read-only');
-  }
-  core.info(`Registry proxy startup: ${options.onDemand ? 'on-demand' : 'warm'}`);
-  if (options.ociPrefetchRefs?.length) {
-    core.info(`Registry proxy OCI prefetch refs: ${options.ociPrefetchRefs.join(', ')}`);
-  }
-  if (options.ociRequiredReadableRefs?.length) {
-    core.info(`Registry proxy required readable refs: ${options.ociRequiredReadableRefs.join(', ')}`);
-  }
-  if (options.ociAliasPromotionRefs?.length) {
-    core.info(`Registry proxy OCI alias promotion refs: ${options.ociAliasPromotionRefs.join(', ')}`);
-  }
-  if (ociHydration) {
-    core.info(`Registry proxy OCI hydration: ${ociHydration}`);
-  }
-
+  core.info(`Starting BoringCache proxy on ${host}:${options.port}...`);
   const logFile = proxyLogPath(options.port);
   const logFd = fs.openSync(logFile, 'w');
   const child: ChildProcess = spawn('boringcache', args, {
@@ -447,11 +424,11 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   fs.closeSync(logFd);
 
   if (!child.pid) {
-    throw new Error('Failed to start registry proxy');
+    throw new Error('Failed to start BoringCache proxy');
   }
 
   fs.writeFileSync(PROXY_PID_FILE, String(child.pid));
-  core.info(`Registry proxy started (PID: ${child.pid})`);
+  core.info(`BoringCache proxy started (PID: ${child.pid})`);
   const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
 
   try {
@@ -494,17 +471,17 @@ export async function stopRegistryProxy(pid: number): Promise<void> {
     return;
   }
 
-  core.info(`Stopping registry proxy (PID: ${pid})...`);
+  core.info(`Stopping BoringCache proxy (PID: ${pid})...`);
 
   try {
     process.kill(pid, 'SIGTERM');
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ESRCH') {
-      core.info(`Registry proxy (PID: ${pid}) already exited`);
+      core.info(`BoringCache proxy (PID: ${pid}) already exited`);
       return;
     }
-    core.warning(`Failed to send SIGTERM to registry proxy: ${(err as Error).message}`);
+    core.warning(`Failed to send SIGTERM to BoringCache proxy: ${(err as Error).message}`);
     return;
   }
 
@@ -514,12 +491,12 @@ export async function stopRegistryProxy(pid: number): Promise<void> {
   let lastLog = start;
   while (true) {
     if (!isProcessAlive(pid)) {
-      core.info(`Registry proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
+      core.info(`BoringCache proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
       return;
     }
     const now = Date.now();
     if (now - lastLog >= logInterval) {
-      core.info(`Waiting for registry proxy to flush and exit... (${Math.round((now - start) / 1000)}s elapsed)`);
+      core.info(`Waiting for BoringCache proxy to flush and exit... (${Math.round((now - start) / 1000)}s elapsed)`);
       lastLog = now;
     }
     await new Promise(resolve => setTimeout(resolve, pollInterval));
