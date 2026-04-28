@@ -14,7 +14,7 @@ inputs:
     default: 'mise'
     required: false
   mode:
-    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, go, gradle, maven, rust-sccache, or turbo-proxy. Proxy/build modes are pure remote by default; add entries when you want explicit local archive caches too.'
+    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy. Proxy/build modes are pure remote by default; add entries when you want explicit local archive caches too.'
     default: 'auto'
     required: false
   preset:
@@ -305,6 +305,13 @@ inputs:
   turbo-port:
     description: 'Preferred port for a local Turbo proxy.'
     default: '4227'
+    required: false
+  nx-access-token:
+    description: 'Nx self-hosted remote cache access token. Defaults to the proxy-internal token.'
+    required: false
+  nx-port:
+    description: 'Preferred port for a local Nx self-hosted remote cache proxy.'
+    default: '4228'
     required: false
   cache-profiles:
     description: 'Optional repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). These resolve through the CLI source of truth before any extra raw entries are appended.'

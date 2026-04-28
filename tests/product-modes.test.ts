@@ -1406,6 +1406,33 @@ describe('product modes', () => {
     }
   });
 
+  it('configures nx-proxy mode and exports Nx self-hosted remote cache env', async () => {
+    const project = await makeTempProject({
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      mockGetInput({
+        mode: 'nx-proxy',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('node', '22.4.1', { label: 'Node.js' });
+      expect(actionCoreMocks.installMiseTool).toHaveBeenCalledWith('pnpm', '9.15.1', { label: 'pnpm' });
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalled();
+      expect(core.exportVariable).toHaveBeenCalledWith('NX_SELF_HOSTED_REMOTE_CACHE_SERVER', 'http://127.0.0.1:5000');
+      expect(core.exportVariable).toHaveBeenCalledWith('NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', 'boringcache');
+      expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'nx-proxy');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('supports rust mode with mise-managed tooling and proxy sccache', async () => {
     const project = await makeTempProject({
       'Cargo.lock': '',

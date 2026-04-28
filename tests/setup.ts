@@ -980,6 +980,13 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
         TURBO_TOKEN: 'boringcache',
         TURBO_TEAM: 'boringcache',
       };
+  } else if (adapterName === 'nx') {
+    envVars = {
+        BORINGCACHE_PROXY_PORT: String(resolvedPort),
+        BORINGCACHE_CACHE_REF: '{CACHE_REF}',
+        NX_SELF_HOSTED_REMOTE_CACHE_SERVER: `http://127.0.0.1:${resolvedPort}`,
+        NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: 'boringcache',
+      };
   } else if (adapterName === 'sccache') {
     envVars = {
       BORINGCACHE_PROXY_PORT: String(resolvedPort),
@@ -1175,7 +1182,7 @@ beforeEach(() => {
     if (
       command === 'boringcache'
       && args
-      && ['bazel', 'docker', 'go', 'gradle', 'maven', 'sccache', 'turbo'].includes(args[0])
+      && ['bazel', 'docker', 'go', 'gradle', 'maven', 'nx', 'sccache', 'turbo'].includes(args[0])
       && args.includes('--dry-run')
       && args.includes('--json')
     ) {

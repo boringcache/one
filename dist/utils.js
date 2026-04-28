@@ -885,6 +885,7 @@ async function detectPresetTools(preset, workingDirectory, uvVersion, composerVe
 async function detectModeTools(mode, workingDirectory) {
     switch (mode) {
         case 'turbo-proxy':
+        case 'nx-proxy':
             return detectNodeTurboTools(workingDirectory);
         case 'bazel':
             return detectBazelTools(workingDirectory);

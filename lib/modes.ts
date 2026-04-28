@@ -7,6 +7,7 @@ export type OneMode =
   | 'go'
   | 'gradle'
   | 'maven'
+  | 'nx-proxy'
   | 'rust-sccache'
   | 'turbo-proxy';
 
@@ -55,6 +56,11 @@ const MODE_SPECS: Record<ResolvedMode, Omit<ModeSpec, 'requested'>> = {
     implemented: true,
     description: 'Maven build cache proxy integration.',
   },
+  'nx-proxy': {
+    resolved: 'nx-proxy',
+    implemented: true,
+    description: 'Nx self-hosted remote cache proxy integration.',
+  },
   'rust-sccache': {
     resolved: 'rust-sccache',
     implemented: true,
@@ -78,12 +84,13 @@ export function normalizeMode(value: string): OneMode {
     case 'go':
     case 'gradle':
     case 'maven':
+    case 'nx-proxy':
     case 'rust-sccache':
     case 'turbo-proxy':
       return normalized;
     default:
       throw new Error(
-        `Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, rust-sccache, or turbo-proxy.`,
+        `Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy.`,
       );
   }
 }

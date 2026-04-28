@@ -43471,6 +43471,8 @@ async function runModeRestore(plan, inputs) {
             return runRustRestore(plan, inputs);
         case 'turbo-proxy':
             return runTurboProxyRestore(plan, inputs);
+        case 'nx-proxy':
+            return runNxProxyRestore(plan, inputs);
         case 'archive':
             return {};
     }
@@ -43492,6 +43494,7 @@ async function runModeSave(mode) {
             return;
         case 'gradle':
         case 'maven':
+        case 'nx-proxy':
         case 'turbo-proxy':
             await stopProxyFromState();
             return;
@@ -44513,6 +44516,10 @@ function configureTurboRemoteEnv(apiUrl, token, team) {
     core.exportVariable('TURBO_TOKEN', token);
     core.exportVariable('TURBO_TEAM', team || 'team_boringcache');
 }
+function configureNxRemoteEnv(serverUrl, accessToken) {
+    core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_SERVER', serverUrl);
+    core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', accessToken);
+}
 function resolveNodePackageManagerCacheDir(packageManager) {
     if (!packageManager) {
         return null;
@@ -45238,6 +45245,38 @@ async function runTurboProxyRestore(plan, inputs) {
             }],
     };
 }
+async function runNxProxyRestore(plan, inputs) {
+    const nxAccessToken = core.getInput('nx-access-token') || 'boringcache';
+    const preferredPort = parseInt(core.getInput('nx-port') || inputs.proxyPort || '4228', 10);
+    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, false, false, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+    });
+    const workspace = nxPlan.workspace;
+    const cacheTag = nxPlan.tag;
+    let proxy;
+    try {
+        proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
+    }
+    catch {
+        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
+    }
+    saveModeState('proxy-pid', String(proxy.pid));
+    saveProxyModeState(proxy.port);
+    configureNxRemoteEnv(`http://127.0.0.1:${proxy.port}`, nxAccessToken);
+    core.setOutput('cache-tag', cacheTag);
+    setProxyOutputs(proxy.port);
+    core.setOutput('workspace', workspace);
+    return {
+        cacheTag,
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: nxPlan.proxy.no_platform,
+                noGit: nxPlan.proxy.no_git,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
+}
 async function runRustRestore(plan, inputs) {
     var _a, _b;
     const cacheTagPrefix = (inputs.cacheTag || plan.cacheTagPrefix || '').trim();
@@ -45598,6 +45637,11 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Maven build cache proxy integration.',
     },
+    'nx-proxy': {
+        resolved: 'nx-proxy',
+        implemented: true,
+        description: 'Nx self-hosted remote cache proxy integration.',
+    },
     'rust-sccache': {
         resolved: 'rust-sccache',
         implemented: true,
@@ -45620,11 +45664,12 @@ function normalizeMode(value) {
         case 'go':
         case 'gradle':
         case 'maven':
+        case 'nx-proxy':
         case 'rust-sccache':
         case 'turbo-proxy':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, rust-sccache, or turbo-proxy.`);
+            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy.`);
     }
 }
 function resolveModeSpec(mode) {
@@ -46763,6 +46808,7 @@ async function detectPresetTools(preset, workingDirectory, uvVersion, composerVe
 async function detectModeTools(mode, workingDirectory) {
     switch (mode) {
         case 'turbo-proxy':
+        case 'nx-proxy':
             return detectNodeTurboTools(workingDirectory);
         case 'bazel':
             return detectBazelTools(workingDirectory);

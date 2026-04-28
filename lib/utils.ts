@@ -1139,6 +1139,7 @@ async function detectPresetTools(
 async function detectModeTools(mode: OneMode, workingDirectory: string): Promise<ToolSpec[]> {
   switch (mode) {
     case 'turbo-proxy':
+    case 'nx-proxy':
       return detectNodeTurboTools(workingDirectory);
     case 'bazel':
       return detectBazelTools(workingDirectory);

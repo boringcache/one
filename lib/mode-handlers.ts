@@ -194,6 +194,8 @@ export async function runModeRestore(plan: ResolvedPlan, inputs: OneInputs): Pro
       return runRustRestore(plan, inputs);
     case 'turbo-proxy':
       return runTurboProxyRestore(plan, inputs);
+    case 'nx-proxy':
+      return runNxProxyRestore(plan, inputs);
     case 'archive':
       return {};
   }
@@ -216,6 +218,7 @@ export async function runModeSave(mode: ResolvedPlan['mode']): Promise<void> {
       return;
     case 'gradle':
     case 'maven':
+    case 'nx-proxy':
     case 'turbo-proxy':
       await stopProxyFromState();
       return;
@@ -401,7 +404,7 @@ function emitCliPlannerWarnings(stderr: string): void {
 }
 
 async function resolveAdapterCliPlan(
-  adapter: 'bazel' | 'go' | 'gradle' | 'maven' | 'sccache' | 'turbo',
+  adapter: 'bazel' | 'go' | 'gradle' | 'maven' | 'nx' | 'sccache' | 'turbo',
   workspace: string,
   workingDirectory: string,
   inputCacheTag: string,
@@ -1432,6 +1435,11 @@ function configureTurboRemoteEnv(apiUrl: string, token: string, team?: string): 
   core.exportVariable('TURBO_TEAM', team || 'team_boringcache');
 }
 
+function configureNxRemoteEnv(serverUrl: string, accessToken: string): void {
+  core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_SERVER', serverUrl);
+  core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', accessToken);
+}
+
 function resolveNodePackageManagerCacheDir(
   packageManager: Awaited<ReturnType<typeof detectNodePackageManager>>,
 ): string | null {
@@ -2323,6 +2331,62 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
       tag: cacheTag,
       noPlatform: true,
       noGit: true,
+      pathHint: plan.workingDirectory,
+      saveExpected: !inputs.readOnly,
+    }],
+  };
+}
+
+async function runNxProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
+  const nxAccessToken = core.getInput('nx-access-token') || 'boringcache';
+  const preferredPort = parseInt(core.getInput('nx-port') || inputs.proxyPort || '4228', 10);
+  const nxPlan = await resolveAdapterCliPlan(
+    'nx',
+    plan.workspace,
+    plan.workingDirectory,
+    inputs.cacheTag,
+    preferredPort,
+    false,
+    false,
+    proxyPlanningReadOnly(inputs.readOnly),
+    {
+      metadataHintsInput: inputs.metadataHints,
+    },
+  );
+  const workspace = nxPlan.workspace;
+  const cacheTag = nxPlan.tag;
+
+  let proxy;
+  try {
+    proxy = await startPortableCacheProxy(
+      workspace,
+      nxPlan.proxy.port || preferredPort,
+      cacheTag,
+      nxPlan.proxy.read_only,
+      nxPlan.proxy,
+    );
+  } catch {
+    proxy = await startPortableCacheProxy(
+      workspace,
+      await findAvailablePort(),
+      cacheTag,
+      nxPlan.proxy.read_only,
+      nxPlan.proxy,
+    );
+  }
+
+  saveModeState('proxy-pid', String(proxy.pid));
+  saveProxyModeState(proxy.port);
+  configureNxRemoteEnv(`http://127.0.0.1:${proxy.port}`, nxAccessToken);
+  core.setOutput('cache-tag', cacheTag);
+  setProxyOutputs(proxy.port);
+  core.setOutput('workspace', workspace);
+  return {
+    cacheTag,
+    verificationSpecs: [{
+      tag: cacheTag,
+      noPlatform: nxPlan.proxy.no_platform,
+      noGit: nxPlan.proxy.no_git,
       pathHint: plan.workingDirectory,
       saveExpected: !inputs.readOnly,
     }],
