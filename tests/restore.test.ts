@@ -235,6 +235,26 @@ describe('restore action', () => {
     expect(actionCoreMocks.exportMiseEnv).toHaveBeenCalledWith(process.cwd());
   });
 
+  it('restores archive entries before probing mise tools', async () => {
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      tools: 'go@1.25.0',
+      entries: 'go-mod-cache:.go/pkg/mod',
+    });
+    mockGetBooleanInput({ 'cache-runtime': false });
+
+    await restoreRun();
+
+    const archiveRestoreCall = actionCoreMocks.execBoringCache.mock.calls.findIndex(
+      ([args]) => Array.isArray(args) && args[0] === 'restore' && String(args[2]).includes('.go/pkg/mod'),
+    );
+    expect(archiveRestoreCall).toBeGreaterThanOrEqual(0);
+    const archiveRestoreOrder = actionCoreMocks.execBoringCache.mock.invocationCallOrder[archiveRestoreCall];
+    const toolProbeOrder = actionCoreMocks.hasToolVersionOnPath.mock.invocationCallOrder[0];
+
+    expect(archiveRestoreOrder).toBeLessThan(toolProbeOrder);
+  });
+
   it('skips save-expected verification in restore step when no save-capable token is present', async () => {
     delete process.env.BORINGCACHE_SAVE_TOKEN;
     delete process.env.BORINGCACHE_API_TOKEN;

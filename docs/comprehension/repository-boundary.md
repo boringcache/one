@@ -30,4 +30,8 @@ Docker support should stay on the BuildKit registry-cache path through CLI-plann
 
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
 
-Release alignment note: the current launch release candidate is `v1.12.69` and the default CLI install version is `v1.12.50`. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps, and do not treat the bump as public until it is signed, tagged, and `one@v1` is moved.
+Verification is action orchestration, not Rails policy. Normal restores inherit strict server-signature verification from the action environment, but post-save `verify` checks must honor `verify-require-server-signature`; when that input is false, the action clears the inherited strict env only for the `boringcache check` subprocess.
+
+Archive restore should happen before mise tool probes or installs. Tool discovery can execute language binaries in the project directory, and those binaries must not get a chance to populate archive cache targets before `boringcache restore` sees them.
+
+Release alignment note: the current launch release candidate is `v1.12.71` and the default CLI install version is `v1.12.51`. Keep `action.yml`, `lib/utils.ts`, restore tests, generated `dist/**`, and package version changes together for future CLI default bumps, and do not treat the bump as public until it is signed, tagged, and `one@v1` is moved.

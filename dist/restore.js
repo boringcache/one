@@ -125,11 +125,11 @@ async function run() {
         process.chdir(plan.workingDirectory);
         await (0, utils_1.applyPresetCacheEnv)(plan);
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs));
+        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, (0, utils_1.buildFlagArgs)(inputs), plan.archiveRestoreCandidates);
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
             usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
         }
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, (0, utils_1.buildFlagArgs)(inputs), plan.archiveRestoreCandidates);
         const modeRestore = await (0, mode_handlers_1.runModeRestore)(plan, inputs);
         const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)

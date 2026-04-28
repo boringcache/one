@@ -957,7 +957,11 @@ beforeEach(() => {
   (exec.exec as jest.Mock).mockImplementation(async (
     command: string,
     args?: string[],
-    options?: { cwd?: string; listeners?: { stdout?: (data: Buffer) => void; stderr?: (data: Buffer) => void } },
+    options?: {
+      cwd?: string;
+      env?: NodeJS.ProcessEnv;
+      listeners?: { stdout?: (data: Buffer) => void; stderr?: (data: Buffer) => void };
+    },
   ) => {
     if (command === 'boringcache' && args?.[0] === 'run' && args.includes('--dry-run') && args.includes('--json')) {
       const plan = cliDryRunPlan(args, options?.cwd || process.cwd());

@@ -200,6 +200,67 @@ describe('one utils', () => {
     }
   });
 
+  it('disables inherited strict signature checks for unsigned verification', async () => {
+    process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE = '1';
+    (exec.exec as jest.Mock).mockResolvedValue(0);
+
+    await verifyVerificationSpecs(
+      'my-org/my-project',
+      [{ tag: 'deps', noPlatform: true, noGit: true }],
+      {
+        mode: 'check',
+        timeoutSeconds: 60,
+        requireServerSignature: false,
+        verbose: false,
+      },
+    );
+
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--exact', '--fail-on-miss'],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0',
+        }),
+      }),
+    );
+  });
+
+  it('keeps explicit signed verification strict', async () => {
+    process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE = '1';
+    (exec.exec as jest.Mock).mockResolvedValue(0);
+
+    await verifyVerificationSpecs(
+      'my-org/my-project',
+      [{ tag: 'deps', noPlatform: true, noGit: true }],
+      {
+        mode: 'check',
+        timeoutSeconds: 60,
+        requireServerSignature: true,
+        verbose: false,
+      },
+    );
+
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      [
+        '--require-server-signature',
+        'check',
+        'my-org/my-project',
+        'deps',
+        '--no-platform',
+        '--no-git',
+        '--exact',
+        '--fail-on-miss',
+      ],
+      expect.not.objectContaining({
+        env: expect.objectContaining({
+          BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0',
+        }),
+      }),
+    );
+  });
+
   it('parses explicit tool specs and normalizes nodejs to node', () => {
     expect(parseToolSpecs('nodejs@22.4.1\nruby@3.3.6')).toEqual([
       { name: 'node', version: '22.4.1', label: 'Node.js', source: 'input' },

@@ -158,17 +158,17 @@ export async function run(): Promise<void> {
       buildRuntimeRestoreFlagArgs(inputs),
     );
 
-    let usedMiseRuntime = false;
-    if (plan.setup === 'mise') {
-      usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
-    }
-
     const archiveRestore = await restoreEntries(
       plan.workspace,
       plan.archiveEntries,
       buildFlagArgs(inputs),
       plan.archiveRestoreCandidates,
     );
+
+    let usedMiseRuntime = false;
+    if (plan.setup === 'mise') {
+      usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
+    }
 
     const modeRestore = await runModeRestore(plan, inputs);
     const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]

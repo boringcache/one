@@ -866,6 +866,16 @@ interface TagCheckBatch {
   noGit: boolean;
 }
 
+function envWithOverrides(overrides: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return { ...env, ...overrides };
+}
+
 function groupVerificationSpecs(specs: TagVerificationSpec[]): TagCheckBatch[] {
   const grouped = new Map<string, TagCheckBatch>();
 
@@ -915,7 +925,7 @@ async function runTagCheck(
 
   let stdout = '';
   let stderr = '';
-  const exitCode = await exec.exec('boringcache', args, {
+  const execOptions: exec.ExecOptions = {
     ignoreReturnCode: true,
     silent: true,
     listeners: {
@@ -926,7 +936,12 @@ async function runTagCheck(
         stderr += data.toString();
       },
     },
-  });
+  };
+  if (!options.requireServerSignature) {
+    execOptions.env = envWithOverrides({ BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0' });
+  }
+
+  const exitCode = await exec.exec('boringcache', args, execOptions);
 
   return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
 }

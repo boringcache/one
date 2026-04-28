@@ -46730,6 +46730,15 @@ function buildGenericVerificationSpecs(plan, inputs, includeRuntime) {
     appendVerificationSpecsFromEntries(specs, plan.archiveEntries, noPlatform, false);
     return specs;
 }
+function envWithOverrides(overrides) {
+    const env = {};
+    for (const [key, value] of Object.entries(process.env)) {
+        if (value !== undefined) {
+            env[key] = value;
+        }
+    }
+    return { ...env, ...overrides };
+}
 function groupVerificationSpecs(specs) {
     const grouped = new Map();
     for (const spec of specs) {
@@ -46764,7 +46773,7 @@ async function runTagCheck(workspace, batch, options) {
     args.push('--exact', '--fail-on-miss');
     let stdout = '';
     let stderr = '';
-    const exitCode = await exec.exec('boringcache', args, {
+    const execOptions = {
         ignoreReturnCode: true,
         silent: true,
         listeners: {
@@ -46775,7 +46784,11 @@ async function runTagCheck(workspace, batch, options) {
                 stderr += data.toString();
             },
         },
-    });
+    };
+    if (!options.requireServerSignature) {
+        execOptions.env = envWithOverrides({ BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0' });
+    }
+    const exitCode = await exec.exec('boringcache', args, execOptions);
     return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
 }
 function formatCheckFailure(result) {

@@ -70,6 +70,18 @@ modes. This is the user-facing path for low-cardinality grouping labels such as
 `project=web`, `phase=seed`, `tool=bazel`, or `benchmark=grpc-bazel`. Keep
 those labels stable and replayable; do not use commit SHAs or run ids there.
 
+Post-save verification must respect the `verify-require-server-signature`
+input independently of the action's default strict restore environment. The
+action exports `BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1` for normal CLI restore
+safety, but unsigned verification explicitly runs `boringcache check` with
+`BORINGCACHE_REQUIRE_SERVER_SIGNATURE=0` so existence checks do not become
+signed-restore checks by accident.
+
+Archive restores run before mise tool probes and installs. This prevents
+language tool discovery from populating cache targets first; for example, Go can
+create `GOMODCACHE/golang.org` while resolving `GOTOOLCHAIN` if probed inside a
+module after `GOMODCACHE` already points at the archive restore path.
+
 ## Release Alignment
 
 CLI default bumps must keep these files together:
