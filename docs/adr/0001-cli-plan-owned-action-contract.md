@@ -30,16 +30,19 @@ It may:
 - accept explicit low-cardinality `metadata-hints` from workflow authors;
 - invoke the CLI dry-run plan;
 - start the CLI proxy with replayable metadata hints from that plan;
+- materialize CLI-planned adapter setup files, directories, and environment variables;
 - publish concise outputs for workflow steps.
 
 Shared proxy metadata defaults belong in `.boringcache.toml` and should arrive
 through the CLI dry-run plan. Action-level `metadata-hints` are the workflow
-override path when a job needs to add or replace labels.
+override path when a job needs to add or replace labels, but validation,
+normalization, ordering, and capping belong to the CLI plan.
 
 It must not:
 
 - reimplement `.boringcache.toml` semantics;
 - derive Docker immutable run refs independently from the CLI;
+- recreate adapter setup templates or default path rules for Bazel, Gradle, or Maven;
 - guess Rails publish, restore, or stale-promotion policy;
 - create a second Docker adoption path apart from the CLI plan;
 - revive `@boringcache/action-core` as a maintained dependency.
@@ -79,7 +82,7 @@ For Docker alias promotion, GitHub Actions run-start time is a contract field fo
 - Cache a parsed plan inside the step rather than re-running the CLI for restore and save halves when the plan is unchanged.
 - Keep generated `dist` bundles in sync with source changes before release.
 - Keep metadata hints capped and replayable; do not stuff unbounded CI context into proxy arguments.
-- When the action accepts explicit `metadata-hints`, prioritize user-facing grouping labels such as `project`, `benchmark`, `phase`, and `tool` ahead of per-run diagnostic labels when the replayable proxy hint cap is tight.
+- When the action accepts explicit `metadata-hints`, pass them into the CLI dry-run plan so the CLI can prioritize user-facing grouping labels such as `project`, `benchmark`, `phase`, and `tool` ahead of per-run diagnostic labels when the replayable proxy hint cap is tight.
 
 ## Legacy Surfaces
 

@@ -43439,111 +43439,15 @@ const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
-const MAX_PROXY_METADATA_HINTS = 8;
-const MAX_PROXY_METADATA_HINT_KEY_BYTES = 32;
-const MAX_PROXY_METADATA_HINT_VALUE_BYTES = 64;
-const PROXY_METADATA_HINT_PRIORITY = [
-    'project',
-    'benchmark',
-    'phase',
-    'tool',
-    'scenario',
-    'docker_immutable_run_ref',
-    'docker_alias_promotion_refs',
-    'ci_provider',
-    'ci_run_uid',
-    'ci_run_started_at',
-    'ci_ref_type',
-    'ci_pr_number',
-    'docker_cache_ref_tag',
-    'ci_run_attempt',
-    'ci_ref_name',
-    'ci_commit_sha',
-];
-function actionProxyOptions(options, proxyPlan, metadataHintsInput = '') {
-    const explicitMetadataHints = parseMetadataHintsInput(metadataHintsInput);
+function actionProxyOptions(options, proxyPlan) {
     return {
         ...options,
         onDemand: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.startup_mode) === 'on-demand',
         ociPrefetchRefs: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_prefetch_refs) || [],
         ociRequiredReadableRefs: options.ociRequiredReadableRefs || [],
         ociHydration: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.oci_hydration) || options.ociHydration || utils_1.DEFAULT_OCI_HYDRATION_POLICY,
-        metadataHints: commandLineSafeMetadataHints({
-            ...((proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || {}),
-            ...explicitMetadataHints,
-        }),
+        metadataHints: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || options.metadataHints || {},
     };
-}
-function parseMetadataHintsInput(input) {
-    const hints = {};
-    for (const rawPart of parseList(input)) {
-        const [rawKey, ...rawValueParts] = rawPart.split('=');
-        const rawValue = rawValueParts.join('=');
-        if (!rawKey || rawValueParts.length === 0) {
-            throw new Error(`Invalid metadata-hints entry "${rawPart}". Use short KEY=VALUE labels such as phase=seed or benchmark=grpc-bazel.`);
-        }
-        const key = normalizeMetadataHintKey(rawKey);
-        if (!key) {
-            throw new Error(`Invalid metadata-hints key "${rawKey}". Use lowercase letters, digits, underscores, or hyphens.`);
-        }
-        const value = normalizeMetadataHintValue(key, rawValue);
-        if (!value) {
-            throw new Error(`Invalid metadata-hints value "${rawValue}". Use short ASCII labels such as seed, warm, grpc-bazel, or ci.`);
-        }
-        hints[key] = value;
-    }
-    return hints;
-}
-function commandLineSafeMetadataHints(rawHints) {
-    const orderedKeys = Object.keys(rawHints).sort((left, right) => {
-        const leftPriority = PROXY_METADATA_HINT_PRIORITY.indexOf(normalizeMetadataHintKey(left) || left);
-        const rightPriority = PROXY_METADATA_HINT_PRIORITY.indexOf(normalizeMetadataHintKey(right) || right);
-        const normalizedLeft = leftPriority === -1 ? Number.MAX_SAFE_INTEGER : leftPriority;
-        const normalizedRight = rightPriority === -1 ? Number.MAX_SAFE_INTEGER : rightPriority;
-        if (normalizedLeft !== normalizedRight) {
-            return normalizedLeft - normalizedRight;
-        }
-        return left.localeCompare(right);
-    });
-    const hints = {};
-    for (const rawKey of orderedKeys) {
-        const key = normalizeMetadataHintKey(rawKey);
-        if (!key || Object.prototype.hasOwnProperty.call(hints, key)) {
-            continue;
-        }
-        const value = normalizeMetadataHintValue(key, rawHints[rawKey]);
-        if (!value) {
-            core.debug(`Skipping proxy metadata hint ${rawKey}: value is not command-line safe`);
-            continue;
-        }
-        hints[key] = value;
-        if (Object.keys(hints).length >= MAX_PROXY_METADATA_HINTS) {
-            break;
-        }
-    }
-    return hints;
-}
-function normalizeMetadataHintKey(rawKey) {
-    const normalized = rawKey.trim().toLowerCase().replace(/-/g, '_');
-    if (!normalized || Buffer.byteLength(normalized, 'utf8') > MAX_PROXY_METADATA_HINT_KEY_BYTES) {
-        return null;
-    }
-    return /^[a-z0-9_]+$/.test(normalized) ? normalized : null;
-}
-function normalizeMetadataHintValue(key, rawValue) {
-    let value = String(rawValue || '');
-    if (key === 'docker_alias_promotion_refs') {
-        value = value
-            .split(',')
-            .map((part) => part.trim())
-            .filter(Boolean)
-            .join('/');
-    }
-    const normalized = value.trim().toLowerCase().replace(/\s+/g, '-');
-    if (!normalized || Buffer.byteLength(normalized, 'utf8') > MAX_PROXY_METADATA_HINT_VALUE_BYTES) {
-        return null;
-    }
-    return /^[a-z0-9_.:/-]+$/.test(normalized) ? normalized : null;
 }
 let rustLastOutput = '';
 function currentHomeDir() {
@@ -43610,6 +43514,11 @@ function parseList(input, separator = /[\n,]/) {
         .map((item) => item.trim())
         .filter(Boolean);
 }
+function appendMetadataHintArgs(args, metadataHintsInput) {
+    for (const hint of parseList(metadataHintsInput)) {
+        args.push('--metadata-hint', hint);
+    }
+}
 function parseMultiline(input) {
     return input
         .split('\n')
@@ -43627,6 +43536,57 @@ function sanitizeBuilderToken(value) {
 }
 function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
+}
+function proxyPlanningReadOnly(requestedReadOnly) {
+    return requestedReadOnly || (!(0, core_1.hasSaveToken)() && (0, core_1.hasRestoreToken)());
+}
+function requireAdapterSetupPlan(adapter, setup) {
+    if (!setup || (!Object.keys(setup.env_vars || {}).length && !(setup.files || []).length && !(setup.directories || []).length)) {
+        throw new Error(`boringcache ${adapter} dry-run JSON did not include adapter setup planning data`);
+    }
+    return setup;
+}
+function applyAdapterSetupPlan(setup) {
+    for (const [key, value] of Object.entries(setup.env_vars || {})) {
+        process.env[key] = value;
+        core.exportVariable(key, value);
+    }
+    for (const directory of setup.directories || []) {
+        ensureDir(directory);
+    }
+    for (const file of setup.files || []) {
+        ensureDir(path.dirname(file.path));
+        if (file.mode === 'append') {
+            fs.appendFileSync(file.path, file.content);
+        }
+        else if (file.mode === 'write') {
+            fs.writeFileSync(file.path, file.content);
+        }
+        else {
+            throw new Error(`Unsupported adapter setup file mode for ${file.path}`);
+        }
+    }
+}
+function setupFilePath(setup, suffix) {
+    var _a;
+    return ((_a = (setup.files || []).find((file) => file.path.endsWith(suffix))) === null || _a === void 0 ? void 0 : _a.path) || '';
+}
+function setupDirectory(setup) {
+    return (setup.directories || [])[0] || '';
+}
+function requireSetupFilePath(setup, suffix, label) {
+    const filePath = setupFilePath(setup, suffix);
+    if (!filePath) {
+        throw new Error(`boringcache adapter setup plan did not include ${label}`);
+    }
+    return filePath;
+}
+function requireSetupDirectory(setup, label) {
+    const directory = setupDirectory(setup);
+    if (!directory) {
+        throw new Error(`boringcache adapter setup plan did not include ${label}`);
+    }
+    return directory;
 }
 function modeStateKey(key) {
     return `mode-${key}`;
@@ -43689,7 +43649,8 @@ function emitCliPlannerWarnings(stderr) {
         }
     }
 }
-async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, noPlatform, noGit, readOnly) {
+async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, noPlatform, noGit, readOnly, options = {}) {
+    var _a, _b, _c, _d, _e, _f;
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
@@ -43706,6 +43667,31 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     }
     if (readOnly) {
         args.push('--read-only');
+    }
+    appendMetadataHintArgs(args, options.metadataHintsInput || '');
+    for (const line of parseMultiline(options.bazelrcLines || '')) {
+        args.push('--bazelrc-line', line);
+    }
+    if ((_a = options.gradleHome) === null || _a === void 0 ? void 0 : _a.trim()) {
+        args.push('--gradle-home', options.gradleHome.trim());
+    }
+    if (options.enableGradleBuildCache === false) {
+        args.push('--no-gradle-build-cache-property');
+    }
+    if ((_b = options.mavenLocalRepo) === null || _b === void 0 ? void 0 : _b.trim()) {
+        args.push('--maven-local-repo', options.mavenLocalRepo.trim());
+    }
+    if ((_c = options.mavenExtensionsPath) === null || _c === void 0 ? void 0 : _c.trim()) {
+        args.push('--maven-extensions-path', options.mavenExtensionsPath.trim());
+    }
+    if ((_d = options.mavenBuildCacheConfigPath) === null || _d === void 0 ? void 0 : _d.trim()) {
+        args.push('--maven-build-cache-config-path', options.mavenBuildCacheConfigPath.trim());
+    }
+    if ((_e = options.mavenBuildCacheExtensionVersion) === null || _e === void 0 ? void 0 : _e.trim()) {
+        args.push('--maven-build-cache-extension-version', options.mavenBuildCacheExtensionVersion.trim());
+    }
+    if ((_f = options.mavenBuildCacheId) === null || _f === void 0 ? void 0 : _f.trim()) {
+        args.push('--maven-build-cache-id', options.mavenBuildCacheId.trim());
     }
     args.push('--dry-run', '--json');
     let stdout = '';
@@ -43734,7 +43720,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration) {
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '') {
     var _a;
     const args = ['docker', '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
@@ -43770,6 +43756,7 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     if (trimmedOciHydration) {
         args.push('--oci-hydration', trimmedOciHydration);
     }
+    appendMetadataHintArgs(args, metadataHintsInput);
     args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
     let stdout = '';
     let stderr = '';
@@ -44266,112 +44253,6 @@ function readBuildkitDigest(metadataFile) {
         return '';
     }
 }
-function writeBazelrc(port, readOnly, extraLines = '') {
-    const bazelrcPath = path.join(currentHomeDir(), '.bazelrc');
-    const remoteMaxConnections = parseInt(process.env.BORINGCACHE_BAZEL_REMOTE_MAX_CONNECTIONS || '', 10);
-    const maxConnections = Number.isFinite(remoteMaxConnections) && remoteMaxConnections > 0
-        ? remoteMaxConnections
-        : 64;
-    const normalizedExtraLines = extraLines
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-    const configLines = [
-        '',
-        '# BoringCache remote cache',
-        `build --remote_cache=http://127.0.0.1:${port}`,
-        `build --remote_upload_local_results=${!readOnly}`,
-        // Keep remote cache writes synchronous by default so seed/warm handoff
-        // remains deterministic across isolated CI runners.
-        'build --remote_cache_async=false',
-        'build --remote_download_minimal',
-        `build --remote_max_connections=${maxConnections}`,
-    ];
-    if (normalizedExtraLines.length > 0) {
-        configLines.push(...normalizedExtraLines);
-    }
-    configLines.push('');
-    const config = configLines.join('\n');
-    fs.appendFileSync(bazelrcPath, config);
-}
-function resolveGradleHome(input) {
-    const gradleHome = input || '~/.gradle';
-    if (gradleHome.startsWith('~')) {
-        return path.join(currentHomeDir(), gradleHome.slice(1));
-    }
-    return path.resolve(gradleHome);
-}
-function resolveUserPath(input, workingDirectory) {
-    if (input.startsWith('~')) {
-        return path.join(currentHomeDir(), input.slice(1));
-    }
-    if (path.isAbsolute(input)) {
-        return input;
-    }
-    return path.resolve(workingDirectory, input);
-}
-function writeGradleInitScript(gradleHome, port, readOnly) {
-    const initDir = path.join(gradleHome, 'init.d');
-    fs.mkdirSync(initDir, { recursive: true });
-    const initScript = `gradle.settingsEvaluated { settings ->
-    settings.buildCache {
-        remote(HttpBuildCache) {
-            url = "http://127.0.0.1:${port}/cache/"
-            push = ${!readOnly}
-            allowInsecureProtocol = true
-        }
-    }
-}
-`;
-    fs.writeFileSync(path.join(initDir, 'boringcache-cache.gradle'), initScript);
-}
-function enableGradleBuildCache(gradleHome) {
-    fs.mkdirSync(gradleHome, { recursive: true });
-    fs.appendFileSync(path.join(gradleHome, 'gradle.properties'), '\norg.gradle.caching=true\n');
-}
-function ensureMavenBuildCacheExtension(extensionsPath, version) {
-    const extensionBlock = [
-        '  <extension>',
-        '    <groupId>org.apache.maven.extensions</groupId>',
-        '    <artifactId>maven-build-cache-extension</artifactId>',
-        `    <version>${version}</version>`,
-        '  </extension>',
-    ].join('\n');
-    fs.mkdirSync(path.dirname(extensionsPath), { recursive: true });
-    if (fs.existsSync(extensionsPath)) {
-        const existing = fs.readFileSync(extensionsPath, 'utf8');
-        if (existing.includes('<artifactId>maven-build-cache-extension</artifactId>')) {
-            return;
-        }
-        if (existing.includes('</extensions>')) {
-            fs.writeFileSync(extensionsPath, existing.replace('</extensions>', `${extensionBlock}\n</extensions>`));
-            return;
-        }
-    }
-    const content = `<?xml version="1.0" encoding="UTF-8"?>
-<extensions xmlns="http://maven.apache.org/EXTENSIONS/1.0.0"
-            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-            xsi:schemaLocation="http://maven.apache.org/EXTENSIONS/1.0.0 https://maven.apache.org/xsd/core-extensions-1.0.0.xsd">
-${extensionBlock}
-</extensions>
-`;
-    fs.writeFileSync(extensionsPath, content);
-}
-function writeMavenBuildCacheConfig(configPath, port, readOnly, cacheId) {
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    const content = `<?xml version="1.0" encoding="UTF-8"?>
-<cache xmlns="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0"
-       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-       xsi:schemaLocation="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0 https://maven.apache.org/xsd/build-cache-config-1.2.0.xsd">
-  <configuration>
-    <remote enabled="true" saveToRemote="${!readOnly}" transport="resolver" id="${cacheId}">
-      <url>http://127.0.0.1:${port}</url>
-    </remote>
-  </configuration>
-</cache>
-`;
-    fs.writeFileSync(configPath, content);
-}
 async function execRustBoringCache(args) {
     rustLastOutput = '';
     let output = '';
@@ -44573,7 +44454,7 @@ async function stopSccacheServer() {
     }
     return summarizeSccacheStats(output);
 }
-async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan, metadataHintsInput = '') {
+async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
     const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -44583,7 +44464,7 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false, p
         noPlatform: true,
         noGit: true,
         readOnly,
-    }, proxyPlan, metadataHintsInput));
+    }, proxyPlan));
     return proxy;
 }
 function parseSccacheIntegerStat(output, label) {
@@ -44796,7 +44677,7 @@ async function runDockerRestore(plan, inputs) {
             }
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints);
         const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
@@ -44811,7 +44692,7 @@ async function runDockerRestore(plan, inputs) {
             readOnly: dockerPlan.proxy.read_only,
             ociRequiredReadableRefs: requestedImportRefTags,
             ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
-        }, dockerPlan.proxy, inputs.metadataHints));
+        }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('workspace', dockerPlan.workspace);
@@ -44992,7 +44873,7 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints);
         const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
@@ -45007,7 +44888,7 @@ async function runBuildkitRestore(plan, inputs) {
             readOnly: dockerPlan.proxy.read_only,
             ociRequiredReadableRefs: requestedImportRefTags,
             ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
-        }, dockerPlan.proxy, inputs.metadataHints));
+        }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('workspace', dockerPlan.workspace);
@@ -45121,13 +45002,16 @@ async function runBuildkitSave() {
     });
 }
 async function runBazelRestore(plan, inputs) {
-    var _a, _b;
+    var _a;
     const inputVersion = core.getInput('bazel-version') || '';
     const bazelrcLines = core.getInput('bazelrc-lines') || '';
     const runtimeVersion = ((_a = plan.runtimeTools.find((tool) => tool.name === 'bazel')) === null || _a === void 0 ? void 0 : _a.version) || '';
     const bazelVersion = inputVersion || runtimeVersion;
     const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
-    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
+    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+        bazelrcLines,
+    });
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     saveModeState('proxy-pid', '');
@@ -45144,10 +45028,10 @@ async function runBazelRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.metadataHints));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
-    writeBazelrc(proxy.port, (_b = proxy.readOnly) !== null && _b !== void 0 ? _b : proxyPlan.proxy.read_only, bazelrcLines);
+    applyAdapterSetupPlan(requireAdapterSetupPlan('bazel', proxyPlan.setup));
     core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
     core.setOutput('workspace', workspace);
@@ -45182,7 +45066,9 @@ function goCacheProgForProxy(proxyPlan, port) {
 }
 async function runGoRestore(plan, inputs) {
     const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
-    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
+    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+    });
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     saveModeState('proxy-pid', '');
@@ -45196,7 +45082,7 @@ async function runGoRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.metadataHints));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
@@ -45215,13 +45101,16 @@ async function runGoRestore(plan, inputs) {
     };
 }
 async function runGradleRestore(plan, inputs) {
-    var _a;
     const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
-    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
+    const gradleHome = core.getInput('gradle-home') || '';
+    const enableBuildCache = parseBoolean(core.getInput('enable-build-cache'), true);
+    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+        gradleHome,
+        enableGradleBuildCache: enableBuildCache,
+    });
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
-    const gradleHome = resolveGradleHome(core.getInput('gradle-home') || '');
-    const enableBuildCache = parseBoolean(core.getInput('enable-build-cache'), true);
     const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -45232,13 +45121,10 @@ async function runGradleRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.metadataHints));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
-    writeGradleInitScript(gradleHome, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : proxyPlan.proxy.read_only);
-    if (enableBuildCache) {
-        enableGradleBuildCache(gradleHome);
-    }
+    applyAdapterSetupPlan(requireAdapterSetupPlan('gradle', proxyPlan.setup));
     core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
     core.setOutput('workspace', workspace);
@@ -45254,17 +45140,22 @@ async function runGradleRestore(plan, inputs) {
     };
 }
 async function runMavenRestore(plan, inputs) {
-    var _a;
     const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
-    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, inputs.readOnly);
+    const mavenExtensionsPath = core.getInput('maven-extensions-path') || '';
+    const mavenBuildCacheConfigPath = core.getInput('maven-build-cache-config-path') || '';
+    const mavenLocalRepo = core.getInput('maven-local-repo') || '';
+    const mavenBuildCacheExtensionVersion = core.getInput('maven-build-cache-extension-version') || '';
+    const mavenBuildCacheId = core.getInput('maven-build-cache-id') || '';
+    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+        mavenExtensionsPath,
+        mavenBuildCacheConfigPath,
+        mavenLocalRepo,
+        mavenBuildCacheExtensionVersion,
+        mavenBuildCacheId,
+    });
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
-    const workingDirectory = plan.workingDirectory;
-    const extensionsPath = resolveUserPath(core.getInput('maven-extensions-path') || '.mvn/extensions.xml', workingDirectory);
-    const buildCacheConfigPath = resolveUserPath(core.getInput('maven-build-cache-config-path') || '.mvn/maven-build-cache-config.xml', workingDirectory);
-    const localRepo = resolveUserPath(core.getInput('maven-local-repo') || '~/.m2/repository', workingDirectory);
-    const extensionVersion = core.getInput('maven-build-cache-extension-version') || '1.2.2';
-    const cacheId = core.getInput('maven-build-cache-id') || 'boringcache';
     const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -45275,12 +45166,14 @@ async function runMavenRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.metadataHints));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
-    ensureMavenBuildCacheExtension(extensionsPath, extensionVersion);
-    writeMavenBuildCacheConfig(buildCacheConfigPath, proxy.port, (_a = proxy.readOnly) !== null && _a !== void 0 ? _a : proxyPlan.proxy.read_only, cacheId);
-    ensureDir(localRepo);
+    const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
+    applyAdapterSetupPlan(setup);
+    const extensionsPath = requireSetupFilePath(setup, 'extensions.xml', 'maven extensions.xml');
+    const buildCacheConfigPath = requireSetupFilePath(setup, 'maven-build-cache-config.xml', 'maven build-cache config');
+    const localRepo = requireSetupDirectory(setup, 'maven local repository directory');
     core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
     core.setOutput('maven-extensions-path', extensionsPath);
@@ -45303,7 +45196,9 @@ async function runTurboProxyRestore(plan, inputs) {
     const turboToken = core.getInput('turbo-token') || 'boringcache';
     const turboTeam = core.getInput('turbo-team') || '';
     const preferredPort = parseInt(core.getInput('turbo-port') || inputs.proxyPort || '4227', 10);
-    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, false, false, inputs.readOnly);
+    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, false, false, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+    });
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
     const packageManager = await (0, utils_1.detectNodePackageManager)(plan.workingDirectory);
@@ -45321,10 +45216,10 @@ async function runTurboProxyRestore(plan, inputs) {
     }
     let proxy;
     try {
-        proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy, inputs.metadataHints);
+        proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     catch {
-        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy, inputs.metadataHints);
+        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -45460,7 +45355,9 @@ async function runRustRestore(plan, inputs) {
         await installSccache(sccacheVersion);
         if (sccacheMode === 'proxy') {
             const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
-            const proxyPlan = await resolveAdapterCliPlan('sccache', workspace, workingDir, sccacheEntry.tag, requestedPort, true, true, inputs.readOnly);
+            const proxyPlan = await resolveAdapterCliPlan('sccache', workspace, workingDir, sccacheEntry.tag, requestedPort, true, true, proxyPlanningReadOnly(inputs.readOnly), {
+                metadataHintsInput: inputs.metadataHints,
+            });
             sccacheRestored = await checkRustTagHit(proxyPlan.workspace, proxyPlan.tag, {
                 noPlatform: proxyPlan.proxy.no_platform,
                 noGit: proxyPlan.proxy.no_git,
@@ -45475,7 +45372,7 @@ async function runRustRestore(plan, inputs) {
                 noPlatform: proxyPlan.proxy.no_platform,
                 verbose: inputs.verbose,
                 readOnly: proxyPlan.proxy.read_only,
-            }, proxyPlan.proxy, inputs.metadataHints));
+            }, proxyPlan.proxy));
             configureSccacheProxyEnv(proxy.port);
             await startSccacheServer();
             saveModeState('proxy-pid', String(proxy.pid));

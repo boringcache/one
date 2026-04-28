@@ -183,15 +183,12 @@ describe('product modes', () => {
               metadata_hints: {
                 docker_cache_ref_tag: 'run-example-42-attempt-1',
                 docker_immutable_run_ref: 'run-example-42-attempt-1',
-                docker_cache_from_refs: 'type=registry,ref=172.17.0.1:5000/cache:branch-main,type=registry,ref=172.17.0.1:5000/cache:default',
-                docker_alias_promotion_refs: 'branch-main,default',
+                docker_alias_promotion_refs: 'branch-main/default',
                 ci_provider: 'example-ci',
                 ci_run_uid: '42',
                 ci_run_attempt: '1',
                 ci_ref_type: 'branch',
-                ci_ref_name: 'main',
-                ci_commit_sha: 'abcdef1234567890',
-                ci_run_started_at: '2026-04-21T10:00:00Z',
+                ci_run_started_at: '2026-04-21t10:00:00z',
               },
             },
             oci_cache: {
@@ -439,7 +436,7 @@ describe('product modes', () => {
                 docker_alias_promotion_refs: 'branch-main',
                 ci_provider: 'github-actions',
                 ci_run_uid: '42',
-                ci_run_started_at: runStartedAt,
+                ci_run_started_at: runStartedAt.toLowerCase(),
               },
             },
             oci_cache: {
@@ -477,7 +474,7 @@ describe('product modes', () => {
     }
   });
 
-  it('merges explicit metadata-hints into proxy metadata hints', async () => {
+  it('passes explicit metadata-hints through the CLI proxy planner', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 
     try {
@@ -528,6 +525,9 @@ describe('product modes', () => {
               oci_hydration: 'metadata-only',
               metadata_hints: {
                 project: 'demo',
+                benchmark: 'grpc-bazel',
+                phase: 'seed',
+                tool: 'bazel',
                 ci_provider: 'github-actions',
                 ci_run_uid: '42',
               },
@@ -547,6 +547,18 @@ describe('product modes', () => {
 
       await restoreRun();
 
+      expect(exec.exec).toHaveBeenCalledWith(
+        'boringcache',
+        expect.arrayContaining([
+          '--metadata-hint',
+          'benchmark=grpc-bazel',
+          '--metadata-hint',
+          'phase=seed',
+          '--metadata-hint',
+          'tool=bazel',
+        ]),
+        expect.any(Object),
+      );
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         metadataHints: expect.objectContaining({
           benchmark: 'grpc-bazel',

@@ -10,13 +10,15 @@
 
 The CLI owns cache protocol behavior, registry proxy semantics, local adapters, CI run-context detection for proxy save requests, and release binaries. The action may derive GitHub provider metadata, seed `BORINGCACHE_CI_*` environment values, and invoke the CLI, but it should not reimplement Rails API policy, Docker ref planning, or proxy protocol rules.
 
-The action owns the user-facing `metadata-hints` input. It may accept low-cardinality grouping labels from workflow authors and merge them into replayable proxy arguments, but it should still leave cache protocol rules, tag scoping, and provider-neutral save metadata to the CLI. Repo-configured proxy metadata from `.boringcache.toml` should flow through the CLI dry-run plan by default; action inputs are the override path, not a replacement config system.
+The action owns the user-facing `metadata-hints` input, but the CLI owns hint validation, prioritization, normalization, and replayable proxy argument shape. The action should pass low-cardinality workflow labels into the CLI dry-run request and then forward the returned `proxy.metadata_hints`; it should not keep a second sanitizer or merge path. Repo-configured proxy metadata from `.boringcache.toml` should flow through the same CLI dry-run plan by default; action inputs are the override path, not a replacement config system.
 
 Rails owns workspace, token, storage, publish, restore, session, billing, and API truth. Action changes that need a new API contract should update the web ADR/comprehension path and the CLI request path in the same rollout.
 
 The retired `@boringcache/action-core` package is not part of the maintained action path. Do not add it as a dependency or route new behavior through a separate npm release. New product behavior should land here, in CLI, or in Rails.
 
 ADR note: [docs/adr/0001-cli-plan-owned-action-contract.md](../adr/0001-cli-plan-owned-action-contract.md) is the current launch-readiness boundary. It keeps `.boringcache.toml`, Docker ref derivation, and adapter planning owned by the CLI, with the action acting as GitHub Actions orchestration around CLI dry-run JSON.
+
+Bazel, Gradle, and Maven on-disk tool setup is also CLI-planned. The action may materialize files, directories, and environment variables from `adapter.setup`, but `.bazelrc`, Gradle init/properties, Maven extensions/build-cache XML content, and default path resolution should stay in the CLI plan instead of being recreated in TypeScript.
 
 Docker and BuildKit registry modes must consume the complete CLI-planned OCI import list. If the CLI dry-run returns multiple `oci_cache.cache_from_refs` such as PR, branch, default, and stable fallback refs, the action should pass each one as its own `--cache-from` or `--import-cache` flag instead of rebuilding or narrowing that list.
 

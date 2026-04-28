@@ -119,6 +119,15 @@ interface CliAdapterDryRunPlan {
   command: string[];
   archive_entries: CliDryRunArchiveEntry[];
   env_vars: Record<string, string>;
+  setup?: {
+    env_vars?: Record<string, string>;
+    files?: Array<{
+      path: string;
+      mode: 'write' | 'append';
+      content: string;
+    }>;
+    directories?: string[];
+  };
   proxy: {
     host: string;
     endpoint_host: string;
@@ -747,6 +756,69 @@ function resolveMockDockerTarget(rawTag: string, explicitCacheRefTag: string): {
   };
 }
 
+function normalizeMockMetadataHintKey(rawKey: string): string {
+  return rawKey.trim().toLowerCase().replace(/-/g, '_');
+}
+
+function normalizeMockMetadataHintValue(rawValue: string): string {
+  return rawValue.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function addMockMetadataHint(hints: Record<string, string>, input: string): void {
+  const [rawKey, ...rawValueParts] = input.split('=');
+  if (!rawKey || rawValueParts.length === 0) {
+    return;
+  }
+  hints[normalizeMockMetadataHintKey(rawKey)] = normalizeMockMetadataHintValue(rawValueParts.join('='));
+}
+
+function mockGradleInitScript(): string {
+  return `import org.gradle.caching.http.HttpBuildCache
+
+gradle.settingsEvaluated { settings ->
+    def cacheUrl = System.getenv("BORINGCACHE_GRADLE_CACHE_URL")
+    if (cacheUrl) {
+        settings.buildCache {
+            remote(HttpBuildCache) {
+                enabled = true
+                url = uri(cacheUrl)
+                push = System.getenv("BORINGCACHE_GRADLE_CACHE_PUSH") == "true"
+                allowInsecureProtocol = true
+            }
+        }
+    }
+}
+`;
+}
+
+function mockMavenExtensionsContent(version: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<extensions xmlns="http://maven.apache.org/EXTENSIONS/1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://maven.apache.org/EXTENSIONS/1.0.0 https://maven.apache.org/xsd/core-extensions-1.0.0.xsd">
+  <extension>
+    <groupId>org.apache.maven.extensions</groupId>
+    <artifactId>maven-build-cache-extension</artifactId>
+    <version>${version}</version>
+  </extension>
+</extensions>
+`;
+}
+
+function mockMavenBuildCacheConfig(endpoint: string, readOnly: boolean, cacheId: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<cache xmlns="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://maven.apache.org/BUILD-CACHE-CONFIG/1.2.0 https://maven.apache.org/xsd/build-cache-config-1.2.0.xsd">
+  <configuration>
+    <remote enabled="true" saveToRemote="${!readOnly}" transport="resolver" id="${cacheId}">
+      <url>${endpoint}</url>
+    </remote>
+  </configuration>
+</cache>
+`;
+}
+
 function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirectory: string): CliAdapterDryRunPlan {
   let workspace = '';
   let workspaceSource: CliAdapterDryRunPlan['workspace_source'] = 'configured-default';
@@ -760,11 +832,23 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   let cacheMode = '';
   let cacheRefTag = '';
   let ociHydration = 'metadata-only';
+  const metadataHints: Record<string, string> = {};
+  const bazelrcLines: string[] = [];
+  let gradleHome = '';
+  let gradleBuildCacheProperty = true;
+  let mavenLocalRepo = '';
+  let mavenExtensionsPath = '';
+  let mavenBuildCacheConfigPath = '';
+  let mavenBuildCacheExtensionVersion = '';
+  let mavenBuildCacheId = '';
   const { workspace: repoWorkspace, repoConfigPath } = readRepoConfigWorkspace(workingDirectory);
   const repoSettings = readRepoAdapterSettings(workingDirectory, adapterName);
 
   for (let index = 1; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === '--') {
+      break;
+    }
     if (arg === '--workspace') {
       workspace = args[index + 1] || '';
       workspaceSource = 'explicit';
@@ -809,6 +893,52 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       index += 1;
       continue;
     }
+    if (arg === '--metadata-hint') {
+      addMockMetadataHint(metadataHints, args[index + 1] || '');
+      index += 1;
+      continue;
+    }
+    if (arg === '--bazelrc-line') {
+      if (args[index + 1]) {
+        bazelrcLines.push(args[index + 1]);
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === '--gradle-home') {
+      gradleHome = args[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--no-gradle-build-cache-property') {
+      gradleBuildCacheProperty = false;
+      continue;
+    }
+    if (arg === '--maven-local-repo') {
+      mavenLocalRepo = args[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--maven-extensions-path') {
+      mavenExtensionsPath = args[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--maven-build-cache-config-path') {
+      mavenBuildCacheConfigPath = args[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--maven-build-cache-extension-version') {
+      mavenBuildCacheExtensionVersion = args[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--maven-build-cache-id') {
+      mavenBuildCacheId = args[index + 1] || '';
+      index += 1;
+      continue;
+    }
     if (arg === '--no-platform') {
       noPlatform = true;
       continue;
@@ -840,6 +970,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   let ociCache: CliAdapterDryRunPlan['oci_cache'];
   let ociPrefetchRefs: string[] = [];
   let envVars: Record<string, string> = {};
+  let setup: CliAdapterDryRunPlan['setup'];
 
   if (adapterName === 'turbo') {
     envVars = {
@@ -883,6 +1014,78 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     };
   }
 
+  const endpoint = `http://${resolvedEndpointHost}:${resolvedPort}`;
+  const cacheRef = adapterName === 'docker'
+    ? ociCache?.registry_ref || `${resolvedEndpointHost}:${resolvedPort}/cache:${resolvedCacheRefTag}`
+    : `${resolvedEndpointHost}:${resolvedPort}/cache:${finalTag}`;
+  if (adapterName === 'bazel') {
+    const remoteMaxConnections = Number.parseInt(process.env.BORINGCACHE_BAZEL_REMOTE_MAX_CONNECTIONS || '', 10);
+    const maxConnections = Number.isFinite(remoteMaxConnections) && remoteMaxConnections > 0
+      ? remoteMaxConnections
+      : 64;
+    setup = {
+      files: [{
+        path: path.join(process.env.HOME || '/home/test', '.bazelrc'),
+        mode: 'append',
+        content: [
+          '',
+          '# BoringCache remote cache',
+          `build --remote_cache=${endpoint}`,
+          `build --remote_upload_local_results=${!resolvedReadOnly}`,
+          'build --remote_cache_async=false',
+          'build --remote_download_minimal',
+          `build --remote_max_connections=${maxConnections}`,
+          ...bazelrcLines.map((line) => line.trim()).filter(Boolean),
+          '',
+        ].join('\n'),
+      }],
+    };
+  } else if (adapterName === 'gradle') {
+    const resolvedGradleHome = resolveMockArchivePath(gradleHome || '~/.gradle', workingDirectory);
+    setup = {
+      env_vars: {
+        BORINGCACHE_PROXY_PORT: String(resolvedPort),
+        BORINGCACHE_CACHE_REF: cacheRef,
+        BORINGCACHE_GRADLE_CACHE_URL: `${endpoint}/cache/`,
+        BORINGCACHE_GRADLE_CACHE_PUSH: String(!resolvedReadOnly),
+      },
+      files: [{
+        path: path.join(resolvedGradleHome, 'init.d', 'boringcache-gradle-build-cache.init.gradle'),
+        mode: 'write',
+        content: mockGradleInitScript(),
+      }],
+    };
+    if (gradleBuildCacheProperty) {
+      setup.files!.push({
+        path: path.join(resolvedGradleHome, 'gradle.properties'),
+        mode: 'append',
+        content: '\norg.gradle.caching=true\n',
+      });
+    }
+  } else if (adapterName === 'maven') {
+    const resolvedExtensionsPath = resolveMockArchivePath(mavenExtensionsPath || '.mvn/extensions.xml', workingDirectory);
+    const resolvedBuildCacheConfigPath = resolveMockArchivePath(
+      mavenBuildCacheConfigPath || '.mvn/maven-build-cache-config.xml',
+      workingDirectory,
+    );
+    const resolvedLocalRepo = resolveMockArchivePath(mavenLocalRepo || '~/.m2/repository', workingDirectory);
+    setup = {
+      files: [
+        {
+          path: resolvedExtensionsPath,
+          mode: 'write',
+          content: mockMavenExtensionsContent(mavenBuildCacheExtensionVersion || '1.2.2'),
+        },
+        {
+          path: resolvedBuildCacheConfigPath,
+          mode: 'write',
+          content: mockMavenBuildCacheConfig(endpoint, resolvedReadOnly, mavenBuildCacheId || 'boringcache'),
+        },
+      ],
+      directories: [resolvedLocalRepo],
+    };
+  }
+
   return {
     adapter: adapterName,
     workspace: workspace || process.env.BORINGCACHE_DEFAULT_WORKSPACE || 'default/default',
@@ -892,6 +1095,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     command: [],
     archive_entries: [],
     env_vars: envVars,
+    setup,
     proxy: {
       host: resolvedHost,
       endpoint_host: resolvedEndpointHost,
@@ -902,7 +1106,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       startup_mode: 'warm',
       oci_prefetch_refs: ociPrefetchRefs,
       oci_hydration: ociHydration,
-      metadata_hints: {},
+      metadata_hints: metadataHints,
     },
     oci_cache: ociCache,
   };
@@ -952,7 +1156,7 @@ beforeEach(() => {
   mockReadToolVersionsValue.mockResolvedValue(null);
   mockStartRegistryProxy.mockResolvedValue({ pid: 4321, port: 5000, readOnly: false });
   mockStopRegistryProxy.mockResolvedValue(undefined);
-  mockFindAvailablePort.mockResolvedValue(5001);
+  mockFindAvailablePort.mockResolvedValue(5000);
 
   (exec.exec as jest.Mock).mockImplementation(async (
     command: string,
