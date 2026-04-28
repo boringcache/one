@@ -58,6 +58,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     verify: 'none',
     verifyTimeoutSeconds: 60,
     verifyRequireServerSignature: false,
+    trustedWorkspaceSigningKeyFingerprint: '',
     diagnostics: 'auto',
     diagnosticsLogLines: 40,
     metadataHints: '',

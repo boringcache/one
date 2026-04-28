@@ -75,6 +75,15 @@ function parseSavedVerificationSpecs(raw) {
 function filterVerifiableSpecs(specs) {
     return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
 }
+function buildCliSetupOptions(inputs, cliVersion, cliPlatform) {
+    return {
+        version: cliVersion,
+        platform: cliPlatform,
+        ...(inputs.trustedWorkspaceSigningKeyFingerprint
+            ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
+            : {}),
+    };
+}
 function parseSavedTagList(raw) {
     return new Set(raw
         .split(',')
@@ -164,7 +173,7 @@ async function run() {
             .filter(Boolean);
         let verifySaveSpecs = parseSavedVerificationSpecs(core.getState('verify-save-specs'));
         if (cliVersion.toLowerCase() !== 'skip') {
-            await (0, utils_1.ensureBoringCache)({ version: cliVersion, platform: cliPlatform });
+            await (0, utils_1.ensureBoringCache)(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
         }
         if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
             const plan = await (0, utils_1.buildPlan)(inputs);

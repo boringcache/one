@@ -93,6 +93,7 @@ export interface OneInputs {
   verify: VerifyMode;
   verifyTimeoutSeconds: number;
   verifyRequireServerSignature: boolean;
+  trustedWorkspaceSigningKeyFingerprint: string;
   diagnostics: DiagnosticsInputMode;
   diagnosticsLogLines: number;
   metadataHints: string;
@@ -200,6 +201,7 @@ export function getInputs(): OneInputs {
     verify: normalizeVerifyMode(core.getInput('verify')),
     verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
     verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
+    trustedWorkspaceSigningKeyFingerprint: core.getInput('trusted-workspace-signing-key-fingerprint'),
     diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
     diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
     metadataHints: core.getInput('metadata-hints'),

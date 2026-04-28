@@ -43,6 +43,16 @@ function buildRuntimeRestoreFlagArgs(
   return flagArgs;
 }
 
+function buildCliSetupOptions(inputs: ReturnType<typeof getInputs>, cliPlatform: string | undefined) {
+  return {
+    version: inputs.cliVersion,
+    platform: cliPlatform,
+    ...(inputs.trustedWorkspaceSigningKeyFingerprint
+      ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
+      : {}),
+  };
+}
+
 async function emitRestoreDiagnostics(
   plan: Awaited<ReturnType<typeof buildPlan>>,
   inputs: ReturnType<typeof getInputs>,
@@ -144,7 +154,7 @@ export async function run(): Promise<void> {
     const cliPlatform = inputs.cliPlatform || undefined;
 
     if (inputs.cliVersion.toLowerCase() !== 'skip') {
-      await ensureBoringCache({ version: inputs.cliVersion, platform: cliPlatform });
+      await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
     }
 
     const plan = await buildPlan(inputs);

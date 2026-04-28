@@ -1439,8 +1439,57 @@ describe('product modes', () => {
         ]),
         expect.objectContaining({ cwd: project }),
       );
+      const sccacheCheckCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache' && Array.isArray(args) && args.includes('check'),
+      );
+      expect(sccacheCheckCall?.[1]).toEqual(expect.arrayContaining([
+        '--require-server-signature',
+        '--fail-on-miss',
+      ]));
       expect(core.setOutput).toHaveBeenCalledWith('sccache-hit', 'true');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'rust-sccache');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('treats a proxy sccache preflight miss as a miss', async () => {
+    const project = await makeTempProject({
+      'Cargo.lock': '',
+      'rust-toolchain.toml': '[toolchain]\nchannel = "1.89.0"\n',
+    });
+
+    try {
+      actionCoreMocks.hasToolVersionOnPath.mockImplementation(async (toolName: string) => toolName === 'sccache');
+      actionCoreMocks.execBoringCache.mockImplementation(async (
+        args: string[],
+        options?: Parameters<typeof exec.exec>[2],
+      ) => {
+        if (args.includes('check')) {
+          return 1;
+        }
+        return exec.exec('boringcache', args, options);
+      });
+
+      mockGetInput({
+        mode: 'rust-sccache',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+        sccache: 'true',
+        'sccache-mode': 'proxy',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      const sccacheCheckCall = actionCoreMocks.execBoringCache.mock.calls.find(
+        ([args]) => Array.isArray(args) && args.includes('check'),
+      );
+      expect(sccacheCheckCall?.[0]).toEqual(expect.arrayContaining([
+        '--require-server-signature',
+        '--fail-on-miss',
+      ]));
+      expect(core.setOutput).toHaveBeenCalledWith('sccache-hit', 'false');
     } finally {
       await removeTempProject(project);
     }

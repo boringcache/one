@@ -1540,7 +1540,7 @@ async function checkRustTagHit(
   tag: string,
   { noPlatform = false, noGit = false }: { noPlatform?: boolean; noGit?: boolean } = {},
 ): Promise<boolean> {
-  const args = ['check', workspace, tag];
+  const args = ['--require-server-signature', 'check', workspace, tag, '--fail-on-miss'];
   if (noPlatform) {
     args.push('--no-platform');
   }
@@ -2751,7 +2751,7 @@ async function runRustSave(): Promise<void> {
             );
           } else if (!postShutdownHit) {
             core.warning(
-              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was still missing after shutdown. Check BORINGCACHE_SAVE_TOKEN scope and proxy publish logs.`,
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not available as a signed cache entry after shutdown. Check server-side signing, BORINGCACHE_SAVE_TOKEN scope, and proxy publish logs.`,
             );
           } else {
             core.notice(

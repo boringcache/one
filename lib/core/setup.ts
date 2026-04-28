@@ -22,6 +22,8 @@ export interface SetupOptions {
   verify?: boolean;
   /** Export BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 unless already configured */
   requireServerSignature?: boolean;
+  /** Export BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT when configured */
+  trustedWorkspaceSigningKeyFingerprint?: string;
 }
 
 export interface ToolCacheInfo {
@@ -352,6 +354,12 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
   if (shouldRequireServerSignature && !process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE) {
     core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
     core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
+  }
+
+  const trustedFingerprint = options.trustedWorkspaceSigningKeyFingerprint?.trim();
+  if (trustedFingerprint) {
+    core.exportVariable('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT', trustedFingerprint);
+    core.info('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT configured');
   }
 
   if (options.version === 'skip') {

@@ -42470,6 +42470,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.normalizeProxyTags = normalizeProxyTags;
 exports.waitForOciImportReadiness = waitForOciImportReadiness;
+exports.logOciImportReadiness = logOciImportReadiness;
 exports.startRegistryProxy = startRegistryProxy;
 exports.stopRegistryProxy = stopRegistryProxy;
 exports.findAvailablePort = findAvailablePort;
@@ -42683,6 +42684,30 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
     };
 }
+function logOciImportReadiness(readiness) {
+    if (readiness.ready) {
+        core.info(`Registry proxy OCI import refs are readable: ${readiness.readableRefs.join(', ')}`);
+        return;
+    }
+    const statusSuffix = [
+        readiness.phase ? `phase=${readiness.phase}` : '',
+        readiness.publishState ? `publish=${readiness.publishState}` : '',
+        typeof readiness.publishSettled === 'boolean'
+            ? `publish_settled=${readiness.publishSettled}`
+            : '',
+        typeof readiness.tagsVisible === 'boolean'
+            ? `tags_visible=${readiness.tagsVisible}`
+            : '',
+    ]
+        .filter(Boolean)
+        .join(' ');
+    const message = `Registry proxy became ready before OCI import refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
+    if (readiness.readableRefs.length === 0) {
+        core.notice(`${message}. Continuing without registry imports; this is expected for cold seed jobs.`);
+        return;
+    }
+    core.warning(message);
+}
 /**
  * Start the cache-registry proxy.
  * Spawns a detached boringcache process, writes PID file, returns handle.
@@ -42801,24 +42826,7 @@ async function startRegistryProxy(options) {
         await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
         if ((_d = options.ociRequiredReadableRefs) === null || _d === void 0 ? void 0 : _d.length) {
             const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs);
-            if (!ociImportReadiness.ready) {
-                const statusSuffix = [
-                    ociImportReadiness.phase ? `phase=${ociImportReadiness.phase}` : '',
-                    ociImportReadiness.publishState ? `publish=${ociImportReadiness.publishState}` : '',
-                    typeof ociImportReadiness.publishSettled === 'boolean'
-                        ? `publish_settled=${ociImportReadiness.publishSettled}`
-                        : '',
-                    typeof ociImportReadiness.tagsVisible === 'boolean'
-                        ? `tags_visible=${ociImportReadiness.tagsVisible}`
-                        : '',
-                ]
-                    .filter(Boolean)
-                    .join(' ');
-                core.warning(`Registry proxy became ready before OCI import refs were fully readable. readable=[${ociImportReadiness.readableRefs.join(', ')}] unreadable=[${ociImportReadiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`);
-            }
-            else {
-                core.info(`Registry proxy OCI import refs are readable: ${ociImportReadiness.readableRefs.join(', ')}`);
-            }
+            logOciImportReadiness(ociImportReadiness);
             return {
                 ...handle,
                 ociImportReadiness,
@@ -43199,6 +43207,7 @@ async function isCliAvailable() {
     }
 }
 async function ensureBoringCache(options) {
+    var _a;
     (0, auth_1.warnIfUsingLegacyApiToken)();
     const secrets = new Set([
         options.token,
@@ -43213,6 +43222,11 @@ async function ensureBoringCache(options) {
     if (shouldRequireServerSignature && !process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE) {
         core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
         core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
+    }
+    const trustedFingerprint = (_a = options.trustedWorkspaceSigningKeyFingerprint) === null || _a === void 0 ? void 0 : _a.trim();
+    if (trustedFingerprint) {
+        core.exportVariable('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT', trustedFingerprint);
+        core.info('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT configured');
     }
     if (options.version === 'skip') {
         core.debug('CLI setup skipped (version: skip)');
@@ -44622,7 +44636,7 @@ function summarizeSccacheStats(output) {
     };
 }
 async function checkRustTagHit(workspace, tag, { noPlatform = false, noGit = false } = {}) {
-    const args = ['check', workspace, tag];
+    const args = ['--require-server-signature', 'check', workspace, tag, '--fail-on-miss'];
     if (noPlatform) {
         args.push('--no-platform');
     }
@@ -45625,7 +45639,7 @@ async function runRustSave() {
                         core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for existing tag '${sccacheTag}'. Check emitted tag semantics and BORINGCACHE_SAVE_TOKEN/BORINGCACHE_RESTORE_TOKEN alignment.`);
                     }
                     else if (!postShutdownHit) {
-                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was still missing after shutdown. Check BORINGCACHE_SAVE_TOKEN scope and proxy publish logs.`);
+                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not available as a signed cache entry after shutdown. Check server-side signing, BORINGCACHE_SAVE_TOKEN scope, and proxy publish logs.`);
                     }
                     else {
                         core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests, but '${sccacheTag}' published successfully. This looks like a cold fill.`);
@@ -45811,6 +45825,15 @@ function buildRuntimeRestoreFlagArgs(inputs) {
     }
     return flagArgs;
 }
+function buildCliSetupOptions(inputs, cliPlatform) {
+    return {
+        version: inputs.cliVersion,
+        platform: cliPlatform,
+        ...(inputs.trustedWorkspaceSigningKeyFingerprint
+            ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
+            : {}),
+    };
+}
 async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
     await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Diagnostics', async () => {
@@ -45882,7 +45905,7 @@ async function run() {
         const saveAllowed = saveEnabled ? (0, utils_1.applySaveTokenPolicy)(inputs) : false;
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
-            await (0, utils_1.ensureBoringCache)({ version: inputs.cliVersion, platform: cliPlatform });
+            await (0, utils_1.ensureBoringCache)(buildCliSetupOptions(inputs, cliPlatform));
         }
         const plan = await (0, utils_1.buildPlan)(inputs);
         process.chdir(plan.workingDirectory);
@@ -46120,6 +46143,7 @@ function getInputs() {
         verify: normalizeVerifyMode(core.getInput('verify')),
         verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
         verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
+        trustedWorkspaceSigningKeyFingerprint: core.getInput('trusted-workspace-signing-key-fingerprint'),
         diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
         diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
         metadataHints: core.getInput('metadata-hints'),

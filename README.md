@@ -88,6 +88,10 @@ If some planned refs are unreadable, the action keeps the build path fail-safe:
 - `docker-cache-unreadable-from-refs` reports the refs that were planned but not readable through the started proxy.
 - `docker-cache-import-ready` is `true` only when every planned import ref was readable.
 
+If none of the planned refs are readable, the action treats that as a cold seed
+and continues without registry imports. If only some refs are readable, it keeps
+a warning because the fallback set is degraded.
+
 Workflow authors should consume those outputs instead of polling `/_boringcache/status` or probing `/v2/cache/manifests/*` themselves.
 
 ## What it handles

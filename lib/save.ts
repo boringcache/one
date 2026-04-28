@@ -62,6 +62,16 @@ function filterVerifiableSpecs(specs: TagVerificationSpec[]): TagVerificationSpe
   return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
 }
 
+function buildCliSetupOptions(inputs: ReturnType<typeof getInputs>, cliVersion: string, cliPlatform: string | undefined) {
+  return {
+    version: cliVersion,
+    platform: cliPlatform,
+    ...(inputs.trustedWorkspaceSigningKeyFingerprint
+      ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
+      : {}),
+  };
+}
+
 function parseSavedTagList(raw: string): Set<string> {
   return new Set(
     raw
@@ -178,7 +188,7 @@ export async function run(): Promise<void> {
     let verifySaveSpecs = parseSavedVerificationSpecs(core.getState('verify-save-specs'));
 
     if (cliVersion.toLowerCase() !== 'skip') {
-      await ensureBoringCache({ version: cliVersion, platform: cliPlatform });
+      await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
     }
 
     if (!resolvedMode || (!genericEntries && !genericWorkspace)) {

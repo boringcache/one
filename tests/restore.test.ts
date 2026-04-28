@@ -149,6 +149,24 @@ describe('restore action', () => {
     });
   });
 
+  it('passes trusted workspace signing key fingerprint through to shared CLI setup', async () => {
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+      'trusted-workspace-signing-key-fingerprint':
+        'ed25519-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+
+    await restoreRun();
+
+    expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
+      version: 'v1.12.51',
+      platform: undefined,
+      trustedWorkspaceSigningKeyFingerprint:
+        'ed25519-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+  });
+
   it('allows CLI-only setup when no cache entries resolve', async () => {
     mockGetInput({
       workspace: 'my-org/my-project',

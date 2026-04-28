@@ -55,6 +55,11 @@ fail closed in the emitted outputs. The build path should consume:
 - `docker-cache-unreadable-from-refs` as the unreadable subset; and
 - `docker-cache-import-ready` as the all-refs-readable signal.
 
+When every CLI-planned import ref is unreadable, the action should continue
+without registry imports and report a cold-seed notice, not a release-health
+warning. Partial readability remains a warning because it means at least one
+expected warm fallback was usable while another planned fallback degraded.
+
 Benchmark and product workflows should consume those outputs instead of
 re-implementing their own proxy-manifest readiness probes.
 
@@ -77,10 +82,22 @@ safety, but unsigned verification explicitly runs `boringcache check` with
 `BORINGCACHE_REQUIRE_SERVER_SIGNATURE=0` so existence checks do not become
 signed-restore checks by accident.
 
+The action also exposes `trusted-workspace-signing-key-fingerprint` as thin CLI
+plumbing. When set, the action exports
+`BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT`; the CLI owns verification of
+the returned workspace key, signature envelope, and cache-entry metadata.
+
 Archive restores run before mise tool probes and installs. This prevents
 language tool discovery from populating cache targets first; for example, Go can
 create `GOMODCACHE/golang.org` while resolving `GOTOOLCHAIN` if probed inside a
 module after `GOMODCACHE` already points at the archive restore path.
+
+Rust `sccache` proxy preflight must run
+`boringcache --require-server-signature check --fail-on-miss`. Without
+fail-on-miss, a CLI check that prints a miss but exits successfully can make a
+cold seed look like an existing-cache zero-hit regression. Without the explicit
+server-signature flag, the health check can drift from the official strict
+restore contract.
 
 ## Release Alignment
 

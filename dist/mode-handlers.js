@@ -1224,7 +1224,7 @@ function summarizeSccacheStats(output) {
     };
 }
 async function checkRustTagHit(workspace, tag, { noPlatform = false, noGit = false } = {}) {
-    const args = ['check', workspace, tag];
+    const args = ['--require-server-signature', 'check', workspace, tag, '--fail-on-miss'];
     if (noPlatform) {
         args.push('--no-platform');
     }
@@ -2227,7 +2227,7 @@ async function runRustSave() {
                         core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for existing tag '${sccacheTag}'. Check emitted tag semantics and BORINGCACHE_SAVE_TOKEN/BORINGCACHE_RESTORE_TOKEN alignment.`);
                     }
                     else if (!postShutdownHit) {
-                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was still missing after shutdown. Check BORINGCACHE_SAVE_TOKEN scope and proxy publish logs.`);
+                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not available as a signed cache entry after shutdown. Check server-side signing, BORINGCACHE_SAVE_TOKEN scope, and proxy publish logs.`);
                     }
                     else {
                         core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests, but '${sccacheTag}' published successfully. This looks like a cold fill.`);

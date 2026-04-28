@@ -1,6 +1,7 @@
 import * as http from 'http';
 import { AddressInfo } from 'net';
-import { waitForOciImportReadiness } from '../lib/core/proxy';
+import * as core from '@actions/core';
+import { logOciImportReadiness, waitForOciImportReadiness } from '../lib/core/proxy';
 
 type RefState = 'readable' | 'missing';
 
@@ -136,5 +137,41 @@ describe('proxy OCI import readiness', () => {
       expect(readiness.readableRefs).toEqual(['branch-main', 'buildcache']);
       expect(readiness.unreadableRefs).toEqual([]);
     });
+  });
+
+  it('notices cold starts when no planned OCI import ref is readable', () => {
+    logOciImportReadiness({
+      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      readableRefs: [],
+      unreadableRefs: ['branch-main', 'default', 'buildcache'],
+      ready: false,
+      phase: 'ready',
+      publishState: 'settled',
+      publishSettled: true,
+      tagsVisible: true,
+    });
+
+    expect(core.notice).toHaveBeenCalledWith(
+      'Registry proxy became ready before OCI import refs were fully readable. readable=[] unreadable=[branch-main, default, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true. Continuing without registry imports; this is expected for cold seed jobs.',
+    );
+    expect(core.warning).not.toHaveBeenCalled();
+  });
+
+  it('warns when only some planned OCI import refs are readable', () => {
+    logOciImportReadiness({
+      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      readableRefs: ['default'],
+      unreadableRefs: ['branch-main', 'buildcache'],
+      ready: false,
+      phase: 'ready',
+      publishState: 'settled',
+      publishSettled: true,
+      tagsVisible: true,
+    });
+
+    expect(core.warning).toHaveBeenCalledWith(
+      'Registry proxy became ready before OCI import refs were fully readable. readable=[default] unreadable=[branch-main, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true',
+    );
+    expect(core.notice).not.toHaveBeenCalled();
   });
 });

@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeProxyTags = normalizeProxyTags;
 exports.waitForOciImportReadiness = waitForOciImportReadiness;
+exports.logOciImportReadiness = logOciImportReadiness;
 exports.startRegistryProxy = startRegistryProxy;
 exports.stopRegistryProxy = stopRegistryProxy;
 exports.findAvailablePort = findAvailablePort;
@@ -248,6 +249,30 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
     };
 }
+function logOciImportReadiness(readiness) {
+    if (readiness.ready) {
+        core.info(`Registry proxy OCI import refs are readable: ${readiness.readableRefs.join(', ')}`);
+        return;
+    }
+    const statusSuffix = [
+        readiness.phase ? `phase=${readiness.phase}` : '',
+        readiness.publishState ? `publish=${readiness.publishState}` : '',
+        typeof readiness.publishSettled === 'boolean'
+            ? `publish_settled=${readiness.publishSettled}`
+            : '',
+        typeof readiness.tagsVisible === 'boolean'
+            ? `tags_visible=${readiness.tagsVisible}`
+            : '',
+    ]
+        .filter(Boolean)
+        .join(' ');
+    const message = `Registry proxy became ready before OCI import refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
+    if (readiness.readableRefs.length === 0) {
+        core.notice(`${message}. Continuing without registry imports; this is expected for cold seed jobs.`);
+        return;
+    }
+    core.warning(message);
+}
 /**
  * Start the cache-registry proxy.
  * Spawns a detached boringcache process, writes PID file, returns handle.
@@ -366,24 +391,7 @@ async function startRegistryProxy(options) {
         await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
         if ((_d = options.ociRequiredReadableRefs) === null || _d === void 0 ? void 0 : _d.length) {
             const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs);
-            if (!ociImportReadiness.ready) {
-                const statusSuffix = [
-                    ociImportReadiness.phase ? `phase=${ociImportReadiness.phase}` : '',
-                    ociImportReadiness.publishState ? `publish=${ociImportReadiness.publishState}` : '',
-                    typeof ociImportReadiness.publishSettled === 'boolean'
-                        ? `publish_settled=${ociImportReadiness.publishSettled}`
-                        : '',
-                    typeof ociImportReadiness.tagsVisible === 'boolean'
-                        ? `tags_visible=${ociImportReadiness.tagsVisible}`
-                        : '',
-                ]
-                    .filter(Boolean)
-                    .join(' ');
-                core.warning(`Registry proxy became ready before OCI import refs were fully readable. readable=[${ociImportReadiness.readableRefs.join(', ')}] unreadable=[${ociImportReadiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`);
-            }
-            else {
-                core.info(`Registry proxy OCI import refs are readable: ${ociImportReadiness.readableRefs.join(', ')}`);
-            }
+            logOciImportReadiness(ociImportReadiness);
             return {
                 ...handle,
                 ociImportReadiness,

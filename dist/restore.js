@@ -48,6 +48,15 @@ function buildRuntimeRestoreFlagArgs(inputs) {
     }
     return flagArgs;
 }
+function buildCliSetupOptions(inputs, cliPlatform) {
+    return {
+        version: inputs.cliVersion,
+        platform: cliPlatform,
+        ...(inputs.trustedWorkspaceSigningKeyFingerprint
+            ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
+            : {}),
+    };
+}
 async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
     await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Diagnostics', async () => {
@@ -119,7 +128,7 @@ async function run() {
         const saveAllowed = saveEnabled ? (0, utils_1.applySaveTokenPolicy)(inputs) : false;
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
-            await (0, utils_1.ensureBoringCache)({ version: inputs.cliVersion, platform: cliPlatform });
+            await (0, utils_1.ensureBoringCache)(buildCliSetupOptions(inputs, cliPlatform));
         }
         const plan = await (0, utils_1.buildPlan)(inputs);
         process.chdir(plan.workingDirectory);

@@ -20,7 +20,9 @@ ADR note: [docs/adr/0001-cli-plan-owned-action-contract.md](../adr/0001-cli-plan
 
 Docker and BuildKit registry modes must consume the complete CLI-planned OCI import list. If the CLI dry-run returns multiple `oci_cache.cache_from_refs` such as PR, branch, default, and stable fallback refs, the action should pass each one as its own `--cache-from` or `--import-cache` flag instead of rebuilding or narrowing that list.
 
-The action owns the runtime readiness check for those planned Docker and BuildKit imports. Proxy startup is not complete merely because `/_boringcache/status` says `phase=ready`; the action must also prove which planned OCI refs are readable through the started proxy, filter actual build arguments to the readable set, and expose both the requested and used ref sets through action outputs. Downstream workflows should not implement their own competing manifest-readability gate.
+The action owns the runtime readiness check for those planned Docker and BuildKit imports. Proxy startup is not complete merely because `/_boringcache/status` says `phase=ready`; the action must also prove which planned OCI refs are readable through the started proxy, filter actual build arguments to the readable set, and expose both the requested and used ref sets through action outputs. If none of the planned refs are readable, the action should continue without registry imports and report a cold-seed notice. If only some refs are readable, keep a warning because the warm fallback set is degraded. Downstream workflows should not implement their own competing manifest-readability gate.
+
+Rust `sccache` proxy hit detection must use `boringcache --require-server-signature check --fail-on-miss`; otherwise a printed miss can be misclassified as an existing cache hit before the build, and the health check can drift from the official strict restore contract.
 
 Docker and BuildKit registry modes must also forward CLI-planned `oci_cache.promotion_ref_tags` to `cache-registry` as real `--oci-alias-promotion-ref` arguments. The `docker_alias_promotion_refs` metadata hint is diagnostic only; it does not cause the proxy to bind branch, PR, default, or stable OCI aliases after an immutable run-ref export.
 
@@ -31,6 +33,8 @@ Docker support should stay on the BuildKit registry-cache path through CLI-plann
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
 
 Verification is action orchestration, not Rails policy. Normal restores inherit strict server-signature verification from the action environment, but post-save `verify` checks must honor `verify-require-server-signature`; when that input is false, the action clears the inherited strict env only for the `boringcache check` subprocess.
+
+`trusted-workspace-signing-key-fingerprint` is action input plumbing for the CLI trust boundary. The action exports `BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT`; the CLI verifies the returned workspace signing key and server signature payload.
 
 Archive restore should happen before mise tool probes or installs. Tool discovery can execute language binaries in the project directory, and those binaries must not get a chance to populate archive cache targets before `boringcache restore` sees them.
 

@@ -69,6 +69,9 @@ inputs:
     description: 'Require signed cache hits during verification.'
     default: 'false'
     required: false
+  trusted-workspace-signing-key-fingerprint:
+    description: 'Optional ed25519-sha256 workspace signing key fingerprint. When set, the CLI only accepts signed cache hits from this workspace key.'
+    required: false
   diagnostics:
     description: 'Action-level diagnostics: auto follows ACTIONS_STEP_DEBUG, off disables grouped diagnostics, summary emits grouped state, and verbose also tails proxy logs.'
     default: 'auto'
