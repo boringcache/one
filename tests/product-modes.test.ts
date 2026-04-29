@@ -1476,9 +1476,19 @@ describe('product modes', () => {
     }
   });
 
-  it('uses the CLI turbo planner tag from repo config', async () => {
+  it('uses the CLI turbo planner tag and proxy settings from repo config', async () => {
     const project = await makeTempProject({
-      '.boringcache.toml': 'workspace = "config-org/config-workspace"\n\n[adapters.turbo]\ntag = "turbo-main"\n',
+      '.boringcache.toml': [
+        'workspace = "config-org/config-workspace"',
+        '',
+        '[adapters.turbo]',
+        'tag = "turbo-main"',
+        'host = "0.0.0.0"',
+        'endpoint-host = "host.docker.internal"',
+        'no-platform = true',
+        'no-git = true',
+        '',
+      ].join('\n'),
       '.node-version': '22.4.1\n',
       'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
       'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
@@ -1496,8 +1506,16 @@ describe('product modes', () => {
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         workspace: 'config-org/config-workspace',
         tag: 'turbo-main',
+        host: '0.0.0.0',
+        noPlatform: true,
+        noGit: true,
         onDemand: false,
       }));
+      expect(core.exportVariable).toHaveBeenCalledWith('TURBO_API', 'http://host.docker.internal:5000');
+      expect(core.saveState).toHaveBeenCalledWith(
+        'verify-save-specs',
+        expect.stringContaining('"tag":"turbo-main","noPlatform":true,"noGit":true'),
+      );
       expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'turbo-main');
       expect(core.setOutput).toHaveBeenCalledWith('workspace', 'config-org/config-workspace');
     } finally {
@@ -1567,9 +1585,55 @@ describe('product modes', () => {
       expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_PROXY_PORT', '5000');
       expect(core.saveState).toHaveBeenCalledWith(
         'verify-save-specs',
-        expect.stringContaining('"noPlatform":true,"noGit":true'),
+        expect.stringContaining('"noPlatform":false,"noGit":false'),
       );
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'nx-proxy');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('uses the CLI nx planner proxy settings from repo config', async () => {
+    const project = await makeTempProject({
+      '.boringcache.toml': [
+        'workspace = "config-org/config-workspace"',
+        '',
+        '[adapters.nx]',
+        'tag = "nx-main"',
+        'host = "0.0.0.0"',
+        'endpoint-host = "host.docker.internal"',
+        'no-platform = true',
+        'no-git = true',
+        '',
+      ].join('\n'),
+      '.node-version': '22.4.1\n',
+      'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+
+    try {
+      mockGetInput({
+        mode: 'nx-proxy',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'config-org/config-workspace',
+        tag: 'nx-main',
+        host: '0.0.0.0',
+        noPlatform: true,
+        noGit: true,
+      }));
+      expect(core.exportVariable).toHaveBeenCalledWith('NX_SELF_HOSTED_REMOTE_CACHE_SERVER', 'http://host.docker.internal:5000');
+      expect(core.saveState).toHaveBeenCalledWith(
+        'verify-save-specs',
+        expect.stringContaining('"tag":"nx-main","noPlatform":true,"noGit":true'),
+      );
+      expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'nx-main');
+      expect(core.setOutput).toHaveBeenCalledWith('workspace', 'config-org/config-workspace');
     } finally {
       await removeTempProject(project);
     }

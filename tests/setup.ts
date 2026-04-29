@@ -164,6 +164,8 @@ interface CliAdapterDryRunPlan {
 
 interface RepoAdapterSettings {
   tag?: string;
+  host?: string;
+  endpointHost?: string;
   port?: number;
   noPlatform?: boolean;
   noGit?: boolean;
@@ -234,6 +236,22 @@ function readRepoAdapterSettings(workingDirectory: string, adapterName: string):
       const tagMatch = trimmed.match(/^tag\s*=\s*["']([^"']+)["']$/);
       if (tagMatch?.[1]?.trim()) {
         settings.tag = tagMatch[1].trim();
+        continue;
+      }
+
+      const stringSettingMatch = trimmed.match(/^(host|endpoint-host|endpoint_host)\s*=\s*["']([^"']+)["']$/);
+      if (stringSettingMatch?.[2]?.trim()) {
+        switch (stringSettingMatch[1]) {
+          case 'host':
+            settings.host = stringSettingMatch[2].trim();
+            break;
+          case 'endpoint-host':
+          case 'endpoint_host':
+            settings.endpointHost = stringSettingMatch[2].trim();
+            break;
+          default:
+            break;
+        }
         continue;
       }
 
@@ -826,7 +844,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   let workspaceSource: CliAdapterDryRunPlan['workspace_source'] = 'configured-default';
   let tag = '';
   let port = 0;
-  let host = '127.0.0.1';
+  let host = '';
   let endpointHost = '';
   let noPlatform = false;
   let noGit = false;
@@ -961,8 +979,9 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
 
   const resolvedTag = tag || repoSettings.tag || defaultAdapterTag(adapterName);
   const resolvedPort = port > 0 ? port : repoSettings.port || 5000;
-  const resolvedHost = host.trim() || '127.0.0.1';
+  const resolvedHost = host.trim() || repoSettings.host || '127.0.0.1';
   const resolvedEndpointHost = (endpointHost.trim() || '')
+    || repoSettings.endpointHost
     || (resolvedHost === '0.0.0.0' ? '127.0.0.1' : resolvedHost);
   const resolvedNoPlatform = noPlatform || repoSettings.noPlatform || false;
   const resolvedNoGit = noGit || repoSettings.noGit || false;

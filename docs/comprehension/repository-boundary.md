@@ -20,9 +20,9 @@ ADR note: [docs/adr/0001-cli-plan-owned-action-contract.md](../adr/0001-cli-plan
 
 Bazel, Gradle, and Maven on-disk tool setup is also CLI-planned. The action may materialize files, directories, and environment variables from `adapter.setup`, but `.bazelrc`, Gradle init/properties, Maven extensions/build-cache XML content, and default path resolution should stay in the CLI plan instead of being recreated in TypeScript.
 
-Nx proxy environment wiring is CLI-planned too. The action may rewrite the planned local proxy port after startup and apply the `nx-access-token` GitHub Actions override, but it should otherwise export the CLI dry-run `env_vars` instead of carrying a second Nx adapter plan in TypeScript.
+Turbo and Nx proxy environment wiring is CLI-planned too. The action may rewrite the planned local proxy port after startup and apply GitHub Actions token/team overrides, but it should otherwise export the CLI dry-run `env_vars` instead of carrying a second adapter plan in TypeScript.
 
-Portable adapter proxy tags are first-class human tags. When the action starts `cache-registry` with `--no-platform --no-git`, the deferred post-save verification spec must use the same no-platform/no-git tag shape instead of re-deriving platform or branch suffixes from the CLI dry-run plan.
+Adapter proxy tag shape comes from the CLI dry-run plan, which merges `.boringcache.toml` defaults with explicit action inputs. The action must start `cache-registry` and build deferred post-save verification specs from the same `proxy.no_platform` and `proxy.no_git` values; do not re-derive suffixing in TypeScript or hardcode portable proxy tags in one path only.
 
 The action must check the CLI dry-run `schema_version` before using adapter or OCI planning, and must check `adapter.setup.schema_version` before replaying setup files, directories, or env vars. Unsupported versions should fail with an explicit update/pin message instead of partially applying a setup plan whose file modes or fields may have changed.
 

@@ -86,6 +86,20 @@ function actionProxyOptions<T extends RegistryProxyOptions>(
   };
 }
 
+function adapterProxyVerificationSpec(
+  tag: string,
+  proxyPlan: CliProxyDryRunPlan,
+  pathHint: string,
+): TagVerificationSpec {
+  return {
+    tag,
+    noPlatform: proxyPlan.no_platform,
+    noGit: proxyPlan.no_git,
+    pathHint,
+    saveExpected: !proxyPlan.read_only,
+  };
+}
+
 interface CliAdapterSetupFile {
   path: string;
   mode: 'write' | 'append';
@@ -1394,16 +1408,16 @@ async function startPortableCacheProxy(
   port: number,
   tag: string,
   readOnly = false,
-  proxyPlan?: CliProxyDryRunPlan,
+  proxyPlan: CliProxyDryRunPlan,
 ): Promise<{ pid: number; port: number }> {
   const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
     workspace,
     tag,
-    host: '127.0.0.1',
+    host: proxyPlan.host || '127.0.0.1',
     port,
-    noPlatform: true,
-    noGit: true,
+    noPlatform: proxyPlan.no_platform,
+    noGit: proxyPlan.no_git,
     readOnly,
   }, proxyPlan));
   return proxy;
@@ -1473,6 +1487,30 @@ function rewritePlannedProxyPort(value: string, plannedPort: number, actualPort:
     return value;
   }
   return value.replace(new RegExp(`:${plannedPort}(?=/|$)`), `:${actualPort}`);
+}
+
+function turboEnvForStartedProxy(
+  plan: CliAdapterDryRunPlan,
+  actualPort: number,
+  tokenOverride: string,
+  teamOverride: string,
+): Record<string, string> {
+  const envVars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(plan.env_vars || {})) {
+    envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
+  }
+
+  const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
+  envVars.TURBO_API = `http://${endpointHost}:${actualPort}`;
+  envVars.TURBO_TOKEN = tokenOverride.trim()
+    || envVars.TURBO_TOKEN
+    || 'boringcache';
+  envVars.TURBO_TEAM = teamOverride.trim()
+    || envVars.TURBO_TEAM
+    || 'boringcache';
+  envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
+
+  return envVars;
 }
 
 function nxEnvForStartedProxy(
@@ -1720,7 +1758,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       command: 'cache-registry',
       workspace: dockerPlan.workspace,
       tag: cacheTag,
-      host: proxyBindHost,
+      host: dockerPlan.proxy.host || proxyBindHost,
       port: dockerPlan.proxy.port,
       noGit: dockerPlan.proxy.no_git,
       noPlatform: dockerPlan.proxy.no_platform,
@@ -1944,7 +1982,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       command: 'cache-registry',
       workspace: dockerPlan.workspace,
       tag: cacheTag,
-      host: proxyBindHost,
+      host: dockerPlan.proxy.host || proxyBindHost,
       port: dockerPlan.proxy.port,
       noGit: dockerPlan.proxy.no_git,
       noPlatform: dockerPlan.proxy.no_platform,
@@ -2103,7 +2141,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     command: 'cache-registry',
     workspace,
     tag: cacheTag,
-    host: '127.0.0.1',
+    host: proxyPlan.proxy.host || '127.0.0.1',
     port: proxyPlan.proxy.port,
     noGit: proxyPlan.proxy.no_git,
     noPlatform: proxyPlan.proxy.no_platform,
@@ -2119,13 +2157,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   core.setOutput('workspace', workspace);
   return {
     cacheTag,
-    verificationSpecs: [{
-      tag: cacheTag,
-      noPlatform: proxyPlan.proxy.no_platform,
-      noGit: proxyPlan.proxy.no_git,
-      pathHint: plan.workingDirectory,
-      saveExpected: !proxyPlan.proxy.read_only,
-    }],
+    verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
   };
 }
 
@@ -2171,7 +2203,7 @@ async function runGoRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mode
     command: 'cache-registry',
     workspace,
     tag: cacheTag,
-    host: '127.0.0.1',
+    host: proxyPlan.proxy.host || '127.0.0.1',
     port: proxyPlan.proxy.port,
     noGit: proxyPlan.proxy.no_git,
     noPlatform: proxyPlan.proxy.no_platform,
@@ -2188,13 +2220,7 @@ async function runGoRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mode
   core.setOutput('workspace', workspace);
   return {
     cacheTag,
-    verificationSpecs: [{
-      tag: cacheTag,
-      noPlatform: proxyPlan.proxy.no_platform,
-      noGit: proxyPlan.proxy.no_git,
-      pathHint: plan.workingDirectory,
-      saveExpected: !proxyPlan.proxy.read_only,
-    }],
+    verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
   };
 }
 
@@ -2225,7 +2251,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     command: 'cache-registry',
     workspace,
     tag: cacheTag,
-    host: '127.0.0.1',
+    host: proxyPlan.proxy.host || '127.0.0.1',
     port: proxyPlan.proxy.port,
     noGit: proxyPlan.proxy.no_git,
     noPlatform: proxyPlan.proxy.no_platform,
@@ -2242,13 +2268,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   core.setOutput('workspace', workspace);
   return {
     cacheTag,
-    verificationSpecs: [{
-      tag: cacheTag,
-      noPlatform: proxyPlan.proxy.no_platform,
-      noGit: proxyPlan.proxy.no_git,
-      pathHint: plan.workingDirectory,
-      saveExpected: !proxyPlan.proxy.read_only,
-    }],
+    verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
   };
 }
 
@@ -2285,7 +2305,7 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
     command: 'cache-registry',
     workspace,
     tag: cacheTag,
-    host: '127.0.0.1',
+    host: proxyPlan.proxy.host || '127.0.0.1',
     port: proxyPlan.proxy.port,
     noGit: proxyPlan.proxy.no_git,
     noPlatform: proxyPlan.proxy.no_platform,
@@ -2311,13 +2331,7 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   core.setOutput('workspace', workspace);
   return {
     cacheTag,
-    verificationSpecs: [{
-      tag: cacheTag,
-      noPlatform: proxyPlan.proxy.no_platform,
-      noGit: proxyPlan.proxy.no_git,
-      pathHint: plan.workingDirectory,
-      saveExpected: !proxyPlan.proxy.read_only,
-    }],
+    verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
   };
 }
 
@@ -2332,8 +2346,8 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
     plan.workingDirectory,
     inputs.cacheTag,
     preferredPort,
-    false,
-    false,
+    inputs.proxyNoPlatform,
+    inputs.proxyNoGit,
     proxyPlanningReadOnly(inputs.readOnly),
     {
       metadataHintsInput: inputs.metadataHints,
@@ -2378,19 +2392,13 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
 
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
-  configureTurboRemoteEnv(`http://127.0.0.1:${proxy.port}`, turboToken, turboTeam);
+  exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port, turboToken, turboTeam));
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
   core.setOutput('workspace', workspace);
   return {
     cacheTag,
-    verificationSpecs: [{
-      tag: cacheTag,
-      noPlatform: true,
-      noGit: true,
-      pathHint: plan.workingDirectory,
-      saveExpected: !inputs.readOnly,
-    }],
+    verificationSpecs: [adapterProxyVerificationSpec(cacheTag, turboPlan.proxy, plan.workingDirectory)],
   };
 }
 
@@ -2403,8 +2411,8 @@ async function runNxProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise
     plan.workingDirectory,
     inputs.cacheTag,
     preferredPort,
-    false,
-    false,
+    inputs.proxyNoPlatform,
+    inputs.proxyNoGit,
     proxyPlanningReadOnly(inputs.readOnly),
     {
       metadataHintsInput: inputs.metadataHints,
@@ -2440,13 +2448,7 @@ async function runNxProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise
   core.setOutput('workspace', workspace);
   return {
     cacheTag,
-    verificationSpecs: [{
-      tag: cacheTag,
-      noPlatform: true,
-      noGit: true,
-      pathHint: plan.workingDirectory,
-      saveExpected: !inputs.readOnly,
-    }],
+    verificationSpecs: [adapterProxyVerificationSpec(cacheTag, nxPlan.proxy, plan.workingDirectory)],
   };
 }
 
@@ -2600,7 +2602,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
         command: 'cache-registry',
         workspace: proxyPlan.workspace,
         tag: proxyPlan.tag,
-        host: '127.0.0.1',
+        host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
         noGit: proxyPlan.proxy.no_git,
         noPlatform: proxyPlan.proxy.no_platform,
