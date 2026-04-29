@@ -1784,7 +1784,7 @@ describe('product modes', () => {
     }
   });
 
-  it('supports custom rust subcache tags', async () => {
+  it('uses CLI-planned rust subcache tags', async () => {
     const project = await makeTempProject({
       'Cargo.lock': '[[package]]\nname = "git-dep"\nversion = "0.1.0"\nsource = "git+https://github.com/example/repo?rev=123456#123456"\n',
       'rust-toolchain.toml': '[toolchain]\nchannel = "1.89.0"\n',
@@ -1799,10 +1799,6 @@ describe('product modes', () => {
         workspace: 'my-org/my-project',
         sccache: 'true',
         'sccache-mode': 'proxy',
-        'cargo-tag': 'zed-cargo-registry',
-        'cargo-git-tag': 'zed-cargo-git',
-        'target-tag': 'zed-target-rust1.89',
-        'sccache-tag': 'zed-sccache-rust1.89-r123-a1',
       });
       mockGetBooleanInput({});
 
@@ -1810,13 +1806,13 @@ describe('product modes', () => {
 
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
-        tag: 'zed-sccache-rust1.89-r123-a1',
+        tag: 'rust-sccache-rust1.89',
         onDemand: false,
       }));
-      expect(core.setOutput).toHaveBeenCalledWith('cargo-tag', 'zed-cargo-registry');
-      expect(core.setOutput).toHaveBeenCalledWith('cargo-git-tag', 'zed-cargo-git');
-      expect(core.setOutput).toHaveBeenCalledWith('target-tag', 'zed-target-rust1.89');
-      expect(core.setOutput).toHaveBeenCalledWith('sccache-tag', 'zed-sccache-rust1.89-r123-a1');
+      expect(core.setOutput).toHaveBeenCalledWith('cargo-tag', 'rust-cargo-registry-rust1.89');
+      expect(core.setOutput).toHaveBeenCalledWith('cargo-git-tag', 'rust-cargo-git-rust1.89');
+      expect(core.setOutput).toHaveBeenCalledWith('target-tag', 'rust-target-rust1.89');
+      expect(core.setOutput).toHaveBeenCalledWith('sccache-tag', 'rust-sccache-rust1.89');
     } finally {
       await removeTempProject(project);
     }

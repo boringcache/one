@@ -246,6 +246,7 @@ async function run() {
                     timeoutSeconds: verifyTimeoutSeconds,
                     requireServerSignature: verifyRequireServerSignature,
                     verbose,
+                    acceptPendingSaveExpected: true,
                 });
             }
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
@@ -273,6 +274,7 @@ async function run() {
                 timeoutSeconds: verifyTimeoutSeconds,
                 requireServerSignature: verifyRequireServerSignature,
                 verbose,
+                acceptPendingSaveExpected: true,
             });
         }
         await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);

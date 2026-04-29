@@ -47,7 +47,10 @@ overrides where those are action inputs, and setting lifecycle-only values such
 as `SCCACHE_IDLE_TIMEOUT`. Docker and BuildKit consume CLI-planned
 `oci_cache.cache_from_refs` and `oci_cache.cache_to` as complete BuildKit specs;
 the action must not append registry-cache options in TypeScript. Archive preset
-cache env also comes from the CLI dry-run `env_vars`.
+cache env also comes from the CLI dry-run `env_vars`. Rust archive entry tags
+also stay CLI-owned; the action no longer exposes exact-tag inputs that mutate
+`cargo-registry`, `cargo-git`, `cargo-bin`, `target`, or `sccache-dir` entries
+after dry-run resolution.
 
 It must not:
 

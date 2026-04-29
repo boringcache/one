@@ -1242,17 +1242,6 @@ function sccacheEnvForStartedProxy(plan, actualPort) {
         || '0';
     return envVars;
 }
-function overrideRustArchiveEntry(entry, inputName) {
-    const overrideTag = core.getInput(inputName).trim();
-    if (!overrideTag) {
-        return entry;
-    }
-    return {
-        ...entry,
-        tag: overrideTag,
-        tagPathPair: `${overrideTag}:${entry.path}`,
-    };
-}
 function getRustArchiveEntry(entries, requested, description) {
     var _a;
     const entry = entries.get(requested);
@@ -1954,19 +1943,19 @@ async function runRustRestore(plan, inputs) {
     const rustEntries = new Map(rustEntriesPlan.entries.map((entry) => [entry.requested, entry]));
     const workspace = rustEntriesPlan.workspace || plan.workspace;
     const cargoRegistryEntry = cacheCargo
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-registry', 'cargo registry cache'), 'cargo-tag')
+        ? getRustArchiveEntry(rustEntries, 'cargo-registry', 'cargo registry cache')
         : null;
     const cargoGitEntry = cacheCargo && hasGitDeps
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-git', 'cargo git cache'), 'cargo-git-tag')
+        ? getRustArchiveEntry(rustEntries, 'cargo-git', 'cargo git cache')
         : null;
     const cargoBinEntry = cacheCargoBin
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-bin', 'cargo bin cache'), 'cargo-bin-tag')
+        ? getRustArchiveEntry(rustEntries, 'cargo-bin', 'cargo bin cache')
         : null;
     const targetEntry = cacheTarget
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'target', 'Rust target cache'), 'target-tag')
+        ? getRustArchiveEntry(rustEntries, 'target', 'Rust target cache')
         : null;
     const sccacheEntry = useSccache
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'sccache-dir', 'sccache cache'), 'sccache-tag')
+        ? getRustArchiveEntry(rustEntries, 'sccache-dir', 'sccache cache')
         : null;
     core.setOutput('workspace', workspace);
     core.setOutput('rust-version', rustVersion);

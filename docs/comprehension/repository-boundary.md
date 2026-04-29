@@ -32,6 +32,8 @@ The action owns the runtime readiness check for those planned Docker and BuildKi
 
 Rust cache-hit detection must use structured CLI results instead of parsing human restore logs. Archive subcache restore uses `boringcache check --json` before restore to decide the action output, and proxy sccache preflight keeps the strict `--require-server-signature` check while still reading structured JSON.
 
+Rust archive cache identity comes from the CLI plan. The action does not expose Rust-specific exact-tag override inputs such as `cargo-tag`, `cargo-git-tag`, `cargo-bin-tag`, `target-tag`, or `sccache-tag`; use `.boringcache.toml`, generic archive entries, `cache-tag`, or CLI-owned tag suffixing instead of mutating resolved Rust entries in TypeScript.
+
 Docker and BuildKit registry modes must also forward CLI-planned `oci_cache.promotion_ref_tags` to `cache-registry` as real `--oci-alias-promotion-ref` arguments. The `docker_alias_promotion_refs` metadata hint is diagnostic only; it does not cause the proxy to bind branch, PR, default, or stable OCI aliases after an immutable run-ref export.
 
 Pull request runs are restore-only by default. A PR-scoped Docker or BuildKit ref such as `/cache:pr-3208` may legitimately be missing, because the action does not publish it unless `save-on-pull-request` is explicitly enabled. That miss should be handled by the CLI-planned branch/default/stable fallback imports. If PR saving is enabled, the normal derived promotion target is the PR alias; the action should not turn a missing PR alias into branch/default write permission.
@@ -42,7 +44,7 @@ Preset cache environment exports are a CLI dry-run contract. The action should e
 
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
 
-Verification is action orchestration, not Rails policy. Normal restores inherit strict server-signature verification from the action environment, but post-save `verify` checks must honor `verify-require-server-signature`; when that input is false, the action clears the inherited strict env only for the `boringcache check` subprocess.
+Verification is action orchestration, not Rails policy. Normal restores inherit strict server-signature verification from the action environment, but post-save `verify` checks must honor `verify-require-server-signature`; when that input is false, the action clears the inherited strict env only for the `boringcache check` subprocess. Post-save verification may accept structured `pending`/`uploading` check results only for tags marked `saveExpected`, so valid contention does not wait on tag visibility while true misses and restore-time verification remain strict.
 
 `trusted-workspace-signing-key-fingerprint` is action input plumbing for the CLI trust boundary. The action exports `BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT`; the CLI verifies the returned workspace signing key and server signature payload.
 

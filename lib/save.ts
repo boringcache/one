@@ -295,6 +295,7 @@ export async function run(): Promise<void> {
           timeoutSeconds: verifyTimeoutSeconds,
           requireServerSignature: verifyRequireServerSignature,
           verbose,
+          acceptPendingSaveExpected: true,
         });
       }
       await emitPostStepDiagnostics(
@@ -334,6 +335,7 @@ export async function run(): Promise<void> {
         timeoutSeconds: verifyTimeoutSeconds,
         requireServerSignature: verifyRequireServerSignature,
         verbose,
+        acceptPendingSaveExpected: true,
       });
     }
 

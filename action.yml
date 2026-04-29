@@ -262,21 +262,6 @@ inputs:
     description: 'Cache the Rust target directory.'
     default: 'true'
     required: false
-  cargo-tag:
-    description: 'Exact tag override for the Rust cargo registry cache.'
-    required: false
-  cargo-git-tag:
-    description: 'Exact tag override for the Rust cargo git cache.'
-    required: false
-  cargo-bin-tag:
-    description: 'Exact tag override for the Rust cargo bin cache.'
-    required: false
-  target-tag:
-    description: 'Exact tag override for the Rust target directory cache.'
-    required: false
-  sccache-tag:
-    description: 'Exact tag override for the Rust sccache cache or proxy tag.'
-    required: false
   sccache:
     description: 'Enable sccache for Rust builds.'
     default: 'false'

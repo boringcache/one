@@ -698,15 +698,21 @@ function groupVerificationSpecs(specs) {
             tags: [],
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            saveExpectedTags: new Set(),
         };
         if (!batch.tags.includes(spec.tag)) {
             batch.tags.push(spec.tag);
+        }
+        if (spec.saveExpected) {
+            batch.saveExpectedTags.add(spec.tag);
         }
         grouped.set(key, batch);
     }
     return Array.from(grouped.values());
 }
 async function runTagCheck(workspace, batch, options) {
+    const acceptedPendingTags = options.acceptPendingSaveExpected ? batch.saveExpectedTags : new Set();
+    const shouldParseCheckJson = acceptedPendingTags.size > 0;
     const args = [];
     if (options.verbose) {
         args.push('--verbose');
@@ -722,6 +728,9 @@ async function runTagCheck(workspace, batch, options) {
         args.push('--no-git');
     }
     args.push('--exact', '--fail-on-miss');
+    if (shouldParseCheckJson) {
+        args.push('--json');
+    }
     let stdout = '';
     let stderr = '';
     const execOptions = {
@@ -740,11 +749,49 @@ async function runTagCheck(workspace, batch, options) {
         execOptions.env = envWithOverrides({ BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0' });
     }
     const exitCode = await exec.exec('boringcache', args, execOptions);
-    return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+    const result = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+    if (result.exitCode !== 0 && shouldParseCheckJson) {
+        const acceptedTags = pendingOnlyForAcceptedSaveTags(result.stdout, acceptedPendingTags);
+        if (acceptedTags.length > 0) {
+            core.info(`Accepted pending save verification for tags: ${acceptedTags.join(', ')}`);
+            return { ...result, exitCode: 0 };
+        }
+    }
+    return result;
 }
 function formatCheckFailure(result) {
     const details = [result.stderr, result.stdout].filter(Boolean).join('\n');
     return details || `boringcache check exited with code ${result.exitCode}`;
+}
+function pendingOnlyForAcceptedSaveTags(stdout, acceptedPendingTags) {
+    if (!stdout.trim()) {
+        return [];
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(stdout);
+    }
+    catch {
+        return [];
+    }
+    if (!Array.isArray(parsed.results)) {
+        return [];
+    }
+    const accepted = [];
+    for (const result of parsed.results) {
+        const status = (result.status || '').toLowerCase();
+        if (status === 'hit') {
+            continue;
+        }
+        const candidateTags = [result.requested_tag, result.tag].filter((tag) => Boolean(tag));
+        const acceptedTag = candidateTags.find((tag) => acceptedPendingTags.has(tag));
+        if ((status === 'pending' || status === 'uploading') && acceptedTag) {
+            accepted.push(acceptedTag);
+            continue;
+        }
+        return [];
+    }
+    return accepted;
 }
 async function verifyResolvedTags(workspace, exactTags, options) {
     const specs = exactTags.map((tag) => ({

@@ -44632,17 +44632,6 @@ function sccacheEnvForStartedProxy(plan, actualPort) {
         || '0';
     return envVars;
 }
-function overrideRustArchiveEntry(entry, inputName) {
-    const overrideTag = core.getInput(inputName).trim();
-    if (!overrideTag) {
-        return entry;
-    }
-    return {
-        ...entry,
-        tag: overrideTag,
-        tagPathPair: `${overrideTag}:${entry.path}`,
-    };
-}
 function getRustArchiveEntry(entries, requested, description) {
     var _a;
     const entry = entries.get(requested);
@@ -45344,19 +45333,19 @@ async function runRustRestore(plan, inputs) {
     const rustEntries = new Map(rustEntriesPlan.entries.map((entry) => [entry.requested, entry]));
     const workspace = rustEntriesPlan.workspace || plan.workspace;
     const cargoRegistryEntry = cacheCargo
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-registry', 'cargo registry cache'), 'cargo-tag')
+        ? getRustArchiveEntry(rustEntries, 'cargo-registry', 'cargo registry cache')
         : null;
     const cargoGitEntry = cacheCargo && hasGitDeps
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-git', 'cargo git cache'), 'cargo-git-tag')
+        ? getRustArchiveEntry(rustEntries, 'cargo-git', 'cargo git cache')
         : null;
     const cargoBinEntry = cacheCargoBin
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'cargo-bin', 'cargo bin cache'), 'cargo-bin-tag')
+        ? getRustArchiveEntry(rustEntries, 'cargo-bin', 'cargo bin cache')
         : null;
     const targetEntry = cacheTarget
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'target', 'Rust target cache'), 'target-tag')
+        ? getRustArchiveEntry(rustEntries, 'target', 'Rust target cache')
         : null;
     const sccacheEntry = useSccache
-        ? overrideRustArchiveEntry(getRustArchiveEntry(rustEntries, 'sccache-dir', 'sccache cache'), 'sccache-tag')
+        ? getRustArchiveEntry(rustEntries, 'sccache-dir', 'sccache cache')
         : null;
     core.setOutput('workspace', workspace);
     core.setOutput('rust-version', rustVersion);
@@ -46633,15 +46622,21 @@ function groupVerificationSpecs(specs) {
             tags: [],
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            saveExpectedTags: new Set(),
         };
         if (!batch.tags.includes(spec.tag)) {
             batch.tags.push(spec.tag);
+        }
+        if (spec.saveExpected) {
+            batch.saveExpectedTags.add(spec.tag);
         }
         grouped.set(key, batch);
     }
     return Array.from(grouped.values());
 }
 async function runTagCheck(workspace, batch, options) {
+    const acceptedPendingTags = options.acceptPendingSaveExpected ? batch.saveExpectedTags : new Set();
+    const shouldParseCheckJson = acceptedPendingTags.size > 0;
     const args = [];
     if (options.verbose) {
         args.push('--verbose');
@@ -46657,6 +46652,9 @@ async function runTagCheck(workspace, batch, options) {
         args.push('--no-git');
     }
     args.push('--exact', '--fail-on-miss');
+    if (shouldParseCheckJson) {
+        args.push('--json');
+    }
     let stdout = '';
     let stderr = '';
     const execOptions = {
@@ -46675,11 +46673,49 @@ async function runTagCheck(workspace, batch, options) {
         execOptions.env = envWithOverrides({ BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0' });
     }
     const exitCode = await exec.exec('boringcache', args, execOptions);
-    return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+    const result = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+    if (result.exitCode !== 0 && shouldParseCheckJson) {
+        const acceptedTags = pendingOnlyForAcceptedSaveTags(result.stdout, acceptedPendingTags);
+        if (acceptedTags.length > 0) {
+            core.info(`Accepted pending save verification for tags: ${acceptedTags.join(', ')}`);
+            return { ...result, exitCode: 0 };
+        }
+    }
+    return result;
 }
 function formatCheckFailure(result) {
     const details = [result.stderr, result.stdout].filter(Boolean).join('\n');
     return details || `boringcache check exited with code ${result.exitCode}`;
+}
+function pendingOnlyForAcceptedSaveTags(stdout, acceptedPendingTags) {
+    if (!stdout.trim()) {
+        return [];
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(stdout);
+    }
+    catch {
+        return [];
+    }
+    if (!Array.isArray(parsed.results)) {
+        return [];
+    }
+    const accepted = [];
+    for (const result of parsed.results) {
+        const status = (result.status || '').toLowerCase();
+        if (status === 'hit') {
+            continue;
+        }
+        const candidateTags = [result.requested_tag, result.tag].filter((tag) => Boolean(tag));
+        const acceptedTag = candidateTags.find((tag) => acceptedPendingTags.has(tag));
+        if ((status === 'pending' || status === 'uploading') && acceptedTag) {
+            accepted.push(acceptedTag);
+            continue;
+        }
+        return [];
+    }
+    return accepted;
 }
 async function verifyResolvedTags(workspace, exactTags, options) {
     const specs = exactTags.map((tag) => ({

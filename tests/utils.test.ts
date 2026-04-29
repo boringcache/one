@@ -263,6 +263,87 @@ describe('one utils', () => {
     );
   });
 
+  it('accepts pending check results only for save-expected verification tags', async () => {
+    (exec.exec as jest.Mock).mockImplementation(async (
+      _command: string,
+      _args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+        schema_version: 1,
+        workspace: 'my-org/my-project',
+        total: 1,
+        hits: 0,
+        pending: 1,
+        misses: 0,
+        results: [{
+          tag: 'deps',
+          requested_tag: 'deps',
+          status: 'pending',
+        }],
+      })));
+      return 1;
+    });
+
+    await verifyVerificationSpecs(
+      'my-org/my-project',
+      [{ tag: 'deps', noPlatform: true, noGit: true, saveExpected: true }],
+      {
+        mode: 'check',
+        timeoutSeconds: 60,
+        requireServerSignature: false,
+        verbose: false,
+        acceptPendingSaveExpected: true,
+      },
+    );
+
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['check', 'my-org/my-project', 'deps', '--no-platform', '--no-git', '--exact', '--fail-on-miss', '--json'],
+      expect.objectContaining({
+        ignoreReturnCode: true,
+        silent: true,
+      }),
+    );
+    expect(core.info).toHaveBeenCalledWith('Accepted pending save verification for tags: deps');
+    expect(core.info).toHaveBeenCalledWith('Verified 1 tag in my-org/my-project');
+  });
+
+  it('does not accept true misses for save-expected verification tags', async () => {
+    (exec.exec as jest.Mock).mockImplementation(async (
+      _command: string,
+      _args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+        schema_version: 1,
+        workspace: 'my-org/my-project',
+        total: 1,
+        hits: 0,
+        pending: 0,
+        misses: 1,
+        results: [{
+          tag: 'deps',
+          requested_tag: 'deps',
+          status: 'miss',
+        }],
+      })));
+      return 1;
+    });
+
+    await expect(verifyVerificationSpecs(
+      'my-org/my-project',
+      [{ tag: 'deps', noPlatform: true, noGit: true, saveExpected: true }],
+      {
+        mode: 'check',
+        timeoutSeconds: 60,
+        requireServerSignature: false,
+        verbose: false,
+        acceptPendingSaveExpected: true,
+      },
+    )).rejects.toThrow('Verification failed for tags deps');
+  });
+
   it('parses explicit tool specs and normalizes nodejs to node', () => {
     expect(parseToolSpecs('nodejs@22.4.1\nruby@3.3.6')).toEqual([
       { name: 'node', version: '22.4.1', label: 'Node.js', source: 'input' },

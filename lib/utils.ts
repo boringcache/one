@@ -129,6 +129,7 @@ export interface VerifyResolvedTagsOptions {
   timeoutSeconds: number;
   requireServerSignature: boolean;
   verbose: boolean;
+  acceptPendingSaveExpected?: boolean;
 }
 
 export interface DiagnosticsConfig {
@@ -868,6 +869,7 @@ interface TagCheckBatch {
   tags: string[];
   noPlatform: boolean;
   noGit: boolean;
+  saveExpectedTags: Set<string>;
 }
 
 function envWithOverrides(overrides: Record<string, string>): Record<string, string> {
@@ -889,9 +891,13 @@ function groupVerificationSpecs(specs: TagVerificationSpec[]): TagCheckBatch[] {
       tags: [],
       noPlatform: spec.noPlatform,
       noGit: spec.noGit,
+      saveExpectedTags: new Set<string>(),
     };
     if (!batch.tags.includes(spec.tag)) {
       batch.tags.push(spec.tag);
+    }
+    if (spec.saveExpected) {
+      batch.saveExpectedTags.add(spec.tag);
     }
     grouped.set(key, batch);
   }
@@ -902,8 +908,10 @@ function groupVerificationSpecs(specs: TagVerificationSpec[]): TagCheckBatch[] {
 async function runTagCheck(
   workspace: string,
   batch: TagCheckBatch,
-  options: Pick<VerifyResolvedTagsOptions, 'requireServerSignature' | 'verbose'>,
+  options: Pick<VerifyResolvedTagsOptions, 'requireServerSignature' | 'verbose' | 'acceptPendingSaveExpected'>,
 ): Promise<CheckExecutionResult> {
+  const acceptedPendingTags = options.acceptPendingSaveExpected ? batch.saveExpectedTags : new Set<string>();
+  const shouldParseCheckJson = acceptedPendingTags.size > 0;
   const args: string[] = [];
   if (options.verbose) {
     args.push('--verbose');
@@ -926,6 +934,9 @@ async function runTagCheck(
     '--exact',
     '--fail-on-miss',
   );
+  if (shouldParseCheckJson) {
+    args.push('--json');
+  }
 
   let stdout = '';
   let stderr = '';
@@ -947,12 +958,65 @@ async function runTagCheck(
 
   const exitCode = await exec.exec('boringcache', args, execOptions);
 
-  return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+  const result = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+  if (result.exitCode !== 0 && shouldParseCheckJson) {
+    const acceptedTags = pendingOnlyForAcceptedSaveTags(result.stdout, acceptedPendingTags);
+    if (acceptedTags.length > 0) {
+      core.info(`Accepted pending save verification for tags: ${acceptedTags.join(', ')}`);
+      return { ...result, exitCode: 0 };
+    }
+  }
+
+  return result;
 }
 
 function formatCheckFailure(result: CheckExecutionResult): string {
   const details = [result.stderr, result.stdout].filter(Boolean).join('\n');
   return details || `boringcache check exited with code ${result.exitCode}`;
+}
+
+interface CheckJsonResult {
+  results?: Array<{
+    tag?: string;
+    requested_tag?: string;
+    status?: string;
+  }>;
+}
+
+function pendingOnlyForAcceptedSaveTags(stdout: string, acceptedPendingTags: Set<string>): string[] {
+  if (!stdout.trim()) {
+    return [];
+  }
+
+  let parsed: CheckJsonResult;
+  try {
+    parsed = JSON.parse(stdout) as CheckJsonResult;
+  } catch {
+    return [];
+  }
+
+  if (!Array.isArray(parsed.results)) {
+    return [];
+  }
+
+  const accepted: string[] = [];
+  for (const result of parsed.results) {
+    const status = (result.status || '').toLowerCase();
+    if (status === 'hit') {
+      continue;
+    }
+
+    const candidateTags = [result.requested_tag, result.tag].filter((tag): tag is string => Boolean(tag));
+    const acceptedTag = candidateTags.find((tag) => acceptedPendingTags.has(tag));
+    if ((status === 'pending' || status === 'uploading') && acceptedTag) {
+      accepted.push(acceptedTag);
+      continue;
+    }
+
+    return [];
+  }
+
+  return accepted;
 }
 
 export async function verifyResolvedTags(
