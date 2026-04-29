@@ -322,6 +322,9 @@ function applyAdapterSetupPlan(setup: CliAdapterSetupPlan): void {
   for (const file of setup.files || []) {
     ensureDir(path.dirname(file.path));
     if (file.mode === 'append') {
+      if (fs.existsSync(file.path) && fs.readFileSync(file.path, 'utf8').includes(file.content)) {
+        continue;
+      }
       fs.appendFileSync(file.path, file.content);
     } else if (file.mode === 'write') {
       fs.writeFileSync(file.path, file.content);

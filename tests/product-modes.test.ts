@@ -1397,6 +1397,32 @@ describe('product modes', () => {
     }
   });
 
+  it('keeps adapter setup append files idempotent', async () => {
+    const project = await makeTempProject({
+      '.java-version': '21\n',
+      'gradle.properties': 'existing=true\norg.gradle.caching=true\n',
+    });
+
+    try {
+      mockGetInput({
+        mode: 'gradle',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+        'gradle-home': project,
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      const properties = await fs.readFile(path.join(project, 'gradle.properties'), 'utf8');
+      const matches = properties.match(/org\.gradle\.caching=true/g) || [];
+      expect(matches).toHaveLength(1);
+      expect(core.setFailed).not.toHaveBeenCalled();
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('configures turbo proxy mode and exports turbo env', async () => {
     const project = await makeTempProject({
       '.node-version': '22.4.1\n',
