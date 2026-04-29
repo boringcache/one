@@ -172,6 +172,7 @@ interface RepoAdapterSettings {
   readOnly?: boolean;
   cacheMode?: string;
   cacheRefTag?: string;
+  sccacheKeyPrefix?: string;
 }
 
 function findRepoConfigPath(workingDirectory: string): string | null {
@@ -239,7 +240,7 @@ function readRepoAdapterSettings(workingDirectory: string, adapterName: string):
         continue;
       }
 
-      const stringSettingMatch = trimmed.match(/^(host|endpoint-host|endpoint_host)\s*=\s*["']([^"']+)["']$/);
+      const stringSettingMatch = trimmed.match(/^(host|endpoint-host|endpoint_host|sccache-key-prefix|sccache_key_prefix)\s*=\s*["']([^"']+)["']$/);
       if (stringSettingMatch?.[2]?.trim()) {
         switch (stringSettingMatch[1]) {
           case 'host':
@@ -248,6 +249,10 @@ function readRepoAdapterSettings(workingDirectory: string, adapterName: string):
           case 'endpoint-host':
           case 'endpoint_host':
             settings.endpointHost = stringSettingMatch[2].trim();
+            break;
+          case 'sccache-key-prefix':
+          case 'sccache_key_prefix':
+            settings.sccacheKeyPrefix = stringSettingMatch[2].trim();
             break;
           default:
             break;
@@ -1013,7 +1018,10 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       BORINGCACHE_PROXY_PORT: String(resolvedPort),
       BORINGCACHE_CACHE_REF: '{CACHE_REF}',
       RUSTC_WRAPPER: 'sccache',
-      SCCACHE_WEBDAV_ENDPOINT: `http://127.0.0.1:${resolvedPort}/`,
+      CC: 'sccache cc',
+      CXX: 'sccache c++',
+      SCCACHE_WEBDAV_ENDPOINT: `http://${resolvedEndpointHost}:${resolvedPort}/`,
+      SCCACHE_WEBDAV_KEY_PREFIX: repoSettings.sccacheKeyPrefix || '',
     };
   } else if (adapterName === 'go') {
     envVars = {
@@ -1030,9 +1038,9 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     const registryRef = `${resolvedEndpointHost}:${resolvedPort}/cache:${dockerTarget.refTag}`;
     ociCache = {
       registry_ref: registryRef,
-      cache_from: `type=registry,ref=${registryRef}`,
-      cache_from_refs: [`type=registry,ref=${registryRef}`],
-      cache_to: resolvedReadOnly ? undefined : `type=registry,ref=${registryRef},mode=${resolvedCacheMode}`,
+      cache_from: `type=registry,ref=${registryRef},registry.insecure=true`,
+      cache_from_refs: [`type=registry,ref=${registryRef},registry.insecure=true`],
+      cache_to: resolvedReadOnly ? undefined : `type=registry,ref=${registryRef},mode=${resolvedCacheMode},registry.insecure=true`,
       ref_tag: dockerTarget.refTag,
     };
     ociPrefetchRefs = [`cache@${dockerTarget.refTag}`];
@@ -1224,6 +1232,23 @@ beforeEach(() => {
         }
       }
       options?.listeners?.stdout?.(Buffer.from(JSON.stringify(plan)));
+      return 0;
+    }
+    if (command === 'boringcache' && args?.includes('check') && args.includes('--json')) {
+      const checkIndex = args.indexOf('check');
+      const requestedTag = args[checkIndex + 2] || '';
+      options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+        schema_version: 1,
+        workspace: args[checkIndex + 1] || 'default/default',
+        total: 1,
+        hits: 1,
+        misses: 0,
+        results: [{
+          tag: requestedTag,
+          requested_tag: requestedTag,
+          status: 'hit',
+        }],
+      })));
       return 0;
     }
     return 0;

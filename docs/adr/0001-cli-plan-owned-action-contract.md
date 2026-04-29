@@ -40,10 +40,14 @@ normalization, ordering, and capping belong to the CLI plan.
 
 Implementation note, 2026-04-29: proxy-backed modes start `cache-registry` and
 build deferred post-save verification specs from the same CLI dry-run
-`proxy.host`, `proxy.no_platform`, and `proxy.no_git` fields. Turbo and Nx
-environment wiring also uses the CLI-planned `env_vars`, with the action only
-rewriting the bound port after startup and applying explicit workflow token/team
-overrides.
+`proxy.host`, `proxy.no_platform`, and `proxy.no_git` fields. Turbo, Nx, and
+sccache environment wiring uses the CLI-planned `env_vars`, with the action only
+rewriting the bound port after startup, applying explicit workflow token/team
+overrides where those are action inputs, and setting lifecycle-only values such
+as `SCCACHE_IDLE_TIMEOUT`. Docker and BuildKit consume CLI-planned
+`oci_cache.cache_from_refs` and `oci_cache.cache_to` as complete BuildKit specs;
+the action must not append registry-cache options in TypeScript. Archive preset
+cache env also comes from the CLI dry-run `env_vars`.
 
 It must not:
 

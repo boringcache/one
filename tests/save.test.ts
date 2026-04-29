@@ -534,6 +534,19 @@ describe('save action', () => {
         ));
         return 0;
       }
+      if (command === 'boringcache' && args?.includes('check') && args.includes('--json')) {
+        const checkIndex = args.indexOf('check');
+        const tag = args[checkIndex + 2] || '';
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          schema_version: 1,
+          workspace: args[checkIndex + 1] || 'my-org/my-project',
+          total: 1,
+          hits: 1,
+          misses: 0,
+          results: [{ tag, requested_tag: tag, status: 'hit' }],
+        })));
+        return 0;
+      }
       return 0;
     });
 
@@ -564,7 +577,7 @@ describe('save action', () => {
         'check',
         'my-org/my-project',
         'rust-1.94.1-ci-test-sccache-rust1.94',
-        '--fail-on-miss',
+        '--json',
       ]),
       expect.objectContaining({ ignoreReturnCode: true, silent: true }),
     );

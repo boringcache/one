@@ -140,6 +140,13 @@ interface CliAdapterDryRunPlan {
   };
 }
 
+interface CliCheckSummary {
+  hits?: number;
+  results?: Array<{
+    status?: string;
+  }>;
+}
+
 const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
 const SUPPORTED_CLI_SETUP_SCHEMA_VERSION = 1;
 
@@ -198,8 +205,6 @@ interface BuildctlOptions {
   noCache: boolean;
   metadataFile: string;
 }
-
-let rustLastOutput = '';
 
 function currentHomeDir(): string {
   return process.env.HOME || os.homedir();
@@ -685,13 +690,6 @@ function getEffectiveRegistryTag(cacheTag: string, registryTag: string): string 
   return registryTag || cacheTag;
 }
 
-function getRegistryCacheFlags(ref: string, cacheMode: string): { from: string; to: string } {
-  return {
-    from: `type=registry,ref=${ref},registry.insecure=true`,
-    to: `type=registry,ref=${ref},mode=${cacheMode},registry.insecure=true`,
-  };
-}
-
 function extractRegistryCacheRefTag(cacheFrom: string): string | null {
   const refMatch = cacheFrom.match(/(?:^|,)ref=([^,]+)/);
   const ref = refMatch?.[1]?.trim();
@@ -720,13 +718,6 @@ function registryCacheFromRefTags(ociCache?: CliAdapterDryRunPlan['oci_cache']):
     .filter((tag): tag is string => Boolean(tag));
 }
 
-function normalizeRegistryImportSpec(cacheFrom: string): string {
-  if (cacheFrom.includes('registry.insecure=')) {
-    return cacheFrom;
-  }
-  return `${cacheFrom},registry.insecure=true`;
-}
-
 function registryCacheImportSpecs(
   ociCache: NonNullable<CliAdapterDryRunPlan['oci_cache']>,
   refTags?: string[],
@@ -748,7 +739,7 @@ function registryCacheImportSpecs(
         .map((cacheFrom) => cacheFrom.trim())
         .filter(Boolean);
 
-  return selectedImports.map(normalizeRegistryImportSpec);
+  return selectedImports;
 }
 
 function effectiveRegistryCacheImports(
@@ -1187,37 +1178,7 @@ function readBuildkitDigest(metadataFile: string): string {
 }
 
 async function execRustBoringCache(args: string[]): Promise<number> {
-  rustLastOutput = '';
-  let output = '';
-
-  const code = await execBoringCache(args, {
-    silent: true,
-    listeners: {
-      stdout: (data: Buffer) => {
-        const text = data.toString();
-        output += text;
-        process.stdout.write(text);
-      },
-      stderr: (data: Buffer) => {
-        const text = data.toString();
-        output += text;
-        process.stderr.write(text);
-      },
-    },
-  });
-
-  rustLastOutput = output;
-  return code;
-}
-
-function wasRustCacheHit(exitCode: number): boolean {
-  if (exitCode !== 0) {
-    return false;
-  }
-  if (!rustLastOutput) {
-    return true;
-  }
-  return ![/Cache miss/i, /No cache entries/i, /Found 0\//i].some((pattern) => pattern.test(rustLastOutput));
+  return execBoringCache(args);
 }
 
 function getCargoHome(): string {
@@ -1459,9 +1420,16 @@ function summarizeSccacheStats(output: string): SccacheStatsSummary | null {
 async function checkRustTagHit(
   workspace: string,
   tag: string,
-  { noPlatform = false, noGit = false }: { noPlatform?: boolean; noGit?: boolean } = {},
+  {
+    noPlatform = false,
+    noGit = false,
+    requireServerSignature = false,
+  }: { noPlatform?: boolean; noGit?: boolean; requireServerSignature?: boolean } = {},
 ): Promise<boolean> {
-  const args = ['--require-server-signature', 'check', workspace, tag, '--fail-on-miss'];
+  const args = ['check', workspace, tag, '--json'];
+  if (requireServerSignature) {
+    args.unshift('--require-server-signature');
+  }
   if (noPlatform) {
     args.push('--no-platform');
   }
@@ -1469,11 +1437,30 @@ async function checkRustTagHit(
     args.push('--no-git');
   }
 
+  let stdout = '';
   const exitCode = await execBoringCache(args, {
     ignoreReturnCode: true,
     silent: true,
+    listeners: {
+      stdout: (data: Buffer) => {
+        stdout += data.toString();
+      },
+    },
   });
-  return exitCode === 0;
+  if (exitCode !== 0) {
+    return false;
+  }
+
+  try {
+    const summary = JSON.parse(stdout) as CliCheckSummary;
+    if (typeof summary.hits === 'number') {
+      return summary.hits > 0;
+    }
+    return (summary.results || []).some((result) => result.status === 'hit');
+  } catch (error) {
+    core.warning(`Failed to parse boringcache check JSON for ${tag}: ${(error as Error).message}`);
+    return false;
+  }
 }
 
 function configureTurboRemoteEnv(apiUrl: string, token: string, team?: string): void {
@@ -1608,13 +1595,19 @@ async function ensureCorepackPackageManager(
   }
 }
 
-function configureSccacheProxyEnv(port: number): void {
-  const endpoint = `http://127.0.0.1:${port}/`;
-  core.exportVariable('SCCACHE_WEBDAV_ENDPOINT', endpoint);
-  core.exportVariable('RUSTC_WRAPPER', 'sccache');
-  core.exportVariable('CC', 'sccache cc');
-  core.exportVariable('CXX', 'sccache c++');
-  core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
+function sccacheEnvForStartedProxy(
+  plan: CliAdapterDryRunPlan,
+  actualPort: number,
+): Record<string, string> {
+  const envVars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(plan.env_vars || {})) {
+    envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
+  }
+
+  envVars.SCCACHE_IDLE_TIMEOUT = process.env.SCCACHE_IDLE_TIMEOUT
+    || envVars.SCCACHE_IDLE_TIMEOUT
+    || '0';
+  return envVars;
 }
 
 function overrideRustArchiveEntry(entry: ResolvedCliArchiveEntry, inputName: string): ResolvedCliArchiveEntry {
@@ -1675,6 +1668,16 @@ function buildRustCacheArgs(
     args.push('--exclude', exclude);
   }
   return args;
+}
+
+async function restoreRustArchiveEntry(
+  workspace: string,
+  entry: ResolvedCliArchiveEntry,
+  verbose: boolean,
+): Promise<boolean> {
+  const preflightHit = await checkRustTagHit(workspace, entry.tag);
+  const exitCode = await execRustBoringCache(buildRustCacheArgs('restore', workspace, entry, verbose));
+  return preflightHit && exitCode === 0;
 }
 
 function toolEnabled(plan: ResolvedPlan, toolName: string): boolean {
@@ -1784,9 +1787,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     setRegistryCacheOutputs({
       ref: dockerPlan.oci_cache!.registry_ref,
       from: effectiveImports.importSpecs,
-      to: dockerPlan.oci_cache!.cache_to
-        ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
-        : undefined,
+      to: dockerPlan.oci_cache!.cache_to,
       ociCache: dockerPlan.oci_cache,
       usedRefTags: effectiveImports.readableRefTags,
       unreadableRefTags: effectiveImports.unreadableRefTags,
@@ -1809,9 +1810,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
         builder: builderName,
         cacheMode,
         cacheFrom: effectiveImports.importSpecs,
-        cacheTo: dockerPlan.oci_cache!.cache_to
-          ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
-          : undefined,
+        cacheTo: dockerPlan.oci_cache!.cache_to,
       });
     }
   } else {
@@ -2007,9 +2006,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     setRegistryCacheOutputs({
       ref: dockerPlan.oci_cache!.registry_ref,
       from: effectiveImports.importSpecs,
-      to: dockerPlan.oci_cache!.cache_to
-        ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
-        : undefined,
+      to: dockerPlan.oci_cache!.cache_to,
       ociCache: dockerPlan.oci_cache,
       usedRefTags: effectiveImports.readableRefTags,
       unreadableRefTags: effectiveImports.unreadableRefTags,
@@ -2031,9 +2028,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       platforms,
       cacheMode,
       importCache: effectiveImports.importSpecs,
-      exportCache: dockerPlan.oci_cache!.cache_to
-        ? `${dockerPlan.oci_cache!.cache_to},registry.insecure=true`
-        : undefined,
+      exportCache: dockerPlan.oci_cache!.cache_to,
       output,
       imageTags,
       push,
@@ -2553,26 +2548,22 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
   let sccacheRestored = false;
 
   if (cargoRegistryEntry) {
-    const registryResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoRegistryEntry, inputs.verbose));
-    registryRestored = wasRustCacheHit(registryResult);
+    registryRestored = await restoreRustArchiveEntry(workspace, cargoRegistryEntry, inputs.verbose);
     saveRustArchiveEntryState('cargo-registry', cargoRegistryEntry);
   }
 
   if (cargoGitEntry) {
-    const cargoGitResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoGitEntry, inputs.verbose));
-    cargoGitRestored = wasRustCacheHit(cargoGitResult);
+    cargoGitRestored = await restoreRustArchiveEntry(workspace, cargoGitEntry, inputs.verbose);
     saveRustArchiveEntryState('cargo-git', cargoGitEntry);
   }
 
   if (cargoBinEntry) {
-    const binResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoBinEntry, inputs.verbose));
-    cargoBinRestored = wasRustCacheHit(binResult);
+    cargoBinRestored = await restoreRustArchiveEntry(workspace, cargoBinEntry, inputs.verbose);
     saveRustArchiveEntryState('cargo-bin', cargoBinEntry);
   }
 
   if (targetEntry) {
-    const targetResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, targetEntry, inputs.verbose));
-    targetRestored = wasRustCacheHit(targetResult);
+    targetRestored = await restoreRustArchiveEntry(workspace, targetEntry, inputs.verbose);
     saveRustArchiveEntryState('target', targetEntry);
   }
 
@@ -2597,6 +2588,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
       sccacheRestored = await checkRustTagHit(proxyPlan.workspace, proxyPlan.tag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
+        requireServerSignature: true,
       });
       const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
@@ -2609,7 +2601,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
       }, proxyPlan.proxy));
-      configureSccacheProxyEnv(proxy.port);
+      exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
       await startSccacheServer();
       saveModeState('proxy-pid', String(proxy.pid));
       saveProxyModeState(proxy.port);
@@ -2621,8 +2613,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
       saveModeState('sccache-preflight-hit', String(sccacheRestored));
       setProxyOutputs(proxy.port);
     } else {
-      const sccacheResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, sccacheEntry, inputs.verbose));
-      sccacheRestored = wasRustCacheHit(sccacheResult);
+      sccacheRestored = await restoreRustArchiveEntry(workspace, sccacheEntry, inputs.verbose);
       await startSccacheServer();
       saveRustArchiveEntryState('sccache', sccacheEntry);
       saveModeState('sccache-preflight-hit', String(sccacheRestored));
@@ -2757,7 +2748,11 @@ async function runRustSave(): Promise<void> {
         return;
       }
       if (sccacheTag && sccacheStats && sccacheStats.compileRequests > 0) {
-        const postShutdownHit = await checkRustTagHit(workspace, sccacheTag, { noPlatform: true, noGit: true });
+        const postShutdownHit = await checkRustTagHit(workspace, sccacheTag, {
+          noPlatform: true,
+          noGit: true,
+          requireServerSignature: true,
+        });
         const rustHitRate = sccacheStats.rustHitRate || 'unknown';
         core.info(
           `sccache proxy stats for ${sccacheTag}: compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`,

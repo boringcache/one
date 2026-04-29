@@ -194,13 +194,13 @@ describe('product modes', () => {
             },
             oci_cache: {
               registry_ref: '172.17.0.1:5000/cache:run-example-42-attempt-1',
-              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:branch-main',
+              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:branch-main,registry.insecure=true',
               cache_from_refs: [
-                'type=registry,ref=172.17.0.1:5000/cache:branch-main',
-                'type=registry,ref=172.17.0.1:5000/cache:default',
-                'type=registry,ref=172.17.0.1:5000/cache:buildcache',
+                'type=registry,ref=172.17.0.1:5000/cache:branch-main,registry.insecure=true',
+                'type=registry,ref=172.17.0.1:5000/cache:default,registry.insecure=true',
+                'type=registry,ref=172.17.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
-              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:run-example-42-attempt-1,mode=max',
+              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:run-example-42-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'run-example-42-attempt-1',
               immutable_run_ref_tag: 'run-example-42-attempt-1',
               promotion_ref_tags: ['branch-main'],
@@ -339,13 +339,13 @@ describe('product modes', () => {
             },
             oci_cache: {
               registry_ref: '127.0.0.1:5000/cache:run-gha-24771923434-attempt-1',
-              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:pr-3208',
+              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
               cache_from_refs: [
-                'type=registry,ref=127.0.0.1:5000/cache:pr-3208',
-                'type=registry,ref=127.0.0.1:5000/cache:default',
-                'type=registry,ref=127.0.0.1:5000/cache:buildcache',
+                'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
+                'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
+                'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
-              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max',
+              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'buildcache',
               immutable_run_ref_tag: 'run-gha-24771923434-attempt-1',
               promotion_ref_tags: ['pr-3208'],
@@ -444,9 +444,9 @@ describe('product modes', () => {
             },
             oci_cache: {
               registry_ref: '172.17.0.1:5000/cache:run-42',
-              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:branch-main',
-              cache_from_refs: ['type=registry,ref=172.17.0.1:5000/cache:branch-main'],
-              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:run-42,mode=max',
+              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:branch-main,registry.insecure=true',
+              cache_from_refs: ['type=registry,ref=172.17.0.1:5000/cache:branch-main,registry.insecure=true'],
+              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:run-42,mode=max,registry.insecure=true',
               ref_tag: 'run-42',
               immutable_run_ref_tag: 'run-42',
               promotion_ref_tags: ['branch-main'],
@@ -538,9 +538,9 @@ describe('product modes', () => {
             },
             oci_cache: {
               registry_ref: '172.17.0.1:5000/cache:buildcache',
-              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:buildcache',
-              cache_from_refs: ['type=registry,ref=172.17.0.1:5000/cache:buildcache'],
-              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:buildcache,mode=max',
+              cache_from: 'type=registry,ref=172.17.0.1:5000/cache:buildcache,registry.insecure=true',
+              cache_from_refs: ['type=registry,ref=172.17.0.1:5000/cache:buildcache,registry.insecure=true'],
+              cache_to: 'type=registry,ref=172.17.0.1:5000/cache:buildcache,mode=max,registry.insecure=true',
               ref_tag: 'buildcache',
             },
           })));
@@ -946,13 +946,13 @@ describe('product modes', () => {
             },
             oci_cache: {
               registry_ref: '127.0.0.1:5000/cache:run-gha-24771923434-attempt-1',
-              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:pr-3208',
+              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
               cache_from_refs: [
-                'type=registry,ref=127.0.0.1:5000/cache:pr-3208',
-                'type=registry,ref=127.0.0.1:5000/cache:default',
-                'type=registry,ref=127.0.0.1:5000/cache:buildcache',
+                'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
+                'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
+                'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
-              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max',
+              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'buildcache',
               immutable_run_ref_tag: 'run-gha-24771923434-attempt-1',
               promotion_ref_tags: ['pr-3208'],
@@ -1056,13 +1056,13 @@ describe('product modes', () => {
             },
             oci_cache: {
               registry_ref: '127.0.0.1:5000/cache:run-gha-24771923434-attempt-1',
-              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:branch-main',
+              cache_from: 'type=registry,ref=127.0.0.1:5000/cache:branch-main,registry.insecure=true',
               cache_from_refs: [
-                'type=registry,ref=127.0.0.1:5000/cache:branch-main',
-                'type=registry,ref=127.0.0.1:5000/cache:default',
-                'type=registry,ref=127.0.0.1:5000/cache:buildcache',
+                'type=registry,ref=127.0.0.1:5000/cache:branch-main,registry.insecure=true',
+                'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
+                'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
-              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max',
+              cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'buildcache',
               immutable_run_ref_tag: 'run-gha-24771923434-attempt-1',
               promotion_ref_tags: ['branch-main'],
@@ -1685,14 +1685,58 @@ describe('product modes', () => {
         expect.objectContaining({ cwd: project }),
       );
       const sccacheCheckCall = (exec.exec as jest.Mock).mock.calls.find(
-        ([command, args]) => command === 'boringcache' && Array.isArray(args) && args.includes('check'),
+        ([command, args]) => command === 'boringcache'
+          && Array.isArray(args)
+          && args.includes('check')
+          && args.includes('--require-server-signature'),
       );
       expect(sccacheCheckCall?.[1]).toEqual(expect.arrayContaining([
         '--require-server-signature',
-        '--fail-on-miss',
+        '--json',
       ]));
       expect(core.setOutput).toHaveBeenCalledWith('sccache-hit', 'true');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'rust-sccache');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('exports sccache proxy env from the CLI plan', async () => {
+    const project = await makeTempProject({
+      '.boringcache.toml': [
+        'workspace = "config-org/config-workspace"',
+        '',
+        '[adapters.sccache]',
+        'endpoint-host = "host.docker.internal"',
+        'sccache-key-prefix = "rust/ci"',
+        'no-platform = true',
+        'no-git = true',
+        '',
+      ].join('\n'),
+      'Cargo.lock': '',
+      'rust-toolchain.toml': '[toolchain]\nchannel = "1.89.0"\n',
+    });
+
+    try {
+      actionCoreMocks.hasToolVersionOnPath.mockImplementation(async (toolName: string) => toolName === 'sccache');
+
+      mockGetInput({
+        mode: 'rust-sccache',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+        sccache: 'true',
+        'sccache-mode': 'proxy',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_WEBDAV_ENDPOINT', 'http://host.docker.internal:5000/');
+      expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_WEBDAV_KEY_PREFIX', 'rust/ci');
+      expect(core.exportVariable).toHaveBeenCalledWith('RUSTC_WRAPPER', 'sccache');
+      expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
+      expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');
+      expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_IDLE_TIMEOUT', '0');
     } finally {
       await removeTempProject(project);
     }
@@ -1728,11 +1772,11 @@ describe('product modes', () => {
       await restoreRun();
 
       const sccacheCheckCall = actionCoreMocks.execBoringCache.mock.calls.find(
-        ([args]) => Array.isArray(args) && args.includes('check'),
+        ([args]) => Array.isArray(args) && args.includes('check') && args.includes('--require-server-signature'),
       );
       expect(sccacheCheckCall?.[0]).toEqual(expect.arrayContaining([
         '--require-server-signature',
-        '--fail-on-miss',
+        '--json',
       ]));
       expect(core.setOutput).toHaveBeenCalledWith('sccache-hit', 'false');
     } finally {

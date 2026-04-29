@@ -77,7 +77,6 @@ function assertSupportedCliDryRunSchema(adapter, plan) {
             + `(expected ${SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION}). Update boringcache/one or pin cli-version.`);
     }
 }
-let rustLastOutput = '';
 function currentHomeDir() {
     return process.env.HOME || os.homedir();
 }
@@ -479,12 +478,6 @@ async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
 function getEffectiveRegistryTag(cacheTag, registryTag) {
     return registryTag || cacheTag;
 }
-function getRegistryCacheFlags(ref, cacheMode) {
-    return {
-        from: `type=registry,ref=${ref},registry.insecure=true`,
-        to: `type=registry,ref=${ref},mode=${cacheMode},registry.insecure=true`,
-    };
-}
 function extractRegistryCacheRefTag(cacheFrom) {
     var _a;
     const refMatch = cacheFrom.match(/(?:^|,)ref=([^,]+)/);
@@ -511,12 +504,6 @@ function registryCacheFromRefTags(ociCache) {
         .map(extractRegistryCacheRefTag)
         .filter((tag) => Boolean(tag));
 }
-function normalizeRegistryImportSpec(cacheFrom) {
-    if (cacheFrom.includes('registry.insecure=')) {
-        return cacheFrom;
-    }
-    return `${cacheFrom},registry.insecure=true`;
-}
 function registryCacheImportSpecs(ociCache, refTags) {
     var _a;
     const imports = ((_a = ociCache.cache_from_refs) === null || _a === void 0 ? void 0 : _a.length) ? ociCache.cache_from_refs : [ociCache.cache_from];
@@ -534,7 +521,7 @@ function registryCacheImportSpecs(ociCache, refTags) {
         : imports
             .map((cacheFrom) => cacheFrom.trim())
             .filter(Boolean);
-    return selectedImports.map(normalizeRegistryImportSpec);
+    return selectedImports;
 }
 function effectiveRegistryCacheImports(ociCache, proxy) {
     var _a, _b, _c;
@@ -901,34 +888,7 @@ function readBuildkitDigest(metadataFile) {
     }
 }
 async function execRustBoringCache(args) {
-    rustLastOutput = '';
-    let output = '';
-    const code = await execBoringCache(args, {
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                const text = data.toString();
-                output += text;
-                process.stdout.write(text);
-            },
-            stderr: (data) => {
-                const text = data.toString();
-                output += text;
-                process.stderr.write(text);
-            },
-        },
-    });
-    rustLastOutput = output;
-    return code;
-}
-function wasRustCacheHit(exitCode) {
-    if (exitCode !== 0) {
-        return false;
-    }
-    if (!rustLastOutput) {
-        return true;
-    }
-    return ![/Cache miss/i, /No cache entries/i, /Found 0\//i].some((pattern) => pattern.test(rustLastOutput));
+    return execBoringCache(args);
 }
 function getCargoHome() {
     return process.env.CARGO_HOME || path.join(currentHomeDir(), '.cargo');
@@ -1141,19 +1101,41 @@ function summarizeSccacheStats(output) {
         rustHitRate: parseSccacheTextStat(output, 'Cache hits rate (Rust)'),
     };
 }
-async function checkRustTagHit(workspace, tag, { noPlatform = false, noGit = false } = {}) {
-    const args = ['--require-server-signature', 'check', workspace, tag, '--fail-on-miss'];
+async function checkRustTagHit(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
+    const args = ['check', workspace, tag, '--json'];
+    if (requireServerSignature) {
+        args.unshift('--require-server-signature');
+    }
     if (noPlatform) {
         args.push('--no-platform');
     }
     if (noGit) {
         args.push('--no-git');
     }
+    let stdout = '';
     const exitCode = await execBoringCache(args, {
         ignoreReturnCode: true,
         silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+        },
     });
-    return exitCode === 0;
+    if (exitCode !== 0) {
+        return false;
+    }
+    try {
+        const summary = JSON.parse(stdout);
+        if (typeof summary.hits === 'number') {
+            return summary.hits > 0;
+        }
+        return (summary.results || []).some((result) => result.status === 'hit');
+    }
+    catch (error) {
+        core.warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
+        return false;
+    }
 }
 function configureTurboRemoteEnv(apiUrl, token, team) {
     core.exportVariable('TURBO_API', apiUrl);
@@ -1250,13 +1232,15 @@ async function ensureCorepackPackageManager(workingDirectory, packageManager, ru
         await exec.exec('corepack', ['prepare', `${packageManager.name}@${packageManager.version}`, '--activate'], { cwd: workingDirectory, ignoreReturnCode: true });
     }
 }
-function configureSccacheProxyEnv(port) {
-    const endpoint = `http://127.0.0.1:${port}/`;
-    core.exportVariable('SCCACHE_WEBDAV_ENDPOINT', endpoint);
-    core.exportVariable('RUSTC_WRAPPER', 'sccache');
-    core.exportVariable('CC', 'sccache cc');
-    core.exportVariable('CXX', 'sccache c++');
-    core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
+function sccacheEnvForStartedProxy(plan, actualPort) {
+    const envVars = {};
+    for (const [key, value] of Object.entries(plan.env_vars || {})) {
+        envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
+    }
+    envVars.SCCACHE_IDLE_TIMEOUT = process.env.SCCACHE_IDLE_TIMEOUT
+        || envVars.SCCACHE_IDLE_TIMEOUT
+        || '0';
+    return envVars;
 }
 function overrideRustArchiveEntry(entry, inputName) {
     const overrideTag = core.getInput(inputName).trim();
@@ -1303,6 +1287,11 @@ function buildRustCacheArgs(action, workspace, entry, verbose, exclude = '') {
         args.push('--exclude', exclude);
     }
     return args;
+}
+async function restoreRustArchiveEntry(workspace, entry, verbose) {
+    const preflightHit = await checkRustTagHit(workspace, entry.tag);
+    const exitCode = await execRustBoringCache(buildRustCacheArgs('restore', workspace, entry, verbose));
+    return preflightHit && exitCode === 0;
 }
 function toolEnabled(plan, toolName) {
     return plan.runtimeTools.some((tool) => tool.name === toolName);
@@ -1391,9 +1380,7 @@ async function runDockerRestore(plan, inputs) {
         setRegistryCacheOutputs({
             ref: dockerPlan.oci_cache.registry_ref,
             from: effectiveImports.importSpecs,
-            to: dockerPlan.oci_cache.cache_to
-                ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
-                : undefined,
+            to: dockerPlan.oci_cache.cache_to,
             ociCache: dockerPlan.oci_cache,
             usedRefTags: effectiveImports.readableRefTags,
             unreadableRefTags: effectiveImports.unreadableRefTags,
@@ -1415,9 +1402,7 @@ async function runDockerRestore(plan, inputs) {
                 builder: builderName,
                 cacheMode,
                 cacheFrom: effectiveImports.importSpecs,
-                cacheTo: dockerPlan.oci_cache.cache_to
-                    ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
-                    : undefined,
+                cacheTo: dockerPlan.oci_cache.cache_to,
             });
         }
     }
@@ -1587,9 +1572,7 @@ async function runBuildkitRestore(plan, inputs) {
         setRegistryCacheOutputs({
             ref: dockerPlan.oci_cache.registry_ref,
             from: effectiveImports.importSpecs,
-            to: dockerPlan.oci_cache.cache_to
-                ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
-                : undefined,
+            to: dockerPlan.oci_cache.cache_to,
             ociCache: dockerPlan.oci_cache,
             usedRefTags: effectiveImports.readableRefTags,
             unreadableRefTags: effectiveImports.unreadableRefTags,
@@ -1611,9 +1594,7 @@ async function runBuildkitRestore(plan, inputs) {
             platforms,
             cacheMode,
             importCache: effectiveImports.importSpecs,
-            exportCache: dockerPlan.oci_cache.cache_to
-                ? `${dockerPlan.oci_cache.cache_to},registry.insecure=true`
-                : undefined,
+            exportCache: dockerPlan.oci_cache.cache_to,
             output,
             imageTags,
             push,
@@ -2012,23 +1993,19 @@ async function runRustRestore(plan, inputs) {
     let targetRestored = false;
     let sccacheRestored = false;
     if (cargoRegistryEntry) {
-        const registryResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoRegistryEntry, inputs.verbose));
-        registryRestored = wasRustCacheHit(registryResult);
+        registryRestored = await restoreRustArchiveEntry(workspace, cargoRegistryEntry, inputs.verbose);
         saveRustArchiveEntryState('cargo-registry', cargoRegistryEntry);
     }
     if (cargoGitEntry) {
-        const cargoGitResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoGitEntry, inputs.verbose));
-        cargoGitRestored = wasRustCacheHit(cargoGitResult);
+        cargoGitRestored = await restoreRustArchiveEntry(workspace, cargoGitEntry, inputs.verbose);
         saveRustArchiveEntryState('cargo-git', cargoGitEntry);
     }
     if (cargoBinEntry) {
-        const binResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, cargoBinEntry, inputs.verbose));
-        cargoBinRestored = wasRustCacheHit(binResult);
+        cargoBinRestored = await restoreRustArchiveEntry(workspace, cargoBinEntry, inputs.verbose);
         saveRustArchiveEntryState('cargo-bin', cargoBinEntry);
     }
     if (targetEntry) {
-        const targetResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, targetEntry, inputs.verbose));
-        targetRestored = wasRustCacheHit(targetResult);
+        targetRestored = await restoreRustArchiveEntry(workspace, targetEntry, inputs.verbose);
         saveRustArchiveEntryState('target', targetEntry);
     }
     if (useSccache && sccacheEntry) {
@@ -2041,6 +2018,7 @@ async function runRustRestore(plan, inputs) {
             sccacheRestored = await checkRustTagHit(proxyPlan.workspace, proxyPlan.tag, {
                 noPlatform: proxyPlan.proxy.no_platform,
                 noGit: proxyPlan.proxy.no_git,
+                requireServerSignature: true,
             });
             const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
                 command: 'cache-registry',
@@ -2053,7 +2031,7 @@ async function runRustRestore(plan, inputs) {
                 verbose: inputs.verbose,
                 readOnly: proxyPlan.proxy.read_only,
             }, proxyPlan.proxy));
-            configureSccacheProxyEnv(proxy.port);
+            exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
             await startSccacheServer();
             saveModeState('proxy-pid', String(proxy.pid));
             saveProxyModeState(proxy.port);
@@ -2066,8 +2044,7 @@ async function runRustRestore(plan, inputs) {
             setProxyOutputs(proxy.port);
         }
         else {
-            const sccacheResult = await execRustBoringCache(buildRustCacheArgs('restore', workspace, sccacheEntry, inputs.verbose));
-            sccacheRestored = wasRustCacheHit(sccacheResult);
+            sccacheRestored = await restoreRustArchiveEntry(workspace, sccacheEntry, inputs.verbose);
             await startSccacheServer();
             saveRustArchiveEntryState('sccache', sccacheEntry);
             saveModeState('sccache-preflight-hit', String(sccacheRestored));
@@ -2186,7 +2163,11 @@ async function runRustSave() {
                 return;
             }
             if (sccacheTag && sccacheStats && sccacheStats.compileRequests > 0) {
-                const postShutdownHit = await checkRustTagHit(workspace, sccacheTag, { noPlatform: true, noGit: true });
+                const postShutdownHit = await checkRustTagHit(workspace, sccacheTag, {
+                    noPlatform: true,
+                    noGit: true,
+                    requireServerSignature: true,
+                });
                 const rustHitRate = sccacheStats.rustHitRate || 'unknown';
                 core.info(`sccache proxy stats for ${sccacheTag}: compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`);
                 if (sccacheStats.cacheHits === 0) {
