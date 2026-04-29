@@ -35,7 +35,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.58',
+      version: 'v1.12.59',
       platform: undefined,
     });
     expect(exec.exec).toHaveBeenCalledWith(
@@ -144,7 +144,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.58',
+      version: 'v1.12.59',
       platform: 'alpine-amd64',
     });
   });
@@ -160,7 +160,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.58',
+      version: 'v1.12.59',
       platform: undefined,
       trustedWorkspaceSigningKeyFingerprint:
         'ed25519-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -176,7 +176,7 @@ describe('restore action', () => {
     await restoreRun();
 
     expect(actionCoreMocks.ensureBoringCache).toHaveBeenCalledWith({
-      version: 'v1.12.58',
+      version: 'v1.12.59',
       platform: 'linux-amd64',
     });
     expect(exec.exec).not.toHaveBeenCalledWith(
