@@ -305,11 +305,15 @@ function requireAdapterSetupPlan(adapter: string, setup?: CliAdapterSetupPlan): 
   return setup;
 }
 
-function applyAdapterSetupPlan(setup: CliAdapterSetupPlan): void {
-  for (const [key, value] of Object.entries(setup.env_vars || {})) {
+function exportEnvVars(envVars: Record<string, string>): void {
+  for (const [key, value] of Object.entries(envVars)) {
     process.env[key] = value;
     core.exportVariable(key, value);
   }
+}
+
+function applyAdapterSetupPlan(setup: CliAdapterSetupPlan): void {
+  exportEnvVars(setup.env_vars || {});
 
   for (const directory of setup.directories || []) {
     ensureDir(directory);
@@ -1461,9 +1465,31 @@ function configureTurboRemoteEnv(apiUrl: string, token: string, team?: string): 
   core.exportVariable('TURBO_TEAM', team || 'team_boringcache');
 }
 
-function configureNxRemoteEnv(serverUrl: string, accessToken: string): void {
-  core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_SERVER', serverUrl);
-  core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', accessToken);
+function rewritePlannedProxyPort(value: string, plannedPort: number, actualPort: number): string {
+  if (plannedPort === actualPort) {
+    return value;
+  }
+  return value.replace(new RegExp(`:${plannedPort}(?=/|$)`), `:${actualPort}`);
+}
+
+function nxEnvForStartedProxy(
+  plan: CliAdapterDryRunPlan,
+  actualPort: number,
+  accessTokenOverride: string,
+): Record<string, string> {
+  const envVars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(plan.env_vars || {})) {
+    envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
+  }
+
+  const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
+  envVars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER = `http://${endpointHost}:${actualPort}`;
+  envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN = accessTokenOverride.trim()
+    || envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN
+    || 'boringcache';
+  envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
+
+  return envVars;
 }
 
 function resolveNodePackageManagerCacheDir(
@@ -2366,7 +2392,7 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
 }
 
 async function runNxProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
-  const nxAccessToken = core.getInput('nx-access-token') || 'boringcache';
+  const nxAccessToken = core.getInput('nx-access-token');
   const preferredPort = parseInt(core.getInput('nx-port') || inputs.proxyPort || '4228', 10);
   const nxPlan = await resolveAdapterCliPlan(
     'nx',
@@ -2405,7 +2431,7 @@ async function runNxProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise
 
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
-  configureNxRemoteEnv(`http://127.0.0.1:${proxy.port}`, nxAccessToken);
+  exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port, nxAccessToken));
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
   core.setOutput('workspace', workspace);
@@ -2413,8 +2439,8 @@ async function runNxProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Promise
     cacheTag,
     verificationSpecs: [{
       tag: cacheTag,
-      noPlatform: nxPlan.proxy.no_platform,
-      noGit: nxPlan.proxy.no_git,
+      noPlatform: true,
+      noGit: true,
       pathHint: plan.workingDirectory,
       saveExpected: !inputs.readOnly,
     }],

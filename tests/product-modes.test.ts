@@ -1538,6 +1538,11 @@ describe('product modes', () => {
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalled();
       expect(core.exportVariable).toHaveBeenCalledWith('NX_SELF_HOSTED_REMOTE_CACHE_SERVER', 'http://127.0.0.1:5000');
       expect(core.exportVariable).toHaveBeenCalledWith('NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', 'boringcache');
+      expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_PROXY_PORT', '5000');
+      expect(core.saveState).toHaveBeenCalledWith(
+        'verify-save-specs',
+        expect.stringContaining('"noPlatform":true,"noGit":true'),
+      );
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'nx-proxy');
     } finally {
       await removeTempProject(project);
