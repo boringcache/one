@@ -52,6 +52,16 @@ also stay CLI-owned; the action no longer exposes exact-tag inputs that mutate
 `cargo-registry`, `cargo-git`, `cargo-bin`, `target`, or `sccache-dir` entries
 after dry-run resolution.
 
+Diagnostics follow the same ownership test. The CLI owns diagnostics that make
+local adapter runs explainable, including proxy/session summaries, OCI
+body-plane counters, and the best-effort `sccache --show-stats` summary printed
+after `boringcache sccache`. The action may consume diagnostics only when it
+owns the GitHub Actions lifecycle or output being measured. Today that exception
+is `mode: rust-sccache`: the action starts/stops the sccache server across
+restore/save phases, so it reads `sccache --show-stats` to decide save/verify
+behavior and step notices. That must remain output/lifecycle plumbing, not a
+second cache setup or tag-planning path.
+
 It must not:
 
 - reimplement `.boringcache.toml` semantics;
