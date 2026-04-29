@@ -331,7 +331,7 @@ function cliBuiltInEntry(workingDirectory: string, requested: string): BuiltInCl
   const canonical = requested === 'node-modules' ? 'node_modules' : requested;
   switch (canonical) {
     case 'bundler': {
-      const bundlePath = path.join(workingDirectory, process.env.BUNDLE_PATH || 'vendor/bundle');
+      const bundlePath = resolveMockArchivePath(process.env.BUNDLE_PATH || 'vendor/bundle', workingDirectory);
       return {
         tag: 'bundler',
         path: bundlePath,
@@ -339,7 +339,10 @@ function cliBuiltInEntry(workingDirectory: string, requested: string): BuiltInCl
       };
     }
     case 'pnpm-store': {
-      const storePath = path.join(workingDirectory, process.env.PNPM_STORE_DIR || process.env.NPM_CONFIG_STORE_DIR || '.pnpm-store');
+      const storePath = resolveMockArchivePath(
+        process.env.PNPM_STORE_DIR || process.env.NPM_CONFIG_STORE_DIR || '.pnpm-store',
+        workingDirectory,
+      );
       return {
         tag: 'pnpm-store',
         path: storePath,
@@ -347,7 +350,7 @@ function cliBuiltInEntry(workingDirectory: string, requested: string): BuiltInCl
       };
     }
     case 'yarn-cache': {
-      const cachePath = path.join(workingDirectory, process.env.YARN_CACHE_FOLDER || '.yarn-cache');
+      const cachePath = resolveMockArchivePath(process.env.YARN_CACHE_FOLDER || '.yarn-cache', workingDirectory);
       return {
         tag: 'yarn-cache',
         path: cachePath,
@@ -355,7 +358,10 @@ function cliBuiltInEntry(workingDirectory: string, requested: string): BuiltInCl
       };
     }
     case 'npm-cache': {
-      const cachePath = path.join(workingDirectory, process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || '.npm-cache');
+      const cachePath = resolveMockArchivePath(
+        process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || '.npm-cache',
+        workingDirectory,
+      );
       return {
         tag: 'npm-cache',
         path: cachePath,
@@ -452,6 +458,54 @@ function cliBuiltInEntry(workingDirectory: string, requested: string): BuiltInCl
     default:
       throw new Error(`Unexpected CLI dry-run entry request in test: ${requested}`);
   }
+}
+
+function mockNodePackageManagerCacheEntry(workingDirectory: string): string | null {
+  const packageJsonPath = path.join(workingDirectory, 'package.json');
+  if (fs.existsSync(packageJsonPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { packageManager?: unknown };
+      if (typeof parsed.packageManager === 'string') {
+        const packageManagerField = parsed.packageManager.trim();
+        const atIndex = packageManagerField.lastIndexOf('@');
+        if (atIndex > 0) {
+          const name = packageManagerField.slice(0, atIndex).trim().toLowerCase();
+          if (name === 'pnpm') {
+            return 'pnpm-store';
+          }
+          if (name === 'yarn') {
+            return 'yarn-cache';
+          }
+          if (name === 'npm') {
+            return 'npm-cache';
+          }
+        }
+      }
+    } catch {
+      // Fall through to lockfile detection.
+    }
+  }
+
+  if (fs.existsSync(path.join(workingDirectory, 'pnpm-lock.yaml'))) {
+    return 'pnpm-store';
+  }
+  if (fs.existsSync(path.join(workingDirectory, 'yarn.lock'))) {
+    return 'yarn-cache';
+  }
+  if (
+    fs.existsSync(path.join(workingDirectory, 'package-lock.json'))
+    || fs.existsSync(path.join(workingDirectory, 'npm-shrinkwrap.json'))
+    || fs.existsSync(packageJsonPath)
+  ) {
+    return 'npm-cache';
+  }
+
+  return null;
+}
+
+function mockNodePackageManagerEnvVars(workingDirectory: string): Record<string, string> {
+  const entry = mockNodePackageManagerCacheEntry(workingDirectory);
+  return entry ? cliBuiltInEntry(workingDirectory, entry).envVars : {};
 }
 
 function cliDryRunEntry(workingDirectory: string, requested: string): CliDryRunArchiveEntry {
@@ -1005,6 +1059,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
         TURBO_API: `http://127.0.0.1:${resolvedPort}`,
         TURBO_TOKEN: 'boringcache',
         TURBO_TEAM: 'boringcache',
+        ...mockNodePackageManagerEnvVars(workingDirectory),
       };
   } else if (adapterName === 'nx') {
     envVars = {
@@ -1012,6 +1067,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
         BORINGCACHE_CACHE_REF: '{CACHE_REF}',
         NX_SELF_HOSTED_REMOTE_CACHE_SERVER: `http://127.0.0.1:${resolvedPort}`,
         NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: 'boringcache',
+        ...mockNodePackageManagerEnvVars(workingDirectory),
       };
   } else if (adapterName === 'sccache') {
     envVars = {

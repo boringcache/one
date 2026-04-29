@@ -1590,8 +1590,46 @@ function nxEnvForStartedProxy(
   return envVars;
 }
 
-function resolveNodePackageManagerCacheDir(
+function plannedNodePackageManagerEnv(
   packageManager: Awaited<ReturnType<typeof detectNodePackageManager>>,
+  plan: CliAdapterDryRunPlan,
+): Record<string, string> {
+  const plannedEnv = plan.env_vars || {};
+  if (!packageManager) {
+    return {};
+  }
+
+  const envVars: Record<string, string> = {};
+  switch (packageManager.name) {
+    case 'pnpm':
+      for (const key of ['PNPM_STORE_DIR', 'NPM_CONFIG_STORE_DIR']) {
+        if (plannedEnv[key]) {
+          envVars[key] = plannedEnv[key];
+        }
+      }
+      break;
+    case 'yarn':
+      for (const key of ['YARN_CACHE_FOLDER', 'YARN_ENABLE_GLOBAL_CACHE']) {
+        if (plannedEnv[key]) {
+          envVars[key] = plannedEnv[key];
+        }
+      }
+      break;
+    case 'npm':
+      for (const key of ['npm_config_cache', 'NPM_CONFIG_CACHE']) {
+        if (plannedEnv[key]) {
+          envVars[key] = plannedEnv[key];
+        }
+      }
+      break;
+  }
+
+  return envVars;
+}
+
+function plannedNodePackageManagerCacheDir(
+  packageManager: Awaited<ReturnType<typeof detectNodePackageManager>>,
+  plan: CliAdapterDryRunPlan,
 ): string | null {
   if (!packageManager) {
     return null;
@@ -1599,41 +1637,12 @@ function resolveNodePackageManagerCacheDir(
 
   switch (packageManager.name) {
     case 'pnpm':
-      return process.env.PNPM_STORE_DIR || process.env.NPM_CONFIG_STORE_DIR || packageManager.cacheDir;
+      return plan.env_vars?.PNPM_STORE_DIR || plan.env_vars?.NPM_CONFIG_STORE_DIR || packageManager.cacheDir;
     case 'yarn':
-      return process.env.YARN_CACHE_FOLDER || packageManager.cacheDir;
+      return plan.env_vars?.YARN_CACHE_FOLDER || packageManager.cacheDir;
     case 'npm':
-      return process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || packageManager.cacheDir;
+      return plan.env_vars?.npm_config_cache || plan.env_vars?.NPM_CONFIG_CACHE || packageManager.cacheDir;
   }
-}
-
-function configureNodePackageManagerEnv(packageManager: Awaited<ReturnType<typeof detectNodePackageManager>>): string | null {
-  if (!packageManager) {
-    return null;
-  }
-
-  const cacheDir = resolveNodePackageManagerCacheDir(packageManager);
-  if (!cacheDir) {
-    return null;
-  }
-
-  ensureDir(cacheDir);
-  switch (packageManager.name) {
-    case 'pnpm':
-      core.exportVariable('PNPM_STORE_DIR', cacheDir);
-      core.exportVariable('NPM_CONFIG_STORE_DIR', cacheDir);
-      break;
-    case 'yarn':
-      core.exportVariable('YARN_CACHE_FOLDER', cacheDir);
-      core.exportVariable('YARN_ENABLE_GLOBAL_CACHE', 'false');
-      break;
-    case 'npm':
-      core.exportVariable('npm_config_cache', cacheDir);
-      core.exportVariable('NPM_CONFIG_CACHE', cacheDir);
-      break;
-  }
-
-  return cacheDir;
 }
 
 async function ensureCorepackPackageManager(
@@ -2410,14 +2419,17 @@ async function runTurboProxyRestore(plan: ResolvedPlan, inputs: OneInputs): Prom
   const cacheTag = turboPlan.tag;
   const packageManager = await detectNodePackageManager(plan.workingDirectory);
 
-  const packageManagerCacheDir = configureNodePackageManagerEnv(packageManager);
   await ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools);
   if (packageManager) {
     core.setOutput('package-manager', packageManager.name);
-    core.setOutput('package-manager-cache-dir', packageManagerCacheDir || packageManager.cacheDir);
+    core.setOutput(
+      'package-manager-cache-dir',
+      plannedNodePackageManagerCacheDir(packageManager, turboPlan) || packageManager.cacheDir,
+    );
   }
 
   if (turboApiUrl) {
+    exportEnvVars(plannedNodePackageManagerEnv(packageManager, turboPlan));
     configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
     core.setOutput('workspace', workspace);
     core.setOutput('cache-tag', cacheTag);

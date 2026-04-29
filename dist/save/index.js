@@ -44573,43 +44573,50 @@ function nxEnvForStartedProxy(plan, actualPort, accessTokenOverride) {
     envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
     return envVars;
 }
-function resolveNodePackageManagerCacheDir(packageManager) {
+function plannedNodePackageManagerEnv(packageManager, plan) {
+    const plannedEnv = plan.env_vars || {};
     if (!packageManager) {
-        return null;
+        return {};
     }
+    const envVars = {};
     switch (packageManager.name) {
         case 'pnpm':
-            return process.env.PNPM_STORE_DIR || process.env.NPM_CONFIG_STORE_DIR || packageManager.cacheDir;
+            for (const key of ['PNPM_STORE_DIR', 'NPM_CONFIG_STORE_DIR']) {
+                if (plannedEnv[key]) {
+                    envVars[key] = plannedEnv[key];
+                }
+            }
+            break;
         case 'yarn':
-            return process.env.YARN_CACHE_FOLDER || packageManager.cacheDir;
+            for (const key of ['YARN_CACHE_FOLDER', 'YARN_ENABLE_GLOBAL_CACHE']) {
+                if (plannedEnv[key]) {
+                    envVars[key] = plannedEnv[key];
+                }
+            }
+            break;
         case 'npm':
-            return process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || packageManager.cacheDir;
+            for (const key of ['npm_config_cache', 'NPM_CONFIG_CACHE']) {
+                if (plannedEnv[key]) {
+                    envVars[key] = plannedEnv[key];
+                }
+            }
+            break;
     }
+    return envVars;
 }
-function configureNodePackageManagerEnv(packageManager) {
+function plannedNodePackageManagerCacheDir(packageManager, plan) {
+    var _a, _b, _c, _d, _e;
     if (!packageManager) {
         return null;
     }
-    const cacheDir = resolveNodePackageManagerCacheDir(packageManager);
-    if (!cacheDir) {
-        return null;
-    }
-    ensureDir(cacheDir);
     switch (packageManager.name) {
         case 'pnpm':
-            core.exportVariable('PNPM_STORE_DIR', cacheDir);
-            core.exportVariable('NPM_CONFIG_STORE_DIR', cacheDir);
-            break;
+            return ((_a = plan.env_vars) === null || _a === void 0 ? void 0 : _a.PNPM_STORE_DIR) || ((_b = plan.env_vars) === null || _b === void 0 ? void 0 : _b.NPM_CONFIG_STORE_DIR) || packageManager.cacheDir;
         case 'yarn':
-            core.exportVariable('YARN_CACHE_FOLDER', cacheDir);
-            core.exportVariable('YARN_ENABLE_GLOBAL_CACHE', 'false');
-            break;
+            return ((_c = plan.env_vars) === null || _c === void 0 ? void 0 : _c.YARN_CACHE_FOLDER) || packageManager.cacheDir;
         case 'npm':
-            core.exportVariable('npm_config_cache', cacheDir);
-            core.exportVariable('NPM_CONFIG_CACHE', cacheDir);
-            break;
+            return ((_d = plan.env_vars) === null || _d === void 0 ? void 0 : _d.npm_config_cache) || ((_e = plan.env_vars) === null || _e === void 0 ? void 0 : _e.NPM_CONFIG_CACHE) || packageManager.cacheDir;
     }
-    return cacheDir;
 }
 async function ensureCorepackPackageManager(workingDirectory, packageManager, runtimeTools) {
     if (!packageManager || packageManager.name === 'npm' || runtimeTools.some((tool) => tool.name === packageManager.name)) {
@@ -45228,13 +45235,13 @@ async function runTurboProxyRestore(plan, inputs) {
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
     const packageManager = await (0, utils_1.detectNodePackageManager)(plan.workingDirectory);
-    const packageManagerCacheDir = configureNodePackageManagerEnv(packageManager);
     await ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools);
     if (packageManager) {
         core.setOutput('package-manager', packageManager.name);
-        core.setOutput('package-manager-cache-dir', packageManagerCacheDir || packageManager.cacheDir);
+        core.setOutput('package-manager-cache-dir', plannedNodePackageManagerCacheDir(packageManager, turboPlan) || packageManager.cacheDir);
     }
     if (turboApiUrl) {
+        exportEnvVars(plannedNodePackageManagerEnv(packageManager, turboPlan));
         configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
         core.setOutput('workspace', workspace);
         core.setOutput('cache-tag', cacheTag);
