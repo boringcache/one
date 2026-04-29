@@ -121,6 +121,7 @@ interface CliAdapterDryRunPlan {
   archive_entries: CliDryRunArchiveEntry[];
   env_vars: Record<string, string>;
   setup?: {
+    schema_version?: number;
     env_vars?: Record<string, string>;
     files?: Array<{
       path: string;
@@ -1032,6 +1033,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       ? remoteMaxConnections
       : 64;
     setup = {
+      schema_version: 1,
       files: [{
         path: path.join(process.env.HOME || '/home/test', '.bazelrc'),
         mode: 'append',
@@ -1051,6 +1053,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   } else if (adapterName === 'gradle') {
     const resolvedGradleHome = resolveMockArchivePath(gradleHome || '~/.gradle', workingDirectory);
     setup = {
+      schema_version: 1,
       env_vars: {
         BORINGCACHE_PROXY_PORT: String(resolvedPort),
         BORINGCACHE_CACHE_REF: cacheRef,
@@ -1078,6 +1081,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     );
     const resolvedLocalRepo = resolveMockArchivePath(mavenLocalRepo || '~/.m2/repository', workingDirectory);
     setup = {
+      schema_version: 1,
       files: [
         {
           path: resolvedExtensionsPath,

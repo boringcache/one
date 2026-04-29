@@ -1341,6 +1341,62 @@ describe('product modes', () => {
     }
   });
 
+  it('fails adapter modes when the CLI setup schema is unsupported', async () => {
+    const project = await makeTempProject({ '.java-version': '21\n' });
+
+    try {
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'gradle' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
+            workspace: 'my-org/my-project',
+            tag: 'gradle',
+            env_vars: {},
+            setup: {
+              schema_version: 2,
+              files: [{
+                path: path.join(project, 'gradle.properties'),
+                mode: 'replace-block',
+                content: 'org.gradle.caching=true\n',
+              }],
+            },
+            proxy: {
+              host: '127.0.0.1',
+              endpoint_host: '127.0.0.1',
+              port: 5000,
+              no_platform: false,
+              no_git: false,
+              read_only: false,
+              startup_mode: 'warm',
+            },
+          })));
+          return 0;
+        }
+        return 0;
+      });
+
+      mockGetInput({
+        mode: 'gradle',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        'boringcache/one restore failed: boringcache gradle setup schema_version 2 is not supported by this action (expected 1). Update boringcache/one or pin cli-version.',
+      );
+      expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('configures turbo proxy mode and exports turbo env', async () => {
     const project = await makeTempProject({
       '.node-version': '22.4.1\n',

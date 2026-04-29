@@ -93,6 +93,7 @@ interface CliAdapterSetupFile {
 }
 
 interface CliAdapterSetupPlan {
+  schema_version?: number;
   env_vars?: Record<string, string>;
   files?: CliAdapterSetupFile[];
   directories?: string[];
@@ -126,6 +127,7 @@ interface CliAdapterDryRunPlan {
 }
 
 const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
+const SUPPORTED_CLI_SETUP_SCHEMA_VERSION = 1;
 
 function assertSupportedCliDryRunSchema(adapter: string, plan: CliAdapterDryRunPlan): void {
   if (plan.schema_version !== SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION) {
@@ -292,6 +294,13 @@ function proxyPlanningReadOnly(requestedReadOnly: boolean): boolean {
 function requireAdapterSetupPlan(adapter: string, setup?: CliAdapterSetupPlan): CliAdapterSetupPlan {
   if (!setup || (!Object.keys(setup.env_vars || {}).length && !(setup.files || []).length && !(setup.directories || []).length)) {
     throw new Error(`boringcache ${adapter} dry-run JSON did not include adapter setup planning data`);
+  }
+  const setupSchemaVersion = setup.schema_version ?? SUPPORTED_CLI_SETUP_SCHEMA_VERSION;
+  if (setupSchemaVersion !== SUPPORTED_CLI_SETUP_SCHEMA_VERSION) {
+    throw new Error(
+      `boringcache ${adapter} setup schema_version ${setupSchemaVersion} is not supported by this action `
+      + `(expected ${SUPPORTED_CLI_SETUP_SCHEMA_VERSION}). Update boringcache/one or pin cli-version.`,
+    );
   }
   return setup;
 }
@@ -2054,6 +2063,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   );
   const workspace = proxyPlan.workspace;
   const cacheTag = proxyPlan.tag;
+  const setup = requireAdapterSetupPlan('bazel', proxyPlan.setup);
 
   saveModeState('proxy-pid', '');
   if (bazelVersion) {
@@ -2074,7 +2084,7 @@ async function runBazelRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
-  applyAdapterSetupPlan(requireAdapterSetupPlan('bazel', proxyPlan.setup));
+  applyAdapterSetupPlan(setup);
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
   core.setOutput('workspace', workspace);
@@ -2180,6 +2190,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   );
   const workspace = proxyPlan.workspace;
   const cacheTag = proxyPlan.tag;
+  const setup = requireAdapterSetupPlan('gradle', proxyPlan.setup);
 
   const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
@@ -2195,7 +2206,7 @@ async function runGradleRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
-  applyAdapterSetupPlan(requireAdapterSetupPlan('gradle', proxyPlan.setup));
+  applyAdapterSetupPlan(setup);
 
   core.setOutput('cache-tag', cacheTag);
   setProxyOutputs(proxy.port);
@@ -2239,6 +2250,7 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   );
   const workspace = proxyPlan.workspace;
   const cacheTag = proxyPlan.tag;
+  const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
 
   const proxy = await startRegistryProxy(actionProxyOptions({
     command: 'cache-registry',
@@ -2254,7 +2266,6 @@ async function runMavenRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<M
   saveModeState('proxy-pid', String(proxy.pid));
   saveProxyModeState(proxy.port);
 
-  const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
   applyAdapterSetupPlan(setup);
   const extensionsPath = requireSetupFilePath(setup, 'extensions.xml', 'maven extensions.xml');
   const buildCacheConfigPath = requireSetupFilePath(
