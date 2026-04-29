@@ -38,6 +38,13 @@ through the CLI dry-run plan. Action-level `metadata-hints` are the workflow
 override path when a job needs to add or replace labels, but validation,
 normalization, ordering, and capping belong to the CLI plan.
 
+Implementation note, 2026-04-29: proxy-backed modes start `cache-registry` and
+build deferred post-save verification specs from the same CLI dry-run
+`proxy.host`, `proxy.no_platform`, and `proxy.no_git` fields. Turbo and Nx
+environment wiring also uses the CLI-planned `env_vars`, with the action only
+rewriting the bound port after startup and applying explicit workflow token/team
+overrides.
+
 It must not:
 
 - reimplement `.boringcache.toml` semantics;
