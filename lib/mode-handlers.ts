@@ -549,7 +549,9 @@ async function resolveAdapterCliPlan(
   return plan;
 }
 
-async function resolveDockerCliPlan(
+async function resolveOciCliPlan(
+  adapter: 'docker' | 'buildkit',
+  adapterCommand: string[],
   workspace: string,
   workingDirectory: string,
   inputCacheTag: string,
@@ -564,7 +566,7 @@ async function resolveDockerCliPlan(
   ociHydration: string,
   metadataHintsInput = '',
 ): Promise<CliAdapterDryRunPlan> {
-  const args = ['docker', '--workspace', workspace];
+  const args = [adapter, '--workspace', workspace];
   const trimmedCacheTag = inputCacheTag.trim();
   const trimmedCacheRefTag = cacheRefTag.trim();
   if (trimmedCacheTag) {
@@ -599,7 +601,7 @@ async function resolveDockerCliPlan(
     args.push('--oci-hydration', trimmedOciHydration);
   }
   appendMetadataHintArgs(args, metadataHintsInput);
-  args.push('--dry-run', '--json', '--', 'docker', 'buildx', 'build', '.');
+  args.push('--dry-run', '--json', '--', ...adapterCommand);
 
   let stdout = '';
   let stderr = '';
@@ -629,7 +631,7 @@ async function resolveDockerCliPlan(
   });
 
   if (exitCode !== 0) {
-    throw new Error(stderr.trim() || stdout.trim() || `boringcache docker --dry-run --json exited with code ${exitCode}`);
+    throw new Error(stderr.trim() || stdout.trim() || `boringcache ${adapter} --dry-run --json exited with code ${exitCode}`);
   }
   emitCliPlannerWarnings(stderr);
 
@@ -638,16 +640,84 @@ async function resolveDockerCliPlan(
     plan = JSON.parse(stdout) as CliAdapterDryRunPlan;
   } catch (error) {
     throw new Error(
-      `Failed to parse boringcache docker dry-run JSON: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  assertSupportedCliDryRunSchema('docker', plan);
+  assertSupportedCliDryRunSchema(adapter, plan);
 
   if (!plan.oci_cache?.registry_ref || !plan.oci_cache.cache_from) {
-    throw new Error('boringcache docker dry-run JSON did not include OCI cache planning data');
+    throw new Error(`boringcache ${adapter} dry-run JSON did not include OCI cache planning data`);
   }
 
   return plan;
+}
+
+async function resolveDockerCliPlan(
+  workspace: string,
+  workingDirectory: string,
+  inputCacheTag: string,
+  preferredPort: number,
+  host: string,
+  endpointHost: string,
+  noPlatform: boolean,
+  noGit: boolean,
+  readOnly: boolean,
+  cacheMode: string,
+  cacheRefTag: string,
+  ociHydration: string,
+  metadataHintsInput = '',
+): Promise<CliAdapterDryRunPlan> {
+  return resolveOciCliPlan(
+    'docker',
+    ['docker', 'buildx', 'build', '.'],
+    workspace,
+    workingDirectory,
+    inputCacheTag,
+    preferredPort,
+    host,
+    endpointHost,
+    noPlatform,
+    noGit,
+    readOnly,
+    cacheMode,
+    cacheRefTag,
+    ociHydration,
+    metadataHintsInput,
+  );
+}
+
+async function resolveBuildkitCliPlan(
+  workspace: string,
+  workingDirectory: string,
+  inputCacheTag: string,
+  preferredPort: number,
+  host: string,
+  endpointHost: string,
+  noPlatform: boolean,
+  noGit: boolean,
+  readOnly: boolean,
+  cacheMode: string,
+  cacheRefTag: string,
+  ociHydration: string,
+  metadataHintsInput = '',
+): Promise<CliAdapterDryRunPlan> {
+  return resolveOciCliPlan(
+    'buildkit',
+    ['buildctl', 'build', '--frontend', 'dockerfile.v0'],
+    workspace,
+    workingDirectory,
+    inputCacheTag,
+    preferredPort,
+    host,
+    endpointHost,
+    noPlatform,
+    noGit,
+    readOnly,
+    cacheMode,
+    cacheRefTag,
+    ociHydration,
+    metadataHintsInput,
+  );
 }
 
 async function restoreSimpleCache(workspace: string, cacheKey: string, cacheDir: string, flags: CacheFlags = {}): Promise<void> {
@@ -1948,7 +2018,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     }
 
     const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
-    const dockerPlan = await resolveDockerCliPlan(
+    const dockerPlan = await resolveBuildkitCliPlan(
       plan.workspace,
       plan.workingDirectory,
       getEffectiveRegistryTag(localCacheTag, registryTagInput),

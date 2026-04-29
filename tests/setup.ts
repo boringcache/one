@@ -1032,7 +1032,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   }
 
   let finalTag = resolvedTag;
-  if (adapterName === 'docker') {
+  if (adapterName === 'docker' || adapterName === 'buildkit') {
     const dockerTarget = resolveMockDockerTarget(resolvedTag, resolvedCacheRefTag);
     finalTag = dockerTarget.tag;
     const registryRef = `${resolvedEndpointHost}:${resolvedPort}/cache:${dockerTarget.refTag}`;
@@ -1051,7 +1051,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   }
 
   const endpoint = `http://${resolvedEndpointHost}:${resolvedPort}`;
-  const cacheRef = adapterName === 'docker'
+  const cacheRef = adapterName === 'docker' || adapterName === 'buildkit'
     ? ociCache?.registry_ref || `${resolvedEndpointHost}:${resolvedPort}/cache:${resolvedCacheRefTag}`
     : `${resolvedEndpointHost}:${resolvedPort}/cache:${finalTag}`;
   if (adapterName === 'bazel') {
@@ -1215,7 +1215,7 @@ beforeEach(() => {
     if (
       command === 'boringcache'
       && args
-      && ['bazel', 'docker', 'go', 'gradle', 'maven', 'nx', 'sccache', 'turbo'].includes(args[0])
+      && ['bazel', 'buildkit', 'docker', 'go', 'gradle', 'maven', 'nx', 'sccache', 'turbo'].includes(args[0])
       && args.includes('--dry-run')
       && args.includes('--json')
     ) {

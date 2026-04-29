@@ -922,10 +922,10 @@ describe('product modes', () => {
           })));
           return 0;
         }
-        if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
+        if (command === 'boringcache' && args?.[0] === 'buildkit' && args.includes('--dry-run') && args.includes('--json')) {
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
             schema_version: 1,
-            adapter: 'docker',
+            adapter: 'buildkit',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
             tag: 'ghcr-io-boringcache-demo',
@@ -1032,10 +1032,10 @@ describe('product modes', () => {
           })));
           return 0;
         }
-        if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
+        if (command === 'boringcache' && args?.[0] === 'buildkit' && args.includes('--dry-run') && args.includes('--json')) {
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
             schema_version: 1,
-            adapter: 'docker',
+            adapter: 'buildkit',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
             tag: 'ghcr-io-boringcache-demo',

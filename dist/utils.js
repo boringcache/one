@@ -1557,63 +1557,6 @@ function joinDefaultEntries(...groups) {
         .filter(Boolean)
         .join('\n');
 }
-function defaultGoModCacheDir(workingDirectory) {
-    var _a;
-    const configured = (_a = process.env.GOMODCACHE) === null || _a === void 0 ? void 0 : _a.trim();
-    if (!configured) {
-        return '.go/pkg/mod';
-    }
-    return path.isAbsolute(configured)
-        ? configured
-        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
-}
-function defaultGoBuildCacheDir(workingDirectory) {
-    var _a;
-    const configured = (_a = process.env.GOCACHE) === null || _a === void 0 ? void 0 : _a.trim();
-    if (!configured) {
-        return '.go/build-cache';
-    }
-    return path.isAbsolute(configured)
-        ? configured
-        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
-}
-async function readComposerConfig(workingDirectory) {
-    const composerJson = await readFile(path.join(workingDirectory, 'composer.json'));
-    if (!composerJson) {
-        return {};
-    }
-    try {
-        const parsed = JSON.parse(composerJson);
-        const config = parsed.config || {};
-        return {
-            cacheDir: typeof config['cache-dir'] === 'string' ? config['cache-dir'] : undefined,
-            vendorDir: typeof config['vendor-dir'] === 'string' ? config['vendor-dir'] : undefined,
-        };
-    }
-    catch {
-        return {};
-    }
-}
-async function defaultComposerCacheDir(workingDirectory) {
-    var _a;
-    const configured = ((_a = process.env.COMPOSER_CACHE_DIR) === null || _a === void 0 ? void 0 : _a.trim()) || (await readComposerConfig(workingDirectory)).cacheDir;
-    if (!configured) {
-        return '.composer-cache';
-    }
-    return path.isAbsolute(configured)
-        ? configured
-        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
-}
-async function defaultComposerVendorDir(workingDirectory) {
-    var _a;
-    const configured = ((_a = process.env.COMPOSER_VENDOR_DIR) === null || _a === void 0 ? void 0 : _a.trim()) || (await readComposerConfig(workingDirectory)).vendorDir;
-    if (!configured) {
-        return 'vendor';
-    }
-    return path.isAbsolute(configured)
-        ? configured
-        : path.relative(workingDirectory, path.resolve(workingDirectory, configured)) || '.';
-}
 async function detectNodeDefaultArchiveEntries(workingDirectory) {
     const packageManager = await detectNodePackageManager(workingDirectory);
     if (!packageManager) {
