@@ -36,6 +36,8 @@ Rust cache-hit detection must use structured CLI results instead of parsing huma
 
 Rust archive cache identity comes from the CLI plan. The action does not expose Rust-specific exact-tag override inputs such as `cargo-tag`, `cargo-git-tag`, `cargo-bin-tag`, `target-tag`, or `sccache-tag`; use `.boringcache.toml`, generic archive entries, `cache-tag`, or CLI-owned tag suffixing instead of mutating resolved Rust entries in TypeScript.
 
+Rust cache hygiene follows the same split. CLI-planned Rust cache entries and the `sccache` adapter own cache-behavior env such as `CARGO_INCREMENTAL=0` and `SCCACHE_DIR`. The action may set Cargo home/path/color and local `SCCACHE_CACHE_SIZE` because those are GitHub Actions runtime ergonomics or local sccache tuning, not adapter cache identity.
+
 Docker and BuildKit registry modes must also forward CLI-planned `oci_cache.promotion_ref_tags` to `cache-registry` as real `--oci-alias-promotion-ref` arguments. The `docker_alias_promotion_refs` metadata hint is diagnostic only; it does not cause the proxy to bind branch, PR, default, or stable OCI aliases after an immutable run-ref export.
 
 Pull request runs are restore-only by default. A PR-scoped Docker or BuildKit ref such as `/cache:pr-3208` may legitimately be missing, because the action does not publish it unless `save-on-pull-request` is explicitly enabled. That miss should be handled by the CLI-planned branch/default/stable fallback imports. If PR saving is enabled, the normal derived promotion target is the PR alias; the action should not turn a missing PR alias into branch/default write permission.

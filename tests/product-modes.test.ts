@@ -1734,6 +1734,7 @@ describe('product modes', () => {
       expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_WEBDAV_ENDPOINT', 'http://host.docker.internal:5000/');
       expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_WEBDAV_KEY_PREFIX', 'rust/ci');
       expect(core.exportVariable).toHaveBeenCalledWith('RUSTC_WRAPPER', 'sccache');
+      expect(core.exportVariable).toHaveBeenCalledWith('CARGO_INCREMENTAL', '0');
       expect(core.exportVariable).toHaveBeenCalledWith('CC', 'sccache cc');
       expect(core.exportVariable).toHaveBeenCalledWith('CXX', 'sccache c++');
       expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_IDLE_TIMEOUT', '0');

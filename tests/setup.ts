@@ -444,7 +444,7 @@ function cliBuiltInEntry(workingDirectory: string, requested: string): BuiltInCl
       return {
         tag: 'target',
         path: path.join(workingDirectory, 'target'),
-        envVars: {},
+        envVars: { CARGO_INCREMENTAL: '0' },
       };
     case 'sccache':
     case 'sccache-dir': {
@@ -1063,17 +1063,18 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       };
   } else if (adapterName === 'nx') {
     envVars = {
-        BORINGCACHE_PROXY_PORT: String(resolvedPort),
-        BORINGCACHE_CACHE_REF: '{CACHE_REF}',
-        NX_SELF_HOSTED_REMOTE_CACHE_SERVER: `http://127.0.0.1:${resolvedPort}`,
-        NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: 'boringcache',
-        ...mockNodePackageManagerEnvVars(workingDirectory),
-      };
+      BORINGCACHE_PROXY_PORT: String(resolvedPort),
+      BORINGCACHE_CACHE_REF: '{CACHE_REF}',
+      NX_SELF_HOSTED_REMOTE_CACHE_SERVER: `http://127.0.0.1:${resolvedPort}`,
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: 'boringcache',
+      ...mockNodePackageManagerEnvVars(workingDirectory),
+    };
   } else if (adapterName === 'sccache') {
     envVars = {
       BORINGCACHE_PROXY_PORT: String(resolvedPort),
       BORINGCACHE_CACHE_REF: '{CACHE_REF}',
       RUSTC_WRAPPER: 'sccache',
+      CARGO_INCREMENTAL: '0',
       CC: 'sccache cc',
       CXX: 'sccache c++',
       SCCACHE_WEBDAV_ENDPOINT: `http://${resolvedEndpointHost}:${resolvedPort}/`,

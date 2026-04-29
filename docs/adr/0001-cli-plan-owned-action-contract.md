@@ -50,7 +50,11 @@ the action must not append registry-cache options in TypeScript. Archive preset
 cache env also comes from the CLI dry-run `env_vars`. Rust archive entry tags
 also stay CLI-owned; the action no longer exposes exact-tag inputs that mutate
 `cargo-registry`, `cargo-git`, `cargo-bin`, `target`, or `sccache-dir` entries
-after dry-run resolution.
+after dry-run resolution. Rust cache-hygiene env follows the same rule:
+CLI-planned `target` entries and the `sccache` adapter own
+`CARGO_INCREMENTAL=0`, while the action keeps runtime ergonomics such as
+`CARGO_HOME`, Cargo path setup, `CARGO_TERM_COLOR`, and local
+`SCCACHE_CACHE_SIZE`.
 
 Diagnostics follow the same ownership test. The CLI owns diagnostics that make
 local adapter runs explainable, including proxy/session summaries, OCI

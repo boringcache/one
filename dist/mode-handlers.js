@@ -904,7 +904,6 @@ function configureCargoEnv() {
     process.env.CARGO_HOME = cargoHome;
     core.exportVariable('CARGO_HOME', cargoHome);
     core.addPath(path.join(cargoHome, 'bin'));
-    core.exportVariable('CARGO_INCREMENTAL', '0');
     core.exportVariable('CARGO_TERM_COLOR', 'always');
 }
 async function setupRustToolchain(version, options) {
@@ -963,8 +962,7 @@ async function hasGitDependencies(lockPath) {
 function getSccacheDir() {
     return process.env.SCCACHE_DIR || path.join(currentHomeDir(), '.cache', 'sccache');
 }
-function configureSccacheEnv(cacheSize) {
-    const sccacheDir = getSccacheDir();
+function configureSccacheEnv(cacheSize, sccacheDir) {
     process.env.RUSTC_WRAPPER = 'sccache';
     core.exportVariable('RUSTC_WRAPPER', 'sccache');
     process.env.SCCACHE_DIR = sccacheDir;
@@ -1922,9 +1920,6 @@ async function runRustRestore(plan, inputs) {
     const rustToolTagSuffix = `rust${rustMajorMinor}`;
     const lockPath = path.join(workingDir, 'Cargo.lock');
     const hasGitDeps = cacheCargo && await hasGitDependencies(lockPath);
-    if (useSccache && sccacheMode !== 'proxy') {
-        configureSccacheEnv(sccacheCacheSize);
-    }
     const rustEntryIds = [];
     if (cacheCargo) {
         rustEntryIds.push('cargo-registry');
@@ -1950,9 +1945,7 @@ async function runRustRestore(plan, inputs) {
             fallbackWorkspace: plan.workspace,
         })
         : { workspace: plan.workspace, entries: [], envVars: {} };
-    for (const [key, value] of Object.entries(rustEntriesPlan.envVars)) {
-        core.exportVariable(key, value);
-    }
+    exportEnvVars(rustEntriesPlan.envVars);
     const rustEntries = new Map(rustEntriesPlan.entries.map((entry) => [entry.requested, entry]));
     const workspace = rustEntriesPlan.workspace || plan.workspace;
     const cargoRegistryEntry = cacheCargo
@@ -1970,6 +1963,9 @@ async function runRustRestore(plan, inputs) {
     const sccacheEntry = useSccache
         ? getRustArchiveEntry(rustEntries, 'sccache-dir', 'sccache cache')
         : null;
+    if (useSccache && sccacheMode !== 'proxy') {
+        configureSccacheEnv(sccacheCacheSize, (sccacheEntry === null || sccacheEntry === void 0 ? void 0 : sccacheEntry.path) || getSccacheDir());
+    }
     core.setOutput('workspace', workspace);
     core.setOutput('rust-version', rustVersion);
     core.setOutput('cache-tag', cacheTagPrefix);
