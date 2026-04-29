@@ -111,6 +111,7 @@ interface BuiltInCliEntry {
 }
 
 interface CliAdapterDryRunPlan {
+  schema_version: number;
   adapter: string;
   workspace: string;
   workspace_source: 'explicit' | 'repo-config' | 'configured-default';
@@ -1094,6 +1095,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   }
 
   return {
+    schema_version: 1,
     adapter: adapterName,
     workspace: workspace || process.env.BORINGCACHE_DEFAULT_WORKSPACE || 'default/default',
     workspace_source: workspaceSource,

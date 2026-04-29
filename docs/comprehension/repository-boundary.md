@@ -20,6 +20,8 @@ ADR note: [docs/adr/0001-cli-plan-owned-action-contract.md](../adr/0001-cli-plan
 
 Bazel, Gradle, and Maven on-disk tool setup is also CLI-planned. The action may materialize files, directories, and environment variables from `adapter.setup`, but `.bazelrc`, Gradle init/properties, Maven extensions/build-cache XML content, and default path resolution should stay in the CLI plan instead of being recreated in TypeScript.
 
+The action must check the CLI dry-run `schema_version` before replaying `adapter.setup` or OCI planning. Unsupported versions should fail with an explicit update/pin message instead of partially applying a setup plan whose file modes or fields may have changed.
+
 Docker and BuildKit registry modes must consume the complete CLI-planned OCI import list. If the CLI dry-run returns multiple `oci_cache.cache_from_refs` such as PR, branch, default, and stable fallback refs, the action should pass each one as its own `--cache-from` or `--import-cache` flag instead of rebuilding or narrowing that list.
 
 The action owns the runtime readiness check for those planned Docker and BuildKit imports. Proxy startup is not complete merely because `/_boringcache/status` says `phase=ready`; the action must also prove which planned OCI refs are readable through the started proxy, filter actual build arguments to the readable set, and expose both the requested and used ref sets through action outputs. If none of the planned refs are readable, the action should continue without registry imports and report a cold-seed notice. If only some refs are readable, keep a warning because the warm fallback set is degraded. Downstream workflows should not implement their own competing manifest-readability gate.

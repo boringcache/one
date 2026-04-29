@@ -59,6 +59,14 @@ function actionProxyOptions(options, proxyPlan) {
         metadataHints: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || options.metadataHints || {},
     };
 }
+const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
+function assertSupportedCliDryRunSchema(adapter, plan) {
+    if (plan.schema_version !== SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION) {
+        const actual = plan.schema_version === undefined ? 'missing' : String(plan.schema_version);
+        throw new Error(`boringcache ${adapter} dry-run JSON schema_version ${actual} is not supported by this action `
+            + `(expected ${SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION}). Update boringcache/one or pin cli-version.`);
+    }
+}
 let rustLastOutput = '';
 function currentHomeDir() {
     return process.env.HOME || os.homedir();
@@ -81,6 +89,8 @@ async function runModeRestore(plan, inputs) {
             return runRustRestore(plan, inputs);
         case 'turbo-proxy':
             return runTurboProxyRestore(plan, inputs);
+        case 'nx-proxy':
+            return runNxProxyRestore(plan, inputs);
         case 'archive':
             return {};
     }
@@ -102,6 +112,7 @@ async function runModeSave(mode) {
             return;
         case 'gradle':
         case 'maven':
+        case 'nx-proxy':
         case 'turbo-proxy':
             await stopProxyFromState();
             return;
@@ -323,12 +334,15 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
         throw new Error(stderr.trim() || stdout.trim() || `boringcache ${adapter} --dry-run --json exited with code ${exitCode}`);
     }
     emitCliPlannerWarnings(stderr);
+    let plan;
     try {
-        return JSON.parse(stdout);
+        plan = JSON.parse(stdout);
     }
     catch (error) {
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
+    assertSupportedCliDryRunSchema(adapter, plan);
+    return plan;
 }
 async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '') {
     var _a;
@@ -405,6 +419,7 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     catch (error) {
         throw new Error(`Failed to parse boringcache docker dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
+    assertSupportedCliDryRunSchema('docker', plan);
     if (!((_a = plan.oci_cache) === null || _a === void 0 ? void 0 : _a.registry_ref) || !plan.oci_cache.cache_from) {
         throw new Error('boringcache docker dry-run JSON did not include OCI cache planning data');
     }
@@ -1122,6 +1137,10 @@ function configureTurboRemoteEnv(apiUrl, token, team) {
     core.exportVariable('TURBO_API', apiUrl);
     core.exportVariable('TURBO_TOKEN', token);
     core.exportVariable('TURBO_TEAM', team || 'team_boringcache');
+}
+function configureNxRemoteEnv(serverUrl, accessToken) {
+    core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_SERVER', serverUrl);
+    core.exportVariable('NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', accessToken);
 }
 function resolveNodePackageManagerCacheDir(packageManager) {
     if (!packageManager) {
@@ -1843,6 +1862,38 @@ async function runTurboProxyRestore(plan, inputs) {
                 tag: cacheTag,
                 noPlatform: true,
                 noGit: true,
+                pathHint: plan.workingDirectory,
+                saveExpected: !inputs.readOnly,
+            }],
+    };
+}
+async function runNxProxyRestore(plan, inputs) {
+    const nxAccessToken = core.getInput('nx-access-token') || 'boringcache';
+    const preferredPort = parseInt(core.getInput('nx-port') || inputs.proxyPort || '4228', 10);
+    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, false, false, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+    });
+    const workspace = nxPlan.workspace;
+    const cacheTag = nxPlan.tag;
+    let proxy;
+    try {
+        proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
+    }
+    catch {
+        proxy = await startPortableCacheProxy(workspace, await (0, core_1.findAvailablePort)(), cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
+    }
+    saveModeState('proxy-pid', String(proxy.pid));
+    saveProxyModeState(proxy.port);
+    configureNxRemoteEnv(`http://127.0.0.1:${proxy.port}`, nxAccessToken);
+    core.setOutput('cache-tag', cacheTag);
+    setProxyOutputs(proxy.port);
+    core.setOutput('workspace', workspace);
+    return {
+        cacheTag,
+        verificationSpecs: [{
+                tag: cacheTag,
+                noPlatform: nxPlan.proxy.no_platform,
+                noGit: nxPlan.proxy.no_git,
                 pathHint: plan.workingDirectory,
                 saveExpected: !inputs.readOnly,
             }],

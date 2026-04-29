@@ -99,6 +99,7 @@ interface CliAdapterSetupPlan {
 }
 
 interface CliAdapterDryRunPlan {
+  schema_version?: number;
   workspace: string;
   tag: string;
   env_vars?: Record<string, string>;
@@ -122,6 +123,18 @@ interface CliAdapterDryRunPlan {
       run_started_at?: string;
     };
   };
+}
+
+const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
+
+function assertSupportedCliDryRunSchema(adapter: string, plan: CliAdapterDryRunPlan): void {
+  if (plan.schema_version !== SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION) {
+    const actual = plan.schema_version === undefined ? 'missing' : String(plan.schema_version);
+    throw new Error(
+      `boringcache ${adapter} dry-run JSON schema_version ${actual} is not supported by this action `
+      + `(expected ${SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION}). Update boringcache/one or pin cli-version.`,
+    );
+  }
 }
 
 interface DockerBuildOptions {
@@ -489,13 +502,16 @@ async function resolveAdapterCliPlan(
   }
   emitCliPlannerWarnings(stderr);
 
+  let plan: CliAdapterDryRunPlan;
   try {
-    return JSON.parse(stdout) as CliAdapterDryRunPlan;
+    plan = JSON.parse(stdout) as CliAdapterDryRunPlan;
   } catch (error) {
     throw new Error(
       `Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  assertSupportedCliDryRunSchema(adapter, plan);
+  return plan;
 }
 
 async function resolveDockerCliPlan(
@@ -590,6 +606,7 @@ async function resolveDockerCliPlan(
       `Failed to parse boringcache docker dry-run JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  assertSupportedCliDryRunSchema('docker', plan);
 
   if (!plan.oci_cache?.registry_ref || !plan.oci_cache.cache_from) {
     throw new Error('boringcache docker dry-run JSON did not include OCI cache planning data');

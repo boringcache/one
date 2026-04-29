@@ -43449,6 +43449,14 @@ function actionProxyOptions(options, proxyPlan) {
         metadataHints: (proxyPlan === null || proxyPlan === void 0 ? void 0 : proxyPlan.metadata_hints) || options.metadataHints || {},
     };
 }
+const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
+function assertSupportedCliDryRunSchema(adapter, plan) {
+    if (plan.schema_version !== SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION) {
+        const actual = plan.schema_version === undefined ? 'missing' : String(plan.schema_version);
+        throw new Error(`boringcache ${adapter} dry-run JSON schema_version ${actual} is not supported by this action `
+            + `(expected ${SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION}). Update boringcache/one or pin cli-version.`);
+    }
+}
 let rustLastOutput = '';
 function currentHomeDir() {
     return process.env.HOME || os.homedir();
@@ -43716,12 +43724,15 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
         throw new Error(stderr.trim() || stdout.trim() || `boringcache ${adapter} --dry-run --json exited with code ${exitCode}`);
     }
     emitCliPlannerWarnings(stderr);
+    let plan;
     try {
-        return JSON.parse(stdout);
+        plan = JSON.parse(stdout);
     }
     catch (error) {
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
+    assertSupportedCliDryRunSchema(adapter, plan);
+    return plan;
 }
 async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '') {
     var _a;
@@ -43798,6 +43809,7 @@ async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, 
     catch (error) {
         throw new Error(`Failed to parse boringcache docker dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
+    assertSupportedCliDryRunSchema('docker', plan);
     if (!((_a = plan.oci_cache) === null || _a === void 0 ? void 0 : _a.registry_ref) || !plan.oci_cache.cache_from) {
         throw new Error('boringcache docker dry-run JSON did not include OCI cache planning data');
     }

@@ -163,6 +163,7 @@ describe('product modes', () => {
         }
         if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
             adapter: 'docker',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
@@ -316,6 +317,7 @@ describe('product modes', () => {
         }
         if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
             adapter: 'docker',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
@@ -414,6 +416,7 @@ describe('product modes', () => {
           dryRunEnv = options?.env;
           const runStartedAt = dryRunEnv?.BORINGCACHE_CI_RUN_STARTED_AT || '';
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
             adapter: 'docker',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
@@ -506,6 +509,7 @@ describe('product modes', () => {
         }
         if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
             adapter: 'docker',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
@@ -920,6 +924,7 @@ describe('product modes', () => {
         }
         if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
             adapter: 'docker',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
@@ -1029,6 +1034,7 @@ describe('product modes', () => {
         }
         if (command === 'boringcache' && args?.[0] === 'docker' && args.includes('--dry-run') && args.includes('--json')) {
           options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
             adapter: 'docker',
             workspace: 'boringcache/test-workspace',
             workspace_source: 'explicit',
@@ -1279,6 +1285,55 @@ describe('product modes', () => {
 
       expect(core.setFailed).toHaveBeenCalledWith(
         'boringcache/one restore failed: boringcache gradle --dry-run --json exited with code 1',
+      );
+      expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('fails adapter modes when the CLI dry-run schema is unsupported', async () => {
+    const project = await makeTempProject({ '.java-version': '21\n' });
+
+    try {
+      (exec.exec as jest.Mock).mockImplementation(async (
+        command: string,
+        args?: string[],
+        options?: { listeners?: { stdout?: (data: Buffer) => void } },
+      ) => {
+        if (command === 'boringcache' && args?.[0] === 'gradle' && args.includes('--dry-run') && args.includes('--json')) {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 2,
+            workspace: 'my-org/my-project',
+            tag: 'gradle',
+            env_vars: {},
+            setup: {},
+            proxy: {
+              host: '127.0.0.1',
+              endpoint_host: '127.0.0.1',
+              port: 5000,
+              no_platform: false,
+              no_git: false,
+              read_only: false,
+              startup_mode: 'warm',
+            },
+          })));
+          return 0;
+        }
+        return 0;
+      });
+
+      mockGetInput({
+        mode: 'gradle',
+        'working-directory': project,
+        workspace: 'my-org/my-project',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        'boringcache/one restore failed: boringcache gradle dry-run JSON schema_version 2 is not supported by this action (expected 1). Update boringcache/one or pin cli-version.',
       );
       expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
     } finally {

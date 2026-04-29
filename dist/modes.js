@@ -39,6 +39,11 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Maven build cache proxy integration.',
     },
+    'nx-proxy': {
+        resolved: 'nx-proxy',
+        implemented: true,
+        description: 'Nx self-hosted remote cache proxy integration.',
+    },
     'rust-sccache': {
         resolved: 'rust-sccache',
         implemented: true,
@@ -61,11 +66,12 @@ function normalizeMode(value) {
         case 'go':
         case 'gradle':
         case 'maven':
+        case 'nx-proxy':
         case 'rust-sccache':
         case 'turbo-proxy':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, rust-sccache, or turbo-proxy.`);
+            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy.`);
     }
 }
 function resolveModeSpec(mode) {
