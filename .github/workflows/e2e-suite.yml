@@ -16,6 +16,9 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  # Keep seed/verify cache names stable across "rerun failed jobs"; GitHub increments
+  # run_attempt without rerunning already-successful seed jobs.
+  E2E_RUN_TAG: ${{ github.run_id }}
 
 jobs:
   build-action:
@@ -205,12 +208,12 @@ jobs:
           mode: ${{ matrix.mode }}
           preset: ${{ matrix.preset }}
           workspace: boringcache/actions
-          cache-tag: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          cache-tag: ${{ format('lang-{0}-{1}', matrix.id, env.E2E_RUN_TAG) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
           entries: ${{ matrix.entries }}
           path: ${{ matrix.path }}
-          key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}', matrix.id, env.E2E_RUN_TAG) || '' }}
           restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
           save-on-pull-request: true
           verify: check
@@ -377,12 +380,12 @@ jobs:
           mode: ${{ matrix.mode }}
           preset: ${{ matrix.preset }}
           workspace: boringcache/actions
-          cache-tag: ${{ format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          cache-tag: ${{ format('lang-{0}-{1}', matrix.id, env.E2E_RUN_TAG) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
           entries: ${{ matrix.entries }}
           path: ${{ matrix.path }}
-          key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          key: ${{ matrix.key_style == 'cache' && format('lang-{0}-{1}', matrix.id, env.E2E_RUN_TAG) || '' }}
           restore-keys: ${{ matrix.key_style == 'cache' && format('lang-{0}-', matrix.id) || '' }}
           verify: check
           verbose: true
@@ -526,7 +529,7 @@ jobs:
           setup: ${{ matrix.setup }}
           mode: ${{ matrix.mode }}
           workspace: boringcache/actions
-          cache-tag: ${{ format('mode-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          cache-tag: ${{ format('mode-{0}-{1}', matrix.id, env.E2E_RUN_TAG) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
           entries: ${{ matrix.entries }}
@@ -535,7 +538,7 @@ jobs:
           image: ${{ format('one-e2e-{0}', matrix.id) }}
           tags: ${{ format('run-{0}', github.run_id) }}
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
-          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}', matrix.id, env.E2E_RUN_TAG) || '' }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
@@ -677,7 +680,7 @@ jobs:
           setup: ${{ matrix.setup }}
           mode: ${{ matrix.mode }}
           workspace: boringcache/actions
-          cache-tag: ${{ format('mode-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) }}
+          cache-tag: ${{ format('mode-{0}-{1}', matrix.id, env.E2E_RUN_TAG) }}
           working-directory: ${{ env.E2E_WORKDIR }}
           tools: ${{ matrix.tools }}
           entries: ${{ matrix.entries }}
@@ -686,7 +689,7 @@ jobs:
           image: ${{ format('one-e2e-{0}', matrix.id) }}
           tags: ${{ format('run-{0}', github.run_id) }}
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
-          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}-{2}', matrix.id, github.run_id, github.run_attempt) || '' }}
+          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}', matrix.id, env.E2E_RUN_TAG) || '' }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
