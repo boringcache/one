@@ -65,6 +65,22 @@ describe('product modes', () => {
           })));
           return 0;
         }
+        if (command === 'boringcache' && args?.[0] === 'check' && args.includes('--json')) {
+          const tag = args[2] || 'archive-restore-miss-cache-dir';
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
+            workspace: args[1] || 'boringcache/test-workspace',
+            total: 1,
+            hits: 0,
+            misses: 1,
+            results: [{
+              tag,
+              requested_tag: tag,
+              status: 'miss',
+            }],
+          })));
+          return 0;
+        }
         if (command === 'boringcache' && args?.[0] === 'restore') {
           return 1;
         }

@@ -42658,12 +42658,12 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
         const readableRefs = readability.filter((entry) => entry.readable).map((entry) => entry.ref);
         const unreadableRefs = readability.filter((entry) => !entry.readable).map((entry) => entry.ref);
-        if (unreadableRefs.length === 0) {
+        if (readableRefs.length > 0) {
             return {
                 requestedRefs: refs,
                 readableRefs,
                 unreadableRefs,
-                ready: true,
+                ready: unreadableRefs.length === 0,
                 phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
                 publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
                 publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
@@ -46185,6 +46185,12 @@ function saveSkippedByPolicyMessage() {
     return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
 }
 function applySaveTokenPolicy(inputs) {
+    delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
+    if (isPullRequestEvent() && inputs.saveOnPullRequest) {
+        process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
+        process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
+        core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    }
     const saveAllowed = saveAllowedForEvent(inputs);
     if (saveAllowed) {
         return true;

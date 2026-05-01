@@ -56,7 +56,6 @@ describe('restore action', () => {
   });
 
   it('falls back through restore keys in actions/cache compatibility mode', async () => {
-    let restoreAttempt = 0;
     (exec.exec as jest.Mock).mockImplementation(async (
       command: string,
       args?: string[],
@@ -84,9 +83,26 @@ describe('restore action', () => {
         return 0;
       }
 
+      if (command === 'boringcache' && args?.[0] === 'check' && args.includes('--json')) {
+        const tags = args[2] || '';
+        const hit = tags.includes('deps-fallback-npm');
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          schema_version: 1,
+          workspace: args[1] || 'default/default',
+          total: 1,
+          hits: hit ? 1 : 0,
+          misses: hit ? 0 : 1,
+          results: tags.split(',').map((tag: string) => ({
+            tag,
+            requested_tag: tag,
+            status: hit ? 'hit' : 'miss',
+          })),
+        })));
+        return 0;
+      }
+
       if (command === 'boringcache' && args?.[0] === 'restore') {
-        restoreAttempt += 1;
-        return restoreAttempt === 1 ? 1 : 0;
+        return 0;
       }
 
       return 0;
@@ -105,10 +121,9 @@ describe('restore action', () => {
       ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'restore',
     );
 
-    expect(restoreCalls).toHaveLength(2);
+    expect(restoreCalls).toHaveLength(1);
     expect(restoreCalls[0][1][1]).toBe('default/default');
-    expect(restoreCalls[0][1][2]).toMatch(/deps-primary-npm:.*\.npm/);
-    expect(restoreCalls[1][1][2]).toMatch(/deps-fallback-npm:.*\.npm/);
+    expect(restoreCalls[0][1][2]).toMatch(/deps-fallback-npm:.*\.npm/);
     expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
   });
 
@@ -288,7 +303,7 @@ describe('restore action', () => {
     await restoreRun();
 
     const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
-      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check' && args.includes('--exact'),
     );
     expect(checkCalls).toHaveLength(0);
     expect(core.info).toHaveBeenCalledWith(
@@ -331,12 +346,35 @@ describe('restore action', () => {
     );
     expect(core.saveState).toHaveBeenCalledWith('save-allowed', 'false');
     const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
-      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check' && args.includes('--exact'),
     );
     expect(checkCalls).toHaveLength(0);
     expect(core.info).toHaveBeenCalledWith(
       'Skipping save-expected tag verification in restore step: no save-capable token is available.',
     );
+    expect(process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST).toBeUndefined();
+    expect(process.env.BORINGCACHE_RESTORE_PR_CACHE).toBeUndefined();
+  });
+
+  it('exports separate PR save and restore scope env when pull_request saves are enabled', async () => {
+    process.env.GITHUB_EVENT_NAME = 'pull_request';
+    process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
+
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+    });
+    mockGetBooleanInput({
+      'no-platform': true,
+      'save-on-pull-request': true,
+    });
+
+    await restoreRun();
+
+    expect(process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST).toBe('1');
+    expect(process.env.BORINGCACHE_RESTORE_PR_CACHE).toBe('1');
+    expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    expect(core.saveState).toHaveBeenCalledWith('save-allowed', 'true');
   });
 
   it('exports bundler and package-manager cache env for the rails preset', async () => {

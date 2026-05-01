@@ -75,8 +75,17 @@ Docker workflows should use `mode: docker` or `mode: buildkit`. The action follo
 
 For Docker and BuildKit registry caches, the action follows the CLI's ref plan.
 Pull request runs are restore-only by default, so a PR-scoped ref such as `/cache:pr-3208` may legitimately 404, especially on the first PR run.
-That miss should not make the build cold: the action also forwards the branch, default, and stable fallback imports, ending with the default `/cache:buildcache` ref.
+That miss should not make the build cold: the action also forwards the base/default and stable fallback imports, ending with the default `/cache:buildcache` ref.
 If a repo deliberately wants PR-scoped Docker cache writes, provide a save-capable token and set `save-on-pull-request: true`; the default derived promotion for a PR is the PR alias, while branch and default aliases remain trusted-branch outputs.
+
+Archive caches use the same trust model through the CLI. Default-branch runs
+read/write the default tag, trusted branch runs read branch then default and
+write branch, PRs read base/default and save nothing by default, and
+`save-on-pull-request: true` makes the PR read/write target isolated to that PR:
+the action exports `BORINGCACHE_SAVE_ON_PULL_REQUEST=1` for its post-save phase
+and sets `BORINGCACHE_RESTORE_PR_CACHE=1` for CLI restore subprocesses.
+If you build explicit tags from refs, slug branch names before passing them to
+the action; explicit tags are not silently rewritten.
 
 For Docker and BuildKit setup flows, `boringcache/one` now treats proxy readiness and OCI import readability as one contract.
 The setup step waits for the started proxy to be reachable, probes each CLI-planned import ref through the proxy, and exposes both the requested and actually usable import refs.

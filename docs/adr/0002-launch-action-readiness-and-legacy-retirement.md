@@ -55,6 +55,11 @@ fail closed in the emitted outputs. The build path should consume:
 - `docker-cache-unreadable-from-refs` as the unreadable subset; and
 - `docker-cache-import-ready` as the all-refs-readable signal.
 
+The build can proceed as soon as the first CLI-planned fallback ref is readable.
+Earlier misses, especially PR-scoped refs on restore-only PRs, should be
+reported as unreadable refs rather than forcing the action to wait the full
+readiness budget before using base/default fallback.
+
 When every CLI-planned import ref is unreadable, the action should continue
 without registry imports and report a cold-seed notice, not a release-health
 warning. Partial readability remains a warning because it means at least one
@@ -64,8 +69,17 @@ Benchmark and product workflows should consume those outputs instead of
 re-implementing their own proxy-manifest readiness probes.
 
 Restore-only PR behavior is expected. Missing PR-scoped Docker refs should
-fall back to CLI-planned branch/default/stable imports. The action should not
+fall back to CLI-planned base/default/stable imports. The action should not
 turn a missing PR cache into branch/default write permission.
+
+Archive scope follows the same rule. With default PR settings the action runs
+restore-only and the CLI reads base/default. With `save-on-pull-request: true`,
+the action exports `BORINGCACHE_SAVE_ON_PULL_REQUEST=1` for save intent and
+sets `BORINGCACHE_RESTORE_PR_CACHE=1` for the CLI restore subprocess that needs
+the matching PR-first read scope. The CLI should not treat the save env name as
+a restore read toggle. `restore-keys` remains an actions/cache compatibility
+layer and must use structured CLI check output instead of restore exit code to
+decide hits.
 
 `BORINGCACHE_API_TOKEN` remains a compatibility fallback. New examples should
 lead with `BORINGCACHE_RESTORE_TOKEN` and `BORINGCACHE_SAVE_TOKEN`.

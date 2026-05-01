@@ -28,6 +28,14 @@ interface RestoreResult {
   saveEntries: string;
 }
 
+interface CheckSummary {
+  results?: CheckResult[];
+}
+
+interface CheckResult {
+  status?: string;
+}
+
 function buildRuntimeRestoreFlagArgs(
   inputs: Pick<ReturnType<typeof getInputs>, 'enableCrossOsArchive' | 'noPlatform' | 'verbose'>,
 ): string[] {
@@ -112,37 +120,100 @@ async function restoreEntries(
 
   const restoreEntriesArg = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`).join(',');
   const saveEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.savePath}`).join(',');
+  const restoreMissShouldFail = flagArgs.includes('--fail-on-cache-miss');
 
-  let lastExitCode = await execBoringCache(
-    ['restore', workspace, restoreEntriesArg, ...flagArgs],
-    { ignoreReturnCode: true },
-  );
+  const primaryHit = await checkEntries(workspace, parsedEntries.map((entry) => entry.tag), flagArgs);
+  let selectedRestoreEntries = restoreEntriesArg;
+  let hit = primaryHit;
 
-  if (lastExitCode !== 0) {
+  if (!hit) {
     for (const candidate of restoreCandidates) {
       if (!candidate.entries.trim()) {
         continue;
       }
 
-      lastExitCode = await execBoringCache(
-        ['restore', workspace, candidate.entries, ...flagArgs],
-        { ignoreReturnCode: true },
+      const candidateEntries = parseEntries(candidate.entries, 'restore', { resolvePaths: false });
+      const candidateHit = await checkEntries(
+        workspace,
+        candidateEntries.map((entry) => entry.tag),
+        flagArgs,
       );
-      if (lastExitCode === 0) {
+      if (candidateHit) {
         core.info(`Cache hit with restore key ${candidate.tagPrefix}`);
+        selectedRestoreEntries = candidate.entries;
+        hit = true;
         break;
       }
     }
   }
 
-  if (lastExitCode !== 0 && flagArgs.includes('--fail-on-cache-miss')) {
+  if (!hit && restoreMissShouldFail) {
     throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
   }
 
+  const restoreFlagArgs = hit ? flagArgs : flagArgs.filter((arg) => arg !== '--fail-on-cache-miss');
+  const restoreExitCode = await execBoringCache(
+    ['restore', workspace, selectedRestoreEntries, ...restoreFlagArgs],
+    { ignoreReturnCode: true },
+  );
+
+  if (restoreExitCode !== 0) {
+    throw new Error(`Cache restore failed for ${selectedRestoreEntries}`);
+  }
+
   return {
-    hit: lastExitCode === 0,
+    hit,
     saveEntries,
   };
+}
+
+async function checkEntries(
+  workspace: string,
+  tags: string[],
+  restoreFlagArgs: string[],
+): Promise<boolean> {
+  const checkTags = tags.map((tag) => tag.trim()).filter(Boolean);
+  if (checkTags.length === 0) {
+    return false;
+  }
+
+  let stdout = '';
+  const args = ['check', workspace, checkTags.join(','), ...checkFlagArgs(restoreFlagArgs), '--json'];
+  const exitCode = await execBoringCache(args, {
+    ignoreReturnCode: true,
+    silent: true,
+    listeners: {
+      stdout: (data: Buffer) => {
+        stdout += data.toString();
+      },
+    },
+  });
+
+  if (exitCode !== 0 && !stdout.trim()) {
+    throw new Error(`Cache check failed for ${checkTags.join(',')}`);
+  }
+
+  let summary: CheckSummary;
+  try {
+    summary = JSON.parse(stdout) as CheckSummary;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse boringcache check JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  return (summary.results || []).some((result) => result.status === 'hit');
+}
+
+function checkFlagArgs(restoreFlagArgs: string[]): string[] {
+  const args: string[] = [];
+  if (restoreFlagArgs.includes('--no-platform')) {
+    args.push('--no-platform');
+  }
+  if (restoreFlagArgs.includes('--no-git')) {
+    args.push('--no-git');
+  }
+  return args;
 }
 
 export async function run(): Promise<void> {
@@ -150,6 +221,7 @@ export async function run(): Promise<void> {
   try {
     const inputs = getInputs();
     const saveEnabled = saveConfigured(inputs);
+    delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
     const saveAllowed = saveEnabled ? applySaveTokenPolicy(inputs) : false;
     const cliPlatform = inputs.cliPlatform || undefined;
 

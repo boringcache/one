@@ -1215,6 +1215,8 @@ beforeEach(() => {
   delete process.env.BORINGCACHE_DEFAULT_WORKSPACE;
   delete process.env.BORINGCACHE_DEFAULT_BRANCH;
   delete process.env.BORINGCACHE_CI_RUN_STARTED_AT;
+  delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
+  delete process.env.BORINGCACHE_RESTORE_PR_CACHE;
   delete process.env.BORINGCACHE_GIT_BRANCH;
   delete process.env.BORINGCACHE_GIT_SHA;
   delete process.env.CI;

@@ -266,12 +266,12 @@ export async function waitForOciImportReadiness(
     const readableRefs = readability.filter((entry) => entry.readable).map((entry) => entry.ref);
     const unreadableRefs = readability.filter((entry) => !entry.readable).map((entry) => entry.ref);
 
-    if (unreadableRefs.length === 0) {
+    if (readableRefs.length > 0) {
       return {
         requestedRefs: refs,
         readableRefs,
         unreadableRefs,
-        ready: true,
+        ready: unreadableRefs.length === 0,
         phase: lastStatus?.phase,
         publishState: lastStatus?.publish_state,
         publishSettled: lastStatus?.publish_settled,

@@ -66,9 +66,23 @@ restore/save phases, so it reads `sccache --show-stats` to decide save/verify
 behavior and step notices. That must remain output/lifecycle plumbing, not a
 second cache setup or tag-planning path.
 
+Implementation note, 2026-05-01: branch/default/PR cache scope is CLI-owned for
+archive, proxy adapters, and Docker/BuildKit. The action may pass GitHub event
+metadata into the CLI and set `BORINGCACHE_SAVE_ON_PULL_REQUEST=1` when
+`save-on-pull-request` is explicitly enabled. It also sets
+`BORINGCACHE_RESTORE_PR_CACHE=1` for CLI restore subprocesses that need the
+matching PR-first archive restore scope; the save env name is not a CLI restore
+toggle. The action must not duplicate `TagResolver` fallback ordering in
+TypeScript. Archive compatibility output such as `cache-hit` and `restore-keys`
+must be based on structured CLI `check --json` results because restore misses
+normally exit `0`. Explicit
+workflow-provided tag strings are not silently slugged by the action; workflows
+that interpolate branch refs must pass valid cache tag names.
+
 It must not:
 
 - reimplement `.boringcache.toml` semantics;
+- reimplement branch/default/PR cache scope or generated tag suffixing;
 - derive Docker immutable run refs independently from the CLI;
 - recreate adapter setup templates or default path rules for Bazel, Gradle, or Maven;
 - guess Rails publish, restore, or stale-promotion policy;

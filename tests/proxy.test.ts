@@ -90,7 +90,7 @@ describe('proxy OCI import readiness', () => {
     });
   });
 
-  it('reports unreadable refs even when proxy status already says ready', async () => {
+  it('returns once the first usable fallback ref is readable', async () => {
     await withProxyServer({
       status: {
         phase: 'ready',
@@ -114,7 +114,7 @@ describe('proxy OCI import readiness', () => {
     });
   });
 
-  it('waits for manifests that become readable after proxy startup', async () => {
+  it('waits while no planned manifest is readable', async () => {
     await withProxyServer({
       status: {
         phase: 'ready',
@@ -123,7 +123,7 @@ describe('proxy OCI import readiness', () => {
         tags_visible: true,
       },
       refs: {
-        'branch-main': 'readable',
+        'branch-main': 'missing',
         'buildcache': 'missing',
       },
     }, async ({ host, port, state }) => {
@@ -133,9 +133,9 @@ describe('proxy OCI import readiness', () => {
 
       const readiness = await waitForOciImportReadiness(host, port, ['branch-main', 'buildcache'], 1500);
 
-      expect(readiness.ready).toBe(true);
-      expect(readiness.readableRefs).toEqual(['branch-main', 'buildcache']);
-      expect(readiness.unreadableRefs).toEqual([]);
+      expect(readiness.ready).toBe(false);
+      expect(readiness.readableRefs).toEqual(['buildcache']);
+      expect(readiness.unreadableRefs).toEqual(['branch-main']);
     });
   });
 

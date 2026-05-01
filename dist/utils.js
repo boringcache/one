@@ -179,6 +179,12 @@ function saveSkippedByPolicyMessage() {
     return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
 }
 function applySaveTokenPolicy(inputs) {
+    delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
+    if (isPullRequestEvent() && inputs.saveOnPullRequest) {
+        process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
+        process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
+        core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    }
     const saveAllowed = saveAllowedForEvent(inputs);
     if (saveAllowed) {
         return true;

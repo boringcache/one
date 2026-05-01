@@ -10,6 +10,15 @@
 
 The CLI owns cache protocol behavior, registry proxy semantics, local adapters, CI run-context detection for proxy save requests, and release binaries. The action may derive GitHub provider metadata, seed `BORINGCACHE_CI_*` environment values, and invoke the CLI, but it should not reimplement Rails API policy, Docker ref planning, or proxy protocol rules.
 
+The CLI also owns generated cache scope. Default, trusted-branch, PR, base,
+platform, and no-git fallback ordering must come from CLI planning or CLI
+restore/check behavior across archive, proxy adapters, and Docker/BuildKit.
+The action may expose GitHub event metadata and set
+`BORINGCACHE_SAVE_ON_PULL_REQUEST=1` when `save-on-pull-request` is explicitly
+enabled, plus process-local `BORINGCACHE_RESTORE_PR_CACHE=1` for matching CLI
+restore subprocesses, but it must not keep a parallel branch/default/PR suffix
+planner.
+
 The action owns the user-facing `metadata-hints` input, but the CLI owns hint validation, prioritization, normalization, and replayable proxy argument shape. The action should pass low-cardinality workflow labels into the CLI dry-run request and then forward the returned `proxy.metadata_hints`; it should not keep a second sanitizer or merge path. Repo-configured proxy metadata from `.boringcache.toml` should flow through the same CLI dry-run plan by default; action inputs are the override path, not a replacement config system.
 
 Rails owns workspace, token, storage, publish, restore, session, billing, and API truth. Action changes that need a new API contract should update the web ADR/comprehension path and the CLI request path in the same rollout.
@@ -28,11 +37,11 @@ Adapter proxy tag shape comes from the CLI dry-run plan, which merges `.boringca
 
 The action must check the CLI dry-run `schema_version` before using adapter or OCI planning, and must check `adapter.setup.schema_version` before replaying setup files, directories, or env vars. Unsupported versions should fail with an explicit update/pin message instead of partially applying a setup plan whose file modes or fields may have changed.
 
-Docker and BuildKit registry modes must consume the complete CLI-planned OCI import/export specs. If the CLI dry-run returns multiple `oci_cache.cache_from_refs` such as PR, branch, default, and stable fallback refs, the action should pass each one as its own `--cache-from` or `--import-cache` flag instead of rebuilding, narrowing, or appending fields such as `registry.insecure=true` in TypeScript.
+Docker and BuildKit registry modes must consume the complete CLI-planned OCI import/export specs. If the CLI dry-run returns multiple `oci_cache.cache_from_refs` such as PR, base/default, and stable fallback refs, the action should pass each one as its own `--cache-from` or `--import-cache` flag instead of rebuilding, narrowing, or appending fields such as `registry.insecure=true` in TypeScript.
 
-The action owns the runtime readiness check for those planned Docker and BuildKit imports. Proxy startup is not complete merely because `/_boringcache/status` says `phase=ready`; the action must also prove which planned OCI refs are readable through the started proxy, filter actual build arguments to the readable set, and expose both the requested and used ref sets through action outputs. If none of the planned refs are readable, the action should continue without registry imports and report a cold-seed notice. If only some refs are readable, keep a warning because the warm fallback set is degraded. Downstream workflows should not implement their own competing manifest-readability gate.
+The action owns the runtime readiness check for those planned Docker and BuildKit imports. Proxy startup is not complete merely because `/_boringcache/status` says `phase=ready`; the action must also prove which planned OCI refs are readable through the started proxy, filter actual build arguments to the readable set, and expose both the requested and used ref sets through action outputs. It may proceed as soon as the first planned fallback ref is readable instead of waiting for every earlier miss to time out. If none of the planned refs are readable, the action should continue without registry imports and report a cold-seed notice. If only some refs are readable, keep a warning because the warm fallback set is degraded. Downstream workflows should not implement their own competing manifest-readability gate.
 
-Rust cache-hit detection must use structured CLI results instead of parsing human restore logs. Archive subcache restore uses `boringcache check --json` before restore to decide the action output, and proxy sccache preflight keeps the strict `--require-server-signature` check while still reading structured JSON.
+Rust cache-hit detection must use structured CLI results instead of parsing human restore logs. Archive subcache restore uses `boringcache check --json` before restore to decide the action output, and proxy sccache preflight keeps the strict `--require-server-signature` check while still reading structured JSON. A normal `boringcache restore` miss exits successfully unless `--fail-on-cache-miss` is set, so action `cache-hit` and `restore-keys` compatibility must never be inferred from restore exit code alone.
 
 Rust archive cache identity comes from the CLI plan. The action does not expose Rust-specific exact-tag override inputs such as `cargo-tag`, `cargo-git-tag`, `cargo-bin-tag`, `target-tag`, or `sccache-tag`; use `.boringcache.toml`, generic archive entries, `cache-tag`, or CLI-owned tag suffixing instead of mutating resolved Rust entries in TypeScript.
 
@@ -40,7 +49,14 @@ Rust cache hygiene follows the same split. CLI-planned Rust cache entries and th
 
 Docker and BuildKit registry modes must also forward CLI-planned `oci_cache.promotion_ref_tags` to `cache-registry` as real `--oci-alias-promotion-ref` arguments. The `docker_alias_promotion_refs` metadata hint is diagnostic only; it does not cause the proxy to bind branch, PR, default, or stable OCI aliases after an immutable run-ref export.
 
-Pull request runs are restore-only by default. A PR-scoped Docker or BuildKit ref such as `/cache:pr-3208` may legitimately be missing, because the action does not publish it unless `save-on-pull-request` is explicitly enabled. That miss should be handled by the CLI-planned branch/default/stable fallback imports. If PR saving is enabled, the normal derived promotion target is the PR alias; the action should not turn a missing PR alias into branch/default write permission.
+Pull request runs are restore-only by default. A PR-scoped Docker or BuildKit ref such as `/cache:pr-3208` may legitimately be missing, because the action does not publish it unless `save-on-pull-request` is explicitly enabled. That miss should be handled by the CLI-planned base/default/stable fallback imports without reading the PR head-branch cache by default. If PR saving is enabled, the normal derived promotion target is the PR alias; the action should not turn a missing PR alias into branch/default write permission. For archive compatibility, `save-on-pull-request` exports `BORINGCACHE_SAVE_ON_PULL_REQUEST=1` for post-save intent and sets `BORINGCACHE_RESTORE_PR_CACHE=1` only for CLI restore subprocesses that need the matching PR-first read scope. The CLI must not infer PR reads from the save-side env name.
+
+Explicit cache tags stay explicit. The CLI sanitizes generated git scope
+components, but the action should not silently rewrite user-provided
+`cache-tag`, entry names, or mode tags. Workflows that build tags from
+`github.ref_name` must slug branch names before passing them to the action;
+otherwise refs such as `gt/expose-bc-tuning-knobs` can produce server-invalid
+tag names during trusted branch or manual dispatch saves.
 
 Docker support should stay on the BuildKit registry-cache path through CLI-planned `--cache-from` and `--cache-to` refs. Do not add a second Docker adoption path without a named migration ADR.
 

@@ -42658,12 +42658,12 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
         const readableRefs = readability.filter((entry) => entry.readable).map((entry) => entry.ref);
         const unreadableRefs = readability.filter((entry) => !entry.readable).map((entry) => entry.ref);
-        if (unreadableRefs.length === 0) {
+        if (readableRefs.length > 0) {
             return {
                 requestedRefs: refs,
                 readableRefs,
                 unreadableRefs,
-                ready: true,
+                ready: unreadableRefs.length === 0,
                 phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
                 publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
                 publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
@@ -45805,26 +45805,75 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
     }
     const restoreEntriesArg = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`).join(',');
     const saveEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.savePath}`).join(',');
-    let lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, restoreEntriesArg, ...flagArgs], { ignoreReturnCode: true });
-    if (lastExitCode !== 0) {
+    const restoreMissShouldFail = flagArgs.includes('--fail-on-cache-miss');
+    const primaryHit = await checkEntries(workspace, parsedEntries.map((entry) => entry.tag), flagArgs);
+    let selectedRestoreEntries = restoreEntriesArg;
+    let hit = primaryHit;
+    if (!hit) {
         for (const candidate of restoreCandidates) {
             if (!candidate.entries.trim()) {
                 continue;
             }
-            lastExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, candidate.entries, ...flagArgs], { ignoreReturnCode: true });
-            if (lastExitCode === 0) {
+            const candidateEntries = (0, utils_1.parseEntries)(candidate.entries, 'restore', { resolvePaths: false });
+            const candidateHit = await checkEntries(workspace, candidateEntries.map((entry) => entry.tag), flagArgs);
+            if (candidateHit) {
                 core.info(`Cache hit with restore key ${candidate.tagPrefix}`);
+                selectedRestoreEntries = candidate.entries;
+                hit = true;
                 break;
             }
         }
     }
-    if (lastExitCode !== 0 && flagArgs.includes('--fail-on-cache-miss')) {
+    if (!hit && restoreMissShouldFail) {
         throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
     }
+    const restoreFlagArgs = hit ? flagArgs : flagArgs.filter((arg) => arg !== '--fail-on-cache-miss');
+    const restoreExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, selectedRestoreEntries, ...restoreFlagArgs], { ignoreReturnCode: true });
+    if (restoreExitCode !== 0) {
+        throw new Error(`Cache restore failed for ${selectedRestoreEntries}`);
+    }
     return {
-        hit: lastExitCode === 0,
+        hit,
         saveEntries,
     };
+}
+async function checkEntries(workspace, tags, restoreFlagArgs) {
+    const checkTags = tags.map((tag) => tag.trim()).filter(Boolean);
+    if (checkTags.length === 0) {
+        return false;
+    }
+    let stdout = '';
+    const args = ['check', workspace, checkTags.join(','), ...checkFlagArgs(restoreFlagArgs), '--json'];
+    const exitCode = await (0, utils_1.execBoringCache)(args, {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+        },
+    });
+    if (exitCode !== 0 && !stdout.trim()) {
+        throw new Error(`Cache check failed for ${checkTags.join(',')}`);
+    }
+    let summary;
+    try {
+        summary = JSON.parse(stdout);
+    }
+    catch (error) {
+        throw new Error(`Failed to parse boringcache check JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return (summary.results || []).some((result) => result.status === 'hit');
+}
+function checkFlagArgs(restoreFlagArgs) {
+    const args = [];
+    if (restoreFlagArgs.includes('--no-platform')) {
+        args.push('--no-platform');
+    }
+    if (restoreFlagArgs.includes('--no-git')) {
+        args.push('--no-git');
+    }
+    return args;
 }
 async function run() {
     var _a;
@@ -45832,6 +45881,7 @@ async function run() {
     try {
         const inputs = (0, utils_1.getInputs)();
         const saveEnabled = (0, utils_1.saveConfigured)(inputs);
+        delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
         const saveAllowed = saveEnabled ? (0, utils_1.applySaveTokenPolicy)(inputs) : false;
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
@@ -46112,6 +46162,12 @@ function saveSkippedByPolicyMessage() {
     return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
 }
 function applySaveTokenPolicy(inputs) {
+    delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
+    if (isPullRequestEvent() && inputs.saveOnPullRequest) {
+        process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
+        process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
+        core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    }
     const saveAllowed = saveAllowedForEvent(inputs);
     if (saveAllowed) {
         return true;
