@@ -127,6 +127,40 @@ describe('restore action', () => {
     expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
   });
 
+  it('treats empty check JSON as a restore miss instead of failing', async () => {
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+    ) => {
+      if (command === 'boringcache' && args?.[0] === 'check' && args.includes('--json')) {
+        return 0;
+      }
+
+      if (command === 'boringcache' && args?.[0] === 'restore') {
+        return 0;
+      }
+
+      return 0;
+    });
+
+    mockGetInput({
+      workspace: 'my-org/my-project',
+      entries: 'deps:node_modules',
+    });
+
+    await restoreRun();
+
+    expect(core.warning).toHaveBeenCalledWith(
+      'boringcache check --json produced no output for deps; treating as a miss.',
+    );
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      ['restore', 'my-org/my-project', 'deps:node_modules'],
+      expect.objectContaining({ ignoreReturnCode: true }),
+    );
+    expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'false');
+  });
+
   it('resolves actions/cache compatibility paths relative to working-directory', async () => {
     const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     mockGetInput({

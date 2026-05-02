@@ -45853,15 +45853,22 @@ async function checkEntries(workspace, tags, restoreFlagArgs) {
             },
         },
     });
-    if (exitCode !== 0 && !stdout.trim()) {
-        throw new Error(`Cache check failed for ${checkTags.join(',')}`);
+    if (!stdout.trim()) {
+        if (exitCode !== 0) {
+            core.warning(`Cache check failed for ${checkTags.join(',')}; treating as a miss.`);
+        }
+        else {
+            core.warning(`boringcache check --json produced no output for ${checkTags.join(',')}; treating as a miss.`);
+        }
+        return false;
     }
     let summary;
     try {
         summary = JSON.parse(stdout);
     }
     catch (error) {
-        throw new Error(`Failed to parse boringcache check JSON: ${error instanceof Error ? error.message : String(error)}`);
+        core.warning(`Failed to parse boringcache check JSON for ${checkTags.join(',')}: ${error instanceof Error ? error.message : String(error)}; treating as a miss.`);
+        return false;
     }
     return (summary.results || []).some((result) => result.status === 'hit');
 }
