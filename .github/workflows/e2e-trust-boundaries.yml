@@ -152,6 +152,7 @@ jobs:
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
             marker:restore=>marker.txt
+          save-on-pull-request: true
           verify: check
           verify-require-server-signature: true
           verbose: true
@@ -225,6 +226,7 @@ jobs:
           working-directory: ${{ env.E2E_WORKDIR }}
           entries: |
             marker:restore=>marker.txt
+          save-on-pull-request: true
           verify: check
           verify-require-server-signature: true
           verbose: true
