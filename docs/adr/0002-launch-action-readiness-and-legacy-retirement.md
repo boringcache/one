@@ -123,10 +123,10 @@ CLI default bumps must keep these files together:
 - generated `dist/**`;
 - `package.json` and `package-lock.json`.
 
-The current local release-alignment change moves the action package from
-`1.12.64` to `1.12.65` and the default CLI from `v1.12.46` to `v1.12.47`.
-That is the right shape, but it still needs the usual signed commit/tag and
-`one@v1` movement before public docs can treat it as released.
+The current release line is action package `1.12.86` with default CLI
+`v1.12.65`. Cut action releases by tagging the already-green commit SHA; do
+not add a release-only commit after CI/E2E has passed. Move `one@v1` only after
+the signed semver tag release succeeds.
 
 ## Performance Guardrails
 
