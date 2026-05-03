@@ -45874,6 +45874,9 @@ async function run() {
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
         const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
+        if (saveAllowed && (0, utils_1.isPullRequestEvent)() && inputs.saveOnPullRequest) {
+            (0, utils_1.applyPullRequestSaveScopeEnv)();
+        }
         let verifySaveTags = core.getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())
@@ -46046,6 +46049,7 @@ exports.saveConfigured = saveConfigured;
 exports.saveAllowedForEvent = saveAllowedForEvent;
 exports.saveSkippedByConfigurationMessage = saveSkippedByConfigurationMessage;
 exports.saveSkippedByPolicyMessage = saveSkippedByPolicyMessage;
+exports.applyPullRequestSaveScopeEnv = applyPullRequestSaveScopeEnv;
 exports.applySaveTokenPolicy = applySaveTokenPolicy;
 exports.readSavedSaveAllowance = readSavedSaveAllowance;
 exports.readSavedSaveConfiguration = readSavedSaveConfiguration;
@@ -46184,12 +46188,16 @@ function saveSkippedByConfigurationMessage() {
 function saveSkippedByPolicyMessage() {
     return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
 }
+function applyPullRequestSaveScopeEnv() {
+    process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
+    process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
+    core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    core.exportVariable('BORINGCACHE_RESTORE_PR_CACHE', '1');
+}
 function applySaveTokenPolicy(inputs) {
     delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
     if (isPullRequestEvent() && inputs.saveOnPullRequest) {
-        process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
-        process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
-        core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+        applyPullRequestSaveScopeEnv();
     }
     const saveAllowed = saveAllowedForEvent(inputs);
     if (saveAllowed) {

@@ -408,6 +408,7 @@ describe('restore action', () => {
     expect(process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST).toBe('1');
     expect(process.env.BORINGCACHE_RESTORE_PR_CACHE).toBe('1');
     expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_RESTORE_PR_CACHE', '1');
     expect(core.saveState).toHaveBeenCalledWith('save-allowed', 'true');
   });
 
