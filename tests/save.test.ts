@@ -157,6 +157,48 @@ describe('save action', () => {
     );
   });
 
+  it('rehydrates PR restore scope before post-save verification', async () => {
+    process.env.GITHUB_EVENT_NAME = 'pull_request';
+    process.env.BORINGCACHE_SAVE_TOKEN = 'test-save-token';
+    delete process.env.BORINGCACHE_RESTORE_PR_CACHE;
+
+    mockGetInput({});
+    mockGetBooleanInput({ 'save-on-pull-request': true });
+    mockGetState({
+      'resolved-mode': 'archive',
+      'generic-cache-entries': 'deps:node_modules',
+      'generic-cache-workspace': 'my-org/my-project',
+      'cli-version': 'skip',
+      'verify-mode': 'check',
+      'verify-timeout-seconds': '60',
+      'verify-require-server-signature': 'false',
+      'save-allowed': 'true',
+      'verify-save-specs': JSON.stringify([{
+        tag: 'deps',
+        noPlatform: false,
+        noGit: false,
+        saveExpected: true,
+      }]),
+    });
+
+    await saveRun();
+
+    expect(process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST).toBe('1');
+    expect(process.env.BORINGCACHE_RESTORE_PR_CACHE).toBe('1');
+    expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_RESTORE_PR_CACHE', '1');
+
+    const checkCall = (exec.exec as jest.Mock).mock.calls.find(
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
+    );
+    expect(checkCall?.[2]).toEqual(expect.objectContaining({
+      env: expect.objectContaining({
+        BORINGCACHE_RESTORE_PR_CACHE: '1',
+        BORINGCACHE_SAVE_ON_PULL_REQUEST: '1',
+      }),
+    }));
+  });
+
   it('does not wait for deferred save tags when verify mode is check', async () => {
     let checkAttempts = 0;
     (exec.exec as jest.Mock).mockImplementation(async (command: string, args?: string[]) => {

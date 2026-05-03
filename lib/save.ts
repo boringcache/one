@@ -6,6 +6,8 @@ import {
   ensureBoringCache,
   execBoringCache,
   getInputs,
+  applyPullRequestSaveScopeEnv,
+  isPullRequestEvent,
   loadDiagnosticsConfig,
   readLogTail,
   readSavedSaveAllowance,
@@ -181,6 +183,9 @@ export async function run(): Promise<void> {
       core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
     const saveConfigured = readSavedSaveConfiguration(inputs, core.getState('save-configured'));
     const saveAllowed = readSavedSaveAllowance(inputs, core.getState('save-allowed'));
+    if (saveAllowed && isPullRequestEvent() && inputs.saveOnPullRequest) {
+      applyPullRequestSaveScopeEnv();
+    }
     let verifySaveTags = core.getState('verify-save-tags')
       .split(',')
       .map((tag) => tag.trim())

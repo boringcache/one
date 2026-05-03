@@ -167,6 +167,9 @@ async function run() {
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
         const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
+        if (saveAllowed && (0, utils_1.isPullRequestEvent)() && inputs.saveOnPullRequest) {
+            (0, utils_1.applyPullRequestSaveScopeEnv)();
+        }
         let verifySaveTags = core.getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())

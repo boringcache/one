@@ -247,13 +247,18 @@ export function saveSkippedByPolicyMessage(): string {
   return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
 }
 
+export function applyPullRequestSaveScopeEnv(): void {
+  process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
+  process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
+  core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+  core.exportVariable('BORINGCACHE_RESTORE_PR_CACHE', '1');
+}
+
 export function applySaveTokenPolicy(inputs: Pick<OneInputs, 'saveOnPullRequest'>): boolean {
   delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
 
   if (isPullRequestEvent() && inputs.saveOnPullRequest) {
-    process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
-    process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
-    core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
+    applyPullRequestSaveScopeEnv();
   }
 
   const saveAllowed = saveAllowedForEvent(inputs);
