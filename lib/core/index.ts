@@ -40,6 +40,7 @@ export {
 export {
   startRegistryProxy,
   stopRegistryProxy,
+  waitForOciRefsReadable,
   findAvailablePort,
   ProxyOptions,
   ProxyHandle,

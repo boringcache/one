@@ -69,11 +69,8 @@ function adapterProxyVerificationSpec(tag, proxyPlan, pathHint) {
     };
 }
 function registryCacheVerificationSpecs(cacheTag, ociCache, noPlatform, noGit, saveExpected, pathHint) {
-    const tags = [cacheTag];
-    if (saveExpected) {
-        tags.push(...((ociCache === null || ociCache === void 0 ? void 0 : ociCache.promotion_ref_tags) || []));
-    }
-    const uniqueTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
+    void ociCache;
+    const uniqueTags = Array.from(new Set([cacheTag].map((tag) => tag.trim()).filter(Boolean)));
     return uniqueTags.map((tag) => ({
         tag,
         noPlatform,
@@ -253,6 +250,12 @@ function saveModeState(key, value) {
 function getModeState(key) {
     return core.getState(modeStateKey(key));
 }
+function getModeStateList(key) {
+    return getModeState(key)
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
 function appendModeStateListValue(key, value) {
     if (!value) {
         return;
@@ -288,6 +291,23 @@ function setProxyOutputs(port) {
 function saveProxyModeState(port) {
     saveModeState('proxy-port', String(port));
     saveModeState('proxy-log-path', registryProxyLogPath(port));
+}
+async function verifyOciPromotionRefsBeforeStop() {
+    const refs = getModeStateList('oci-promotion-ref-tags');
+    if (refs.length === 0) {
+        return;
+    }
+    const port = Number.parseInt(getModeState('proxy-port'), 10);
+    if (!Number.isFinite(port) || port <= 0) {
+        throw new Error(`Cannot verify OCI promotion refs without a proxy port. requested=[${refs.join(', ')}]`);
+    }
+    const host = getModeState('proxy-host') || '127.0.0.1';
+    const readiness = await (0, core_1.waitForOciRefsReadable)(host, port, refs, 60000);
+    if (readiness.ready) {
+        core.info(`Verified OCI promotion refs through proxy: ${readiness.readableRefs.join(', ')}`);
+        return;
+    }
+    throw new Error(`OCI promotion refs were not readable through the proxy before shutdown. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
 }
 async function shutdownBazelServer() {
     await exec.exec('bazel', ['shutdown'], {
@@ -1311,7 +1331,7 @@ function toolEnabled(plan, toolName) {
     return plan.runtimeTools.some((tool) => tool.name === toolName);
 }
 async function runDockerRestore(plan, inputs) {
-    var _a, _b;
+    var _a, _b, _c;
     const context = path.resolve(plan.workingDirectory, core.getInput('context') || '.');
     const dockerfile = core.getInput('dockerfile') || 'Dockerfile';
     const dockerCommand = core.getInput('docker-command') || 'build';
@@ -1382,6 +1402,8 @@ async function runDockerRestore(plan, inputs) {
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
+        saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+        saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
         saveModeState('workspace', dockerPlan.workspace);
         saveModeState('cache-tag', cacheTag);
         setProxyOutputs(proxy.port);
@@ -1456,7 +1478,7 @@ async function runDockerRestore(plan, inputs) {
     }
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly;
+    const saveExpected = (_c = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _c !== void 0 ? _c : !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         // docker-command=setup defers the build to later workflow steps, so treat
@@ -1469,6 +1491,7 @@ async function runDockerSave() {
     try {
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
+            await verifyOciPromotionRefsBeforeStop();
             await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
             return;
         }
@@ -1489,7 +1512,7 @@ async function runDockerSave() {
     }
 }
 async function runBuildkitRestore(plan, inputs) {
-    var _a, _b;
+    var _a, _b, _c;
     const workspaceRoot = process.env.GITHUB_WORKSPACE || plan.workingDirectory;
     const contextInput = core.getInput('context') || '.';
     const contextPath = path.resolve(plan.workingDirectory, contextInput);
@@ -1572,6 +1595,8 @@ async function runBuildkitRestore(plan, inputs) {
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
+        saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+        saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
         saveModeState('workspace', dockerPlan.workspace);
         saveModeState('cache-tag', cacheTag);
         setProxyOutputs(proxy.port);
@@ -1650,7 +1675,7 @@ async function runBuildkitRestore(plan, inputs) {
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly;
+    const saveExpected = (_c = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _c !== void 0 ? _c : !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         verificationSpecs: registryCacheVerificationSpecs(resolvedCacheTag, registryOciCache, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noPlatform) || false, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noGit) || false, saveExpected, plan.workingDirectory),
@@ -1659,6 +1684,7 @@ async function runBuildkitRestore(plan, inputs) {
 async function runBuildkitSave() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
+        await verifyOciPromotionRefsBeforeStop();
         await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
         return;
     }

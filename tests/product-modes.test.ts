@@ -286,7 +286,9 @@ describe('product modes', () => {
       const verifySpecsCall = (core.saveState as jest.Mock).mock.calls.find(
         ([name]) => name === 'verify-save-specs',
       );
-      expect(verifySpecsCall?.[1]).toContain('branch-main');
+      expect(verifySpecsCall?.[1]).toContain('ghcr-io-boringcache-demo');
+      expect(verifySpecsCall?.[1]).not.toContain('branch-main');
+      expect(core.saveState).toHaveBeenCalledWith('mode-oci-promotion-ref-tags', 'branch-main');
     } finally {
       await removeTempProject(project);
     }
@@ -699,6 +701,7 @@ describe('product modes', () => {
         'verify-save-specs',
         expect.stringContaining('"tag":"bench-registry"'),
       );
+      expect(core.saveState).toHaveBeenCalledWith('mode-oci-promotion-ref-tags', '');
     } finally {
       await removeTempProject(project);
     }

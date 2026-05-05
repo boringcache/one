@@ -517,6 +517,59 @@ describe('save action', () => {
     );
   });
 
+  it('verifies docker OCI promotion refs through the proxy before stopping it', async () => {
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'docker',
+      'cli-version': 'skip',
+      'generic-cache-workspace': 'my-org/my-project',
+      'mode-builder-name': 'boringcache-12345-docker-cache-abc123',
+      'mode-proxy-pid': '4321',
+      'mode-proxy-port': '5000',
+      'mode-proxy-host': '127.0.0.1',
+      'mode-oci-promotion-ref-tags': 'default,branch-main',
+    });
+
+    await saveRun();
+
+    expect(actionCoreMocks.waitForOciRefsReadable).toHaveBeenCalledWith(
+      '127.0.0.1',
+      5000,
+      ['default', 'branch-main'],
+      60_000,
+    );
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
+  });
+
+  it('fails docker save when OCI promotion refs never become readable', async () => {
+    actionCoreMocks.waitForOciRefsReadable.mockResolvedValueOnce({
+      requestedRefs: ['default', 'branch-main'],
+      readableRefs: ['branch-main'],
+      unreadableRefs: ['default'],
+      ready: false,
+    });
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'docker',
+      'cli-version': 'skip',
+      'generic-cache-workspace': 'my-org/my-project',
+      'mode-builder-name': 'boringcache-12345-docker-cache-abc123',
+      'mode-proxy-pid': '4321',
+      'mode-proxy-port': '5000',
+      'mode-proxy-host': '127.0.0.1',
+      'mode-oci-promotion-ref-tags': 'default,branch-main',
+    });
+
+    await saveRun();
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      'boringcache/one save failed: OCI promotion refs were not readable through the proxy before shutdown. readable=[branch-main] unreadable=[default]',
+    );
+    expect(actionCoreMocks.stopRegistryProxy).not.toHaveBeenCalled();
+  });
+
   it('warns when proxy sccache sees zero hits for an existing tag', async () => {
     const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     (exec.exec as jest.Mock).mockImplementation(async (

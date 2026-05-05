@@ -17,6 +17,7 @@ const mockReadMiseTomlVersion = jest.fn();
 const mockReadToolVersionsValue = jest.fn();
 const mockStartRegistryProxy = jest.fn();
 const mockStopRegistryProxy = jest.fn();
+const mockWaitForOciRefsReadable = jest.fn();
 const mockFindAvailablePort = jest.fn();
 
 jest.mock('@actions/core', () => ({
@@ -72,6 +73,7 @@ jest.mock('../lib/core', () => {
     readToolVersionsValue: mockReadToolVersionsValue,
     startRegistryProxy: mockStartRegistryProxy,
     stopRegistryProxy: mockStopRegistryProxy,
+    waitForOciRefsReadable: mockWaitForOciRefsReadable,
     findAvailablePort: mockFindAvailablePort,
   };
 });
@@ -1255,6 +1257,12 @@ beforeEach(() => {
   mockReadToolVersionsValue.mockResolvedValue(null);
   mockStartRegistryProxy.mockResolvedValue({ pid: 4321, port: 5000, readOnly: false });
   mockStopRegistryProxy.mockResolvedValue(undefined);
+  mockWaitForOciRefsReadable.mockResolvedValue({
+    requestedRefs: [],
+    readableRefs: [],
+    unreadableRefs: [],
+    ready: true,
+  });
   mockFindAvailablePort.mockResolvedValue(5000);
 
   (exec.exec as jest.Mock).mockImplementation(async (
@@ -1346,4 +1354,5 @@ export const actionCoreMocks = {
   readToolVersionsValue: mockReadToolVersionsValue,
   startRegistryProxy: mockStartRegistryProxy,
   stopRegistryProxy: mockStopRegistryProxy,
+  waitForOciRefsReadable: mockWaitForOciRefsReadable,
 };

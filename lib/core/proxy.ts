@@ -55,6 +55,7 @@ const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
 const OCI_IMPORT_READY_TIMEOUT_MS = 15000;
 const OCI_IMPORT_READY_POLL_INTERVAL_MS = 1000;
+const OCI_REF_READY_POLL_INTERVAL_MS = 1000;
 const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 
 export function normalizeProxyTags(tagInput: string): string {
@@ -240,6 +241,21 @@ async function isManifestReadable(host: string, port: number, ref: string): Prom
   }
 }
 
+async function readOciRefReadiness(
+  host: string,
+  port: number,
+  refs: string[],
+): Promise<Pick<OciImportReadiness, 'readableRefs' | 'unreadableRefs'>> {
+  const readability = await Promise.all(
+    refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })),
+  );
+
+  return {
+    readableRefs: readability.filter((entry) => entry.readable).map((entry) => entry.ref),
+    unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
+  };
+}
+
 export async function waitForOciImportReadiness(
   host: string,
   port: number,
@@ -261,11 +277,7 @@ export async function waitForOciImportReadiness(
 
   while (Date.now() - startedAt < timeoutMs) {
     lastStatus = await fetchProxyStatus(host, port);
-    const readability = await Promise.all(
-      refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })),
-    );
-    const readableRefs = readability.filter((entry) => entry.readable).map((entry) => entry.ref);
-    const unreadableRefs = readability.filter((entry) => !entry.readable).map((entry) => entry.ref);
+    const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
 
     if (readableRefs.length > 0) {
       return {
@@ -283,15 +295,64 @@ export async function waitForOciImportReadiness(
     await new Promise((resolve) => setTimeout(resolve, OCI_IMPORT_READY_POLL_INTERVAL_MS));
   }
 
-  const readability = await Promise.all(
-    refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })),
-  );
+  const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
 
   return {
     requestedRefs: refs,
-    readableRefs: readability.filter((entry) => entry.readable).map((entry) => entry.ref),
-    unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
-    ready: readability.every((entry) => entry.readable),
+    readableRefs,
+    unreadableRefs,
+    ready: unreadableRefs.length === 0,
+    phase: lastStatus?.phase,
+    publishState: lastStatus?.publish_state,
+    publishSettled: lastStatus?.publish_settled,
+    tagsVisible: lastStatus?.tags_visible,
+  };
+}
+
+export async function waitForOciRefsReadable(
+  host: string,
+  port: number,
+  requestedRefs: string[],
+  timeoutMs = 60_000,
+): Promise<OciImportReadiness> {
+  const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
+  if (refs.length === 0) {
+    return {
+      requestedRefs: [],
+      readableRefs: [],
+      unreadableRefs: [],
+      ready: true,
+    };
+  }
+
+  const startedAt = Date.now();
+  let lastStatus: ProxyStatusResponse | null = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastStatus = await fetchProxyStatus(host, port);
+    const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
+    if (unreadableRefs.length === 0) {
+      return {
+        requestedRefs: refs,
+        readableRefs,
+        unreadableRefs,
+        ready: true,
+        phase: lastStatus?.phase,
+        publishState: lastStatus?.publish_state,
+        publishSettled: lastStatus?.publish_settled,
+        tagsVisible: lastStatus?.tags_visible,
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, OCI_REF_READY_POLL_INTERVAL_MS));
+  }
+
+  const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
+  return {
+    requestedRefs: refs,
+    readableRefs,
+    unreadableRefs,
+    ready: unreadableRefs.length === 0,
     phase: lastStatus?.phase,
     publishState: lastStatus?.publish_state,
     publishSettled: lastStatus?.publish_settled,

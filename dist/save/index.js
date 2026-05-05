@@ -41383,7 +41383,7 @@ function missingSaveTokenMessage() {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.readProjectMiseTools = exports.readMiseTomlVersion = exports.readMiseTomlTools = exports.readToolVersionsValue = exports.readToolVersions = exports.exportMiseEnv = exports.reshimMise = exports.activateMiseTool = exports.installMiseTool = exports.installMise = exports.buildMiseRuntimeTag = exports.buildMiseToolTag = exports.scopeMiseToolVersion = exports.slugMiseTagPart = exports.getMiseShimsDir = exports.getMiseInstallsDir = exports.getMiseDataDir = exports.getMiseBinPath = exports.findAvailablePort = exports.stopRegistryProxy = exports.startRegistryProxy = exports.convertCacheFormatToEntries = exports.getInputsWorkspace = exports.getPlatformSuffix = exports.parseEntries = exports.resolvePaths = exports.resolvePath = exports.validateInputs = exports.getCacheConfig = exports.pathExists = exports.getCacheTagPrefix = exports.getWorkspace = exports.missingSaveTokenMessage = exports.missingRestoreTokenMessage = exports.warnIfUsingLegacyApiToken = exports.isUsingLegacyApiTokenOnly = exports.hasSaveToken = exports.hasRestoreToken = exports.getAuthTokens = exports.getToolCacheInfo = exports.isCliAvailable = exports.execBoringCache = exports.ensureBoringCache = void 0;
+exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.readProjectMiseTools = exports.readMiseTomlVersion = exports.readMiseTomlTools = exports.readToolVersionsValue = exports.readToolVersions = exports.exportMiseEnv = exports.reshimMise = exports.activateMiseTool = exports.installMiseTool = exports.installMise = exports.buildMiseRuntimeTag = exports.buildMiseToolTag = exports.scopeMiseToolVersion = exports.slugMiseTagPart = exports.getMiseShimsDir = exports.getMiseInstallsDir = exports.getMiseDataDir = exports.getMiseBinPath = exports.findAvailablePort = exports.waitForOciRefsReadable = exports.stopRegistryProxy = exports.startRegistryProxy = exports.convertCacheFormatToEntries = exports.getInputsWorkspace = exports.getPlatformSuffix = exports.parseEntries = exports.resolvePaths = exports.resolvePath = exports.validateInputs = exports.getCacheConfig = exports.pathExists = exports.getCacheTagPrefix = exports.getWorkspace = exports.missingSaveTokenMessage = exports.missingRestoreTokenMessage = exports.warnIfUsingLegacyApiToken = exports.isUsingLegacyApiTokenOnly = exports.hasSaveToken = exports.hasRestoreToken = exports.getAuthTokens = exports.getToolCacheInfo = exports.isCliAvailable = exports.execBoringCache = exports.ensureBoringCache = void 0;
 var setup_1 = __nccwpck_require__(51529);
 Object.defineProperty(exports, "ensureBoringCache", ({ enumerable: true, get: function () { return setup_1.ensureBoringCache; } }));
 Object.defineProperty(exports, "execBoringCache", ({ enumerable: true, get: function () { return setup_1.execBoringCache; } }));
@@ -41413,6 +41413,7 @@ Object.defineProperty(exports, "convertCacheFormatToEntries", ({ enumerable: tru
 var proxy_1 = __nccwpck_require__(58328);
 Object.defineProperty(exports, "startRegistryProxy", ({ enumerable: true, get: function () { return proxy_1.startRegistryProxy; } }));
 Object.defineProperty(exports, "stopRegistryProxy", ({ enumerable: true, get: function () { return proxy_1.stopRegistryProxy; } }));
+Object.defineProperty(exports, "waitForOciRefsReadable", ({ enumerable: true, get: function () { return proxy_1.waitForOciRefsReadable; } }));
 Object.defineProperty(exports, "findAvailablePort", ({ enumerable: true, get: function () { return proxy_1.findAvailablePort; } }));
 var mise_1 = __nccwpck_require__(14476);
 Object.defineProperty(exports, "getMiseBinPath", ({ enumerable: true, get: function () { return mise_1.getMiseBinPath; } }));
@@ -42470,6 +42471,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.normalizeProxyTags = normalizeProxyTags;
 exports.waitForOciImportReadiness = waitForOciImportReadiness;
+exports.waitForOciRefsReadable = waitForOciRefsReadable;
 exports.logOciImportReadiness = logOciImportReadiness;
 exports.assertOciImportReady = assertOciImportReady;
 exports.startRegistryProxy = startRegistryProxy;
@@ -42489,6 +42491,7 @@ const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
 const OCI_IMPORT_READY_TIMEOUT_MS = 15000;
 const OCI_IMPORT_READY_POLL_INTERVAL_MS = 1000;
+const OCI_REF_READY_POLL_INTERVAL_MS = 1000;
 const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function normalizeProxyTags(tagInput) {
     const tags = [];
@@ -42642,6 +42645,13 @@ async function isManifestReadable(host, port, ref) {
         return false;
     }
 }
+async function readOciRefReadiness(host, port, refs) {
+    const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
+    return {
+        readableRefs: readability.filter((entry) => entry.readable).map((entry) => entry.ref),
+        unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
+    };
+}
 async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = OCI_IMPORT_READY_TIMEOUT_MS) {
     const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
     if (refs.length === 0) {
@@ -42656,9 +42666,7 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
     let lastStatus = null;
     while (Date.now() - startedAt < timeoutMs) {
         lastStatus = await fetchProxyStatus(host, port);
-        const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
-        const readableRefs = readability.filter((entry) => entry.readable).map((entry) => entry.ref);
-        const unreadableRefs = readability.filter((entry) => !entry.readable).map((entry) => entry.ref);
+        const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
         if (readableRefs.length > 0) {
             return {
                 requestedRefs: refs,
@@ -42673,12 +42681,53 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         }
         await new Promise((resolve) => setTimeout(resolve, OCI_IMPORT_READY_POLL_INTERVAL_MS));
     }
-    const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
+    const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
     return {
         requestedRefs: refs,
-        readableRefs: readability.filter((entry) => entry.readable).map((entry) => entry.ref),
-        unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
-        ready: readability.every((entry) => entry.readable),
+        readableRefs,
+        unreadableRefs,
+        ready: unreadableRefs.length === 0,
+        phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
+        publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
+        publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
+        tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+    };
+}
+async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60000) {
+    const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
+    if (refs.length === 0) {
+        return {
+            requestedRefs: [],
+            readableRefs: [],
+            unreadableRefs: [],
+            ready: true,
+        };
+    }
+    const startedAt = Date.now();
+    let lastStatus = null;
+    while (Date.now() - startedAt < timeoutMs) {
+        lastStatus = await fetchProxyStatus(host, port);
+        const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
+        if (unreadableRefs.length === 0) {
+            return {
+                requestedRefs: refs,
+                readableRefs,
+                unreadableRefs,
+                ready: true,
+                phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
+                publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
+                publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
+                tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+            };
+        }
+        await new Promise((resolve) => setTimeout(resolve, OCI_REF_READY_POLL_INTERVAL_MS));
+    }
+    const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
+    return {
+        requestedRefs: refs,
+        readableRefs,
+        unreadableRefs,
+        ready: unreadableRefs.length === 0,
         phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
         publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
         publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
@@ -43475,11 +43524,8 @@ function adapterProxyVerificationSpec(tag, proxyPlan, pathHint) {
     };
 }
 function registryCacheVerificationSpecs(cacheTag, ociCache, noPlatform, noGit, saveExpected, pathHint) {
-    const tags = [cacheTag];
-    if (saveExpected) {
-        tags.push(...((ociCache === null || ociCache === void 0 ? void 0 : ociCache.promotion_ref_tags) || []));
-    }
-    const uniqueTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
+    void ociCache;
+    const uniqueTags = Array.from(new Set([cacheTag].map((tag) => tag.trim()).filter(Boolean)));
     return uniqueTags.map((tag) => ({
         tag,
         noPlatform,
@@ -43659,6 +43705,12 @@ function saveModeState(key, value) {
 function getModeState(key) {
     return core.getState(modeStateKey(key));
 }
+function getModeStateList(key) {
+    return getModeState(key)
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
 function appendModeStateListValue(key, value) {
     if (!value) {
         return;
@@ -43694,6 +43746,23 @@ function setProxyOutputs(port) {
 function saveProxyModeState(port) {
     saveModeState('proxy-port', String(port));
     saveModeState('proxy-log-path', registryProxyLogPath(port));
+}
+async function verifyOciPromotionRefsBeforeStop() {
+    const refs = getModeStateList('oci-promotion-ref-tags');
+    if (refs.length === 0) {
+        return;
+    }
+    const port = Number.parseInt(getModeState('proxy-port'), 10);
+    if (!Number.isFinite(port) || port <= 0) {
+        throw new Error(`Cannot verify OCI promotion refs without a proxy port. requested=[${refs.join(', ')}]`);
+    }
+    const host = getModeState('proxy-host') || '127.0.0.1';
+    const readiness = await (0, core_1.waitForOciRefsReadable)(host, port, refs, 60000);
+    if (readiness.ready) {
+        core.info(`Verified OCI promotion refs through proxy: ${readiness.readableRefs.join(', ')}`);
+        return;
+    }
+    throw new Error(`OCI promotion refs were not readable through the proxy before shutdown. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
 }
 async function shutdownBazelServer() {
     await exec.exec('bazel', ['shutdown'], {
@@ -44717,7 +44786,7 @@ function toolEnabled(plan, toolName) {
     return plan.runtimeTools.some((tool) => tool.name === toolName);
 }
 async function runDockerRestore(plan, inputs) {
-    var _a, _b;
+    var _a, _b, _c;
     const context = path.resolve(plan.workingDirectory, core.getInput('context') || '.');
     const dockerfile = core.getInput('dockerfile') || 'Dockerfile';
     const dockerCommand = core.getInput('docker-command') || 'build';
@@ -44788,6 +44857,8 @@ async function runDockerRestore(plan, inputs) {
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
+        saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+        saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
         saveModeState('workspace', dockerPlan.workspace);
         saveModeState('cache-tag', cacheTag);
         setProxyOutputs(proxy.port);
@@ -44862,7 +44933,7 @@ async function runDockerRestore(plan, inputs) {
     }
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly;
+    const saveExpected = (_c = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _c !== void 0 ? _c : !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         // docker-command=setup defers the build to later workflow steps, so treat
@@ -44875,6 +44946,7 @@ async function runDockerSave() {
     try {
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
+            await verifyOciPromotionRefsBeforeStop();
             await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
             return;
         }
@@ -44895,7 +44967,7 @@ async function runDockerSave() {
     }
 }
 async function runBuildkitRestore(plan, inputs) {
-    var _a, _b;
+    var _a, _b, _c;
     const workspaceRoot = process.env.GITHUB_WORKSPACE || plan.workingDirectory;
     const contextInput = core.getInput('context') || '.';
     const contextPath = path.resolve(plan.workingDirectory, contextInput);
@@ -44978,6 +45050,8 @@ async function runBuildkitRestore(plan, inputs) {
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
+        saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+        saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
         saveModeState('workspace', dockerPlan.workspace);
         saveModeState('cache-tag', cacheTag);
         setProxyOutputs(proxy.port);
@@ -45056,7 +45130,7 @@ async function runBuildkitRestore(plan, inputs) {
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = (_b = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _b !== void 0 ? _b : !inputs.readOnly;
+    const saveExpected = (_c = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _c !== void 0 ? _c : !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         verificationSpecs: registryCacheVerificationSpecs(resolvedCacheTag, registryOciCache, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noPlatform) || false, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noGit) || false, saveExpected, plan.workingDirectory),
@@ -45065,6 +45139,7 @@ async function runBuildkitRestore(plan, inputs) {
 async function runBuildkitSave() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
+        await verifyOciPromotionRefsBeforeStop();
         await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
         return;
     }

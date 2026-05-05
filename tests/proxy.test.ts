@@ -1,7 +1,12 @@
 import * as http from 'http';
 import { AddressInfo } from 'net';
 import * as core from '@actions/core';
-import { assertOciImportReady, logOciImportReadiness, waitForOciImportReadiness } from '../lib/core/proxy';
+import {
+  assertOciImportReady,
+  logOciImportReadiness,
+  waitForOciImportReadiness,
+  waitForOciRefsReadable,
+} from '../lib/core/proxy';
 
 type RefState = 'readable' | 'missing';
 
@@ -136,6 +141,59 @@ describe('proxy OCI import readiness', () => {
       expect(readiness.ready).toBe(false);
       expect(readiness.readableRefs).toEqual(['buildcache']);
       expect(readiness.unreadableRefs).toEqual(['branch-main']);
+    });
+  });
+
+  it('waits until every requested promotion ref is readable', async () => {
+    await withProxyServer({
+      status: {
+        phase: 'ready',
+        publish_state: 'published',
+        publish_settled: true,
+        tags_visible: true,
+      },
+      refs: {
+        default: 'missing',
+        'branch-main': 'readable',
+      },
+    }, async ({ host, port, state }) => {
+      setTimeout(() => {
+        state.refs.default = 'readable';
+      }, 150);
+
+      const readiness = await waitForOciRefsReadable(host, port, ['default', 'branch-main'], 1500);
+
+      expect(readiness).toEqual({
+        requestedRefs: ['default', 'branch-main'],
+        readableRefs: ['default', 'branch-main'],
+        unreadableRefs: [],
+        ready: true,
+        phase: 'ready',
+        publishState: 'published',
+        publishSettled: true,
+        tagsVisible: true,
+      });
+    });
+  });
+
+  it('reports unreadable promotion refs after timeout', async () => {
+    await withProxyServer({
+      status: {
+        phase: 'ready',
+        publish_state: 'published',
+        publish_settled: true,
+        tags_visible: true,
+      },
+      refs: {
+        default: 'missing',
+        'branch-main': 'readable',
+      },
+    }, async ({ host, port }) => {
+      const readiness = await waitForOciRefsReadable(host, port, ['default', 'branch-main'], 100);
+
+      expect(readiness.ready).toBe(false);
+      expect(readiness.readableRefs).toEqual(['branch-main']);
+      expect(readiness.unreadableRefs).toEqual(['default']);
     });
   });
 

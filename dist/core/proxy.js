@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeProxyTags = normalizeProxyTags;
 exports.waitForOciImportReadiness = waitForOciImportReadiness;
+exports.waitForOciRefsReadable = waitForOciRefsReadable;
 exports.logOciImportReadiness = logOciImportReadiness;
 exports.assertOciImportReady = assertOciImportReady;
 exports.startRegistryProxy = startRegistryProxy;
@@ -54,6 +55,7 @@ const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
 const OCI_IMPORT_READY_TIMEOUT_MS = 15000;
 const OCI_IMPORT_READY_POLL_INTERVAL_MS = 1000;
+const OCI_REF_READY_POLL_INTERVAL_MS = 1000;
 const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function normalizeProxyTags(tagInput) {
     const tags = [];
@@ -207,6 +209,13 @@ async function isManifestReadable(host, port, ref) {
         return false;
     }
 }
+async function readOciRefReadiness(host, port, refs) {
+    const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
+    return {
+        readableRefs: readability.filter((entry) => entry.readable).map((entry) => entry.ref),
+        unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
+    };
+}
 async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = OCI_IMPORT_READY_TIMEOUT_MS) {
     const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
     if (refs.length === 0) {
@@ -221,9 +230,7 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
     let lastStatus = null;
     while (Date.now() - startedAt < timeoutMs) {
         lastStatus = await fetchProxyStatus(host, port);
-        const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
-        const readableRefs = readability.filter((entry) => entry.readable).map((entry) => entry.ref);
-        const unreadableRefs = readability.filter((entry) => !entry.readable).map((entry) => entry.ref);
+        const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
         if (readableRefs.length > 0) {
             return {
                 requestedRefs: refs,
@@ -238,12 +245,53 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         }
         await new Promise((resolve) => setTimeout(resolve, OCI_IMPORT_READY_POLL_INTERVAL_MS));
     }
-    const readability = await Promise.all(refs.map(async (ref) => ({ ref, readable: await isManifestReadable(host, port, ref) })));
+    const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
     return {
         requestedRefs: refs,
-        readableRefs: readability.filter((entry) => entry.readable).map((entry) => entry.ref),
-        unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
-        ready: readability.every((entry) => entry.readable),
+        readableRefs,
+        unreadableRefs,
+        ready: unreadableRefs.length === 0,
+        phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
+        publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
+        publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
+        tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+    };
+}
+async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60000) {
+    const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
+    if (refs.length === 0) {
+        return {
+            requestedRefs: [],
+            readableRefs: [],
+            unreadableRefs: [],
+            ready: true,
+        };
+    }
+    const startedAt = Date.now();
+    let lastStatus = null;
+    while (Date.now() - startedAt < timeoutMs) {
+        lastStatus = await fetchProxyStatus(host, port);
+        const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
+        if (unreadableRefs.length === 0) {
+            return {
+                requestedRefs: refs,
+                readableRefs,
+                unreadableRefs,
+                ready: true,
+                phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
+                publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
+                publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
+                tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+            };
+        }
+        await new Promise((resolve) => setTimeout(resolve, OCI_REF_READY_POLL_INTERVAL_MS));
+    }
+    const { readableRefs, unreadableRefs } = await readOciRefReadiness(host, port, refs);
+    return {
+        requestedRefs: refs,
+        readableRefs,
+        unreadableRefs,
+        ready: unreadableRefs.length === 0,
         phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
         publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
         publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,

@@ -14,6 +14,7 @@ import {
   pathExists,
   startRegistryProxy,
   stopRegistryProxy,
+  waitForOciRefsReadable,
 } from './core';
 import {
   DEFAULT_OCI_HYDRATION_POLICY,
@@ -109,12 +110,8 @@ function registryCacheVerificationSpecs(
   saveExpected: boolean,
   pathHint: string,
 ): TagVerificationSpec[] {
-  const tags = [cacheTag];
-  if (saveExpected) {
-    tags.push(...(ociCache?.promotion_ref_tags || []));
-  }
-
-  const uniqueTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
+  void ociCache;
+  const uniqueTags = Array.from(new Set([cacheTag].map((tag) => tag.trim()).filter(Boolean)));
   return uniqueTags.map((tag) => ({
     tag,
     noPlatform,
@@ -413,6 +410,13 @@ function getModeState(key: string): string {
   return core.getState(modeStateKey(key));
 }
 
+function getModeStateList(key: string): string[] {
+  return getModeState(key)
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 function appendModeStateListValue(key: string, value: string): void {
   if (!value) {
     return;
@@ -454,6 +458,29 @@ function setProxyOutputs(port: number): void {
 function saveProxyModeState(port: number): void {
   saveModeState('proxy-port', String(port));
   saveModeState('proxy-log-path', registryProxyLogPath(port));
+}
+
+async function verifyOciPromotionRefsBeforeStop(): Promise<void> {
+  const refs = getModeStateList('oci-promotion-ref-tags');
+  if (refs.length === 0) {
+    return;
+  }
+
+  const port = Number.parseInt(getModeState('proxy-port'), 10);
+  if (!Number.isFinite(port) || port <= 0) {
+    throw new Error(`Cannot verify OCI promotion refs without a proxy port. requested=[${refs.join(', ')}]`);
+  }
+
+  const host = getModeState('proxy-host') || '127.0.0.1';
+  const readiness = await waitForOciRefsReadable(host, port, refs, 60_000);
+  if (readiness.ready) {
+    core.info(`Verified OCI promotion refs through proxy: ${readiness.readableRefs.join(', ')}`);
+    return;
+  }
+
+  throw new Error(
+    `OCI promotion refs were not readable through the proxy before shutdown. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`,
+  );
 }
 
 async function shutdownBazelServer(): Promise<void> {
@@ -1863,6 +1890,8 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
+    saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+    saveModeState('oci-promotion-ref-tags', (dockerPlan.oci_cache?.promotion_ref_tags || []).join(','));
     saveModeState('workspace', dockerPlan.workspace);
     saveModeState('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
@@ -1962,6 +1991,7 @@ async function runDockerSave(): Promise<void> {
   try {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
+      await verifyOciPromotionRefsBeforeStop();
       await stopRegistryProxy(parseInt(proxyPid, 10));
       return;
     }
@@ -2088,6 +2118,8 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
     }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
+    saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+    saveModeState('oci-promotion-ref-tags', (dockerPlan.oci_cache?.promotion_ref_tags || []).join(','));
     saveModeState('workspace', dockerPlan.workspace);
     saveModeState('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
@@ -2184,6 +2216,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
 async function runBuildkitSave(): Promise<void> {
   const proxyPid = getModeState('proxy-pid');
   if (proxyPid) {
+    await verifyOciPromotionRefsBeforeStop();
     await stopRegistryProxy(parseInt(proxyPid, 10));
     return;
   }
