@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeProxyTags = normalizeProxyTags;
 exports.waitForOciImportReadiness = waitForOciImportReadiness;
 exports.logOciImportReadiness = logOciImportReadiness;
+exports.assertOciImportReady = assertOciImportReady;
 exports.startRegistryProxy = startRegistryProxy;
 exports.stopRegistryProxy = stopRegistryProxy;
 exports.findAvailablePort = findAvailablePort;
@@ -273,6 +274,15 @@ function logOciImportReadiness(readiness) {
     }
     core.warning(message);
 }
+function assertOciImportReady(readiness) {
+    if (readiness.ready) {
+        return;
+    }
+    if (readiness.readableRefs.length === 0) {
+        throw new Error(`No OCI cache import refs were readable. requested=[${readiness.requestedRefs.join(', ')}]`);
+    }
+    throw new Error(`Some OCI cache import refs were unreadable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
+}
 /**
  * Start the BoringCache proxy.
  * Spawns a detached boringcache process, writes PID file, returns handle.
@@ -370,10 +380,16 @@ async function startRegistryProxy(options) {
         if ((_a = options.ociRequiredReadableRefs) === null || _a === void 0 ? void 0 : _a.length) {
             const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs);
             logOciImportReadiness(ociImportReadiness);
+            if (options.requireOciImportReady) {
+                assertOciImportReady(ociImportReadiness);
+            }
             return {
                 ...handle,
                 ociImportReadiness,
             };
+        }
+        if (options.requireOciImportReady) {
+            throw new Error('No OCI cache import refs were requested while require-oci-import-ready was enabled.');
         }
         return handle;
     }

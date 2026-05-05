@@ -1,7 +1,7 @@
 import * as http from 'http';
 import { AddressInfo } from 'net';
 import * as core from '@actions/core';
-import { logOciImportReadiness, waitForOciImportReadiness } from '../lib/core/proxy';
+import { assertOciImportReady, logOciImportReadiness, waitForOciImportReadiness } from '../lib/core/proxy';
 
 type RefState = 'readable' | 'missing';
 
@@ -173,5 +173,27 @@ describe('proxy OCI import readiness', () => {
       'BoringCache proxy became ready before OCI import refs were fully readable. readable=[default] unreadable=[branch-main, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true',
     );
     expect(core.notice).not.toHaveBeenCalled();
+  });
+
+  it('fails strict readiness when no planned OCI import ref is readable', () => {
+    expect(() => assertOciImportReady({
+      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      readableRefs: [],
+      unreadableRefs: ['branch-main', 'default', 'buildcache'],
+      ready: false,
+    })).toThrow(
+      'No OCI cache import refs were readable. requested=[branch-main, default, buildcache]',
+    );
+  });
+
+  it('fails strict readiness when only some planned OCI import refs are readable', () => {
+    expect(() => assertOciImportReady({
+      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      readableRefs: ['default'],
+      unreadableRefs: ['branch-main', 'buildcache'],
+      ready: false,
+    })).toThrow(
+      'Some OCI cache import refs were unreadable. readable=[default] unreadable=[branch-main, buildcache]',
+    );
   });
 });

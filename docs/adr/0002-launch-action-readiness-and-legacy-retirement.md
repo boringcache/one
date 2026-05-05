@@ -65,6 +65,16 @@ without registry imports and report a cold-seed notice, not a release-health
 warning. Partial readability remains a warning because it means at least one
 expected warm fallback was usable while another planned fallback degraded.
 
+Strict benchmark and deployment lanes can opt into `require-oci-import-ready`.
+With that input enabled, missing planned import refs, no-readable states, and
+partial-readable OCI import states are setup failures instead of soft
+cold-seed/degraded warnings.
+
+Write-capable Docker and BuildKit runs should verify CLI-planned OCI promotion
+refs during post-save verification. This catches branch/default alias visibility
+problems at the producing run rather than discovering them only when the next
+rolling run imports.
+
 Benchmark and product workflows should consume those outputs instead of
 re-implementing their own proxy-manifest readiness probes.
 

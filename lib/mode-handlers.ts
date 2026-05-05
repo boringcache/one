@@ -56,6 +56,7 @@ type RegistryProxyOptions = Parameters<typeof startRegistryProxy>[0] & {
   ociPrefetchRefs?: string[];
   ociAliasPromotionRefs?: string[];
   ociRequiredReadableRefs?: string[];
+  requireOciImportReady?: boolean;
   metadataHints?: Record<string, string>;
 };
 
@@ -98,6 +99,29 @@ function adapterProxyVerificationSpec(
     pathHint,
     saveExpected: !proxyPlan.read_only,
   };
+}
+
+function registryCacheVerificationSpecs(
+  cacheTag: string,
+  ociCache: CliAdapterDryRunPlan['oci_cache'],
+  noPlatform: boolean,
+  noGit: boolean,
+  saveExpected: boolean,
+  pathHint: string,
+): TagVerificationSpec[] {
+  const tags = [cacheTag];
+  if (saveExpected) {
+    tags.push(...(ociCache?.promotion_ref_tags || []));
+  }
+
+  const uniqueTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
+  return uniqueTags.map((tag) => ({
+    tag,
+    noPlatform,
+    noGit,
+    pathHint,
+    saveExpected,
+  }));
 }
 
 interface CliAdapterSetupFile {
@@ -1777,6 +1801,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   const cacheFlags: CacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
   const useRegistryProxy = cacheBackend !== 'local';
   let registryVerification: { noPlatform: boolean; noGit: boolean; saveExpected: boolean } | null = null;
+  let registryOciCache: CliAdapterDryRunPlan['oci_cache'] | undefined;
   let resolvedWorkspace = plan.workspace;
   let resolvedCacheTag = localCacheTag;
 
@@ -1833,6 +1858,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
       ociRequiredReadableRefs: requestedImportRefTags,
+      requireOciImportReady: inputs.requireOciImportReady,
       ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
     }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
@@ -1847,6 +1873,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       noGit: dockerPlan.proxy.no_git,
       saveExpected: !dockerPlan.proxy.read_only,
     };
+    registryOciCache = dockerPlan.oci_cache;
     const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache!, proxy);
 
     setRegistryCacheOutputs({
@@ -1913,17 +1940,19 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   }
   core.setOutput('workspace', resolvedWorkspace);
   core.setOutput('cache-tag', resolvedCacheTag);
+  const saveExpected = registryVerification?.saveExpected ?? !inputs.readOnly;
   return {
     cacheTag: resolvedCacheTag,
-    verificationSpecs: [{
-      tag: resolvedCacheTag,
-      noPlatform: registryVerification?.noPlatform || false,
-      noGit: registryVerification?.noGit || false,
-      pathHint: plan.workingDirectory,
-      // docker-command=setup defers the build to later workflow steps, so treat
-      // this as save-expected in write-capable runs and verify after post-save.
-      saveExpected: registryVerification?.saveExpected ?? !inputs.readOnly,
-    }],
+    // docker-command=setup defers the build to later workflow steps, so treat
+    // write-capable registry refs as save-expected and verify after post-save.
+    verificationSpecs: registryCacheVerificationSpecs(
+      resolvedCacheTag,
+      registryOciCache,
+      registryVerification?.noPlatform || false,
+      registryVerification?.noGit || false,
+      saveExpected,
+      plan.workingDirectory,
+    ),
   };
 }
 
@@ -1994,6 +2023,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
   const cacheFlags: CacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
   const useRegistryProxy = cacheBackend !== 'local';
   let registryVerification: { noPlatform: boolean; noGit: boolean; saveExpected: boolean } | null = null;
+  let registryOciCache: CliAdapterDryRunPlan['oci_cache'] | undefined;
   let resolvedWorkspace = plan.workspace;
   let resolvedCacheTag = localCacheTag;
 
@@ -2053,6 +2083,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       verbose: inputs.verbose,
       readOnly: dockerPlan.proxy.read_only,
       ociRequiredReadableRefs: requestedImportRefTags,
+      requireOciImportReady: inputs.requireOciImportReady,
       ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
     }, dockerPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
@@ -2067,6 +2098,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       noGit: dockerPlan.proxy.no_git,
       saveExpected: !dockerPlan.proxy.read_only,
     };
+    registryOciCache = dockerPlan.oci_cache;
     const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache!, proxy);
     setRegistryCacheOutputs({
       ref: dockerPlan.oci_cache!.registry_ref,
@@ -2135,15 +2167,17 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
   core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
   core.setOutput('workspace', resolvedWorkspace);
   core.setOutput('cache-tag', resolvedCacheTag);
+  const saveExpected = registryVerification?.saveExpected ?? !inputs.readOnly;
   return {
     cacheTag: resolvedCacheTag,
-    verificationSpecs: [{
-      tag: resolvedCacheTag,
-      noPlatform: registryVerification?.noPlatform || false,
-      noGit: registryVerification?.noGit || false,
-      pathHint: plan.workingDirectory,
-      saveExpected: registryVerification?.saveExpected ?? !inputs.readOnly,
-    }],
+    verificationSpecs: registryCacheVerificationSpecs(
+      resolvedCacheTag,
+      registryOciCache,
+      registryVerification?.noPlatform || false,
+      registryVerification?.noGit || false,
+      saveExpected,
+      plan.workingDirectory,
+    ),
   };
 }
 

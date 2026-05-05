@@ -109,6 +109,7 @@ export interface OneInputs {
   enableCrossOsArchive: boolean;
   noPlatform: boolean;
   failOnCacheMiss: boolean;
+  requireOciImportReady: boolean;
   lookupOnly: boolean;
   force: boolean;
   verbose: boolean;
@@ -219,6 +220,7 @@ export function getInputs(): OneInputs {
     enableCrossOsArchive: core.getBooleanInput('enableCrossOsArchive'),
     noPlatform: core.getBooleanInput('no-platform'),
     failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
+    requireOciImportReady: core.getBooleanInput('require-oci-import-ready'),
     lookupOnly: core.getBooleanInput('lookup-only'),
     force: core.getBooleanInput('force'),
     verbose: core.getBooleanInput('verbose'),

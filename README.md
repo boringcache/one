@@ -101,6 +101,15 @@ If none of the planned refs are readable, the action treats that as a cold seed
 and continues without registry imports. If only some refs are readable, it keeps
 a warning because the fallback set is degraded.
 
+Set `require-oci-import-ready: true` for benchmark or deployment phases where a
+warm OCI import is mandatory. In that mode, the action fails setup when the CLI
+plan has no import refs, when no planned import ref is readable, or when only a
+partial fallback set is readable.
+
+Write-capable Docker and BuildKit runs also include CLI-planned promotion refs
+in post-save verification, so branch/default OCI aliases are checked before the
+action finishes instead of only trusting proxy shutdown.
+
 Workflow authors should consume those outputs instead of polling `/_boringcache/status` or probing `/v2/cache/manifests/*` themselves.
 
 ## What it handles

@@ -26,6 +26,7 @@ export interface ProxyOptions {
   ociPrefetchRefs?: string[];
   ociAliasPromotionRefs?: string[];
   ociRequiredReadableRefs?: string[];
+  requireOciImportReady?: boolean;
   ociHydration?: string;
   metadataHints?: Record<string, string>;
 }
@@ -328,6 +329,22 @@ export function logOciImportReadiness(readiness: OciImportReadiness): void {
   core.warning(message);
 }
 
+export function assertOciImportReady(readiness: OciImportReadiness): void {
+  if (readiness.ready) {
+    return;
+  }
+
+  if (readiness.readableRefs.length === 0) {
+    throw new Error(
+      `No OCI cache import refs were readable. requested=[${readiness.requestedRefs.join(', ')}]`,
+    );
+  }
+
+  throw new Error(
+    `Some OCI cache import refs were unreadable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`,
+  );
+}
+
 /**
  * Start the BoringCache proxy.
  * Spawns a detached boringcache process, writes PID file, returns handle.
@@ -441,11 +458,17 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
       );
 
       logOciImportReadiness(ociImportReadiness);
+      if (options.requireOciImportReady) {
+        assertOciImportReady(ociImportReadiness);
+      }
 
       return {
         ...handle,
         ociImportReadiness,
       };
+    }
+    if (options.requireOciImportReady) {
+      throw new Error('No OCI cache import refs were requested while require-oci-import-ready was enabled.');
     }
 
     return handle;

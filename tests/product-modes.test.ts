@@ -108,7 +108,7 @@ describe('product modes', () => {
         'working-directory': project,
         image: 'ghcr.io/boringcache/demo',
       });
-      mockGetBooleanInput({});
+      mockGetBooleanInput({ 'require-oci-import-ready': true });
 
       await restoreRun();
 
@@ -159,7 +159,7 @@ describe('product modes', () => {
         'working-directory': project,
         image: 'ghcr.io/boringcache/demo',
       });
-      mockGetBooleanInput({});
+      mockGetBooleanInput({ 'require-oci-import-ready': true });
 
       (exec.exec as jest.Mock).mockImplementation(async (
         command: string,
@@ -271,6 +271,7 @@ describe('product modes', () => {
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         ociAliasPromotionRefs: ['branch-main'],
         ociRequiredReadableRefs: ['branch-main', 'default', 'buildcache'],
+        requireOciImportReady: true,
         metadataHints: {
           docker_immutable_run_ref: 'run-example-42-attempt-1',
           docker_alias_promotion_refs: 'branch-main/default',
@@ -282,6 +283,10 @@ describe('product modes', () => {
           docker_cache_ref_tag: 'run-example-42-attempt-1',
         },
       }));
+      const verifySpecsCall = (core.saveState as jest.Mock).mock.calls.find(
+        ([name]) => name === 'verify-save-specs',
+      );
+      expect(verifySpecsCall?.[1]).toContain('branch-main');
     } finally {
       await removeTempProject(project);
     }

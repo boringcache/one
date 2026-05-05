@@ -74,6 +74,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     enableCrossOsArchive: false,
     noPlatform: false,
     failOnCacheMiss: false,
+    requireOciImportReady: false,
     lookupOnly: false,
     force: false,
     verbose: false,

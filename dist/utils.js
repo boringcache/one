@@ -157,6 +157,7 @@ function getInputs() {
         enableCrossOsArchive: core.getBooleanInput('enableCrossOsArchive'),
         noPlatform: core.getBooleanInput('no-platform'),
         failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
+        requireOciImportReady: core.getBooleanInput('require-oci-import-ready'),
         lookupOnly: core.getBooleanInput('lookup-only'),
         force: core.getBooleanInput('force'),
         verbose: core.getBooleanInput('verbose'),
