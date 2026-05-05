@@ -292,22 +292,76 @@ function saveProxyModeState(port) {
     saveModeState('proxy-port', String(port));
     saveModeState('proxy-log-path', registryProxyLogPath(port));
 }
-async function verifyOciPromotionRefsBeforeStop() {
+function getModeStateBoolean(key) {
+    return getModeState(key) === 'true';
+}
+async function verifyOciPromotionRefsAfterStop() {
     const refs = getModeStateList('oci-promotion-ref-tags');
     if (refs.length === 0) {
         return;
     }
+    const workspace = getModeState('workspace');
+    const cacheTag = getModeState('cache-tag');
     const port = Number.parseInt(getModeState('proxy-port'), 10);
+    if (!workspace || !cacheTag) {
+        throw new Error(`Cannot verify OCI promotion refs without workspace and cache tag. requested=[${refs.join(', ')}]`);
+    }
     if (!Number.isFinite(port) || port <= 0) {
         throw new Error(`Cannot verify OCI promotion refs without a proxy port. requested=[${refs.join(', ')}]`);
     }
     const host = getModeState('proxy-host') || '127.0.0.1';
-    const readiness = await (0, core_1.waitForOciRefsReadable)(host, port, refs, 60000);
-    if (readiness.ready) {
-        core.info(`Verified OCI promotion refs through proxy: ${readiness.readableRefs.join(', ')}`);
-        return;
+    let verificationProxyPid = null;
+    try {
+        const verificationProxy = await (0, core_1.startRegistryProxy)({
+            command: 'cache-registry',
+            workspace,
+            tag: cacheTag,
+            host,
+            port,
+            noGit: getModeStateBoolean('proxy-no-git'),
+            noPlatform: getModeStateBoolean('proxy-no-platform'),
+            verbose: getModeStateBoolean('verbose'),
+            readOnly: true,
+            ociRequiredReadableRefs: refs,
+            requireOciImportReady: true,
+            ociImportReadyTimeoutMs: ociPromotionVerificationTimeoutMs(),
+            ociHydration: utils_1.DEFAULT_OCI_HYDRATION_POLICY,
+        });
+        verificationProxyPid = verificationProxy.pid > 0 ? verificationProxy.pid : null;
+        const readiness = verificationProxy.ociImportReadiness;
+        if (!(readiness === null || readiness === void 0 ? void 0 : readiness.ready)) {
+            throw new Error(`OCI promotion refs were not readable after proxy shutdown. readable=[${(readiness === null || readiness === void 0 ? void 0 : readiness.readableRefs.join(', ')) || ''}] unreadable=[${(readiness === null || readiness === void 0 ? void 0 : readiness.unreadableRefs.join(', ')) || refs.join(', ')}]`);
+        }
+        core.info(`Verified OCI promotion refs after proxy shutdown: ${readiness.readableRefs.join(', ')}`);
     }
-    throw new Error(`OCI promotion refs were not readable through the proxy before shutdown. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
+    catch (error) {
+        throw new Error(`OCI promotion refs were not readable after proxy shutdown. requested=[${refs.join(', ')}]: ${errorMessage(error)}`);
+    }
+    finally {
+        if (verificationProxyPid !== null) {
+            await (0, core_1.stopRegistryProxy)(verificationProxyPid);
+        }
+    }
+}
+function ociPromotionVerificationTimeoutMs() {
+    const raw = core.getState('verify-timeout-seconds') || core.getInput('verify-timeout-seconds') || '180';
+    const seconds = Number.parseInt(raw, 10);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+        return 180000;
+    }
+    return seconds * 1000;
+}
+function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
+async function verifyOciPromotionRefsThenStopProxy(proxyPid) {
+    try {
+        await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+    }
+    catch (stopError) {
+        throw new Error(`Failed to stop BoringCache proxy cleanly before OCI promotion verification: ${errorMessage(stopError)}`);
+    }
+    await verifyOciPromotionRefsAfterStop();
 }
 async function shutdownBazelServer() {
     await exec.exec('bazel', ['shutdown'], {
@@ -1403,6 +1457,8 @@ async function runDockerRestore(plan, inputs) {
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+        saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
+        saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
         saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
         saveModeState('workspace', dockerPlan.workspace);
         saveModeState('cache-tag', cacheTag);
@@ -1491,8 +1547,7 @@ async function runDockerSave() {
     try {
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
-            await verifyOciPromotionRefsBeforeStop();
-            await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+            await verifyOciPromotionRefsThenStopProxy(proxyPid);
             return;
         }
         const workspace = getModeState('workspace');
@@ -1596,6 +1651,8 @@ async function runBuildkitRestore(plan, inputs) {
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+        saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
+        saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
         saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
         saveModeState('workspace', dockerPlan.workspace);
         saveModeState('cache-tag', cacheTag);
@@ -1684,8 +1741,7 @@ async function runBuildkitRestore(plan, inputs) {
 async function runBuildkitSave() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
-        await verifyOciPromotionRefsBeforeStop();
-        await (0, core_1.stopRegistryProxy)(parseInt(proxyPid, 10));
+        await verifyOciPromotionRefsThenStopProxy(proxyPid);
         return;
     }
     const workspace = getModeState('workspace');

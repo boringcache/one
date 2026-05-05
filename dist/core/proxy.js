@@ -426,7 +426,7 @@ async function startRegistryProxy(options) {
     try {
         await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
         if ((_a = options.ociRequiredReadableRefs) === null || _a === void 0 ? void 0 : _a.length) {
-            const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs);
+            const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs, options.ociImportReadyTimeoutMs);
             logOciImportReadiness(ociImportReadiness);
             if (options.requireOciImportReady) {
                 assertOciImportReady(ociImportReadiness);

@@ -27,6 +27,7 @@ export interface ProxyOptions {
   ociAliasPromotionRefs?: string[];
   ociRequiredReadableRefs?: string[];
   requireOciImportReady?: boolean;
+  ociImportReadyTimeoutMs?: number;
   ociHydration?: string;
   metadataHints?: Record<string, string>;
 }
@@ -516,6 +517,7 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
         host,
         options.port,
         options.ociRequiredReadableRefs,
+        options.ociImportReadyTimeoutMs,
       );
 
       logOciImportReadiness(ociImportReadiness);

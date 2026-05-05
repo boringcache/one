@@ -517,7 +517,18 @@ describe('save action', () => {
     );
   });
 
-  it('verifies docker OCI promotion refs through the proxy before stopping it', async () => {
+  it('verifies docker OCI promotion refs through a fresh proxy after stopping the writer', async () => {
+    actionCoreMocks.startRegistryProxy.mockResolvedValueOnce({
+      pid: 9876,
+      port: 5000,
+      readOnly: true,
+      ociImportReadiness: {
+        requestedRefs: ['default', 'branch-main'],
+        readableRefs: ['default', 'branch-main'],
+        unreadableRefs: [],
+        ready: true,
+      },
+    });
     mockGetInput({});
     mockGetBooleanInput({});
     mockGetState({
@@ -528,27 +539,35 @@ describe('save action', () => {
       'mode-proxy-pid': '4321',
       'mode-proxy-port': '5000',
       'mode-proxy-host': '127.0.0.1',
+      'mode-proxy-no-git': 'true',
+      'mode-proxy-no-platform': 'true',
+      'mode-workspace': 'my-org/my-project',
+      'mode-cache-tag': 'docker-cache',
       'mode-oci-promotion-ref-tags': 'default,branch-main',
     });
 
     await saveRun();
 
-    expect(actionCoreMocks.waitForOciRefsReadable).toHaveBeenCalledWith(
-      '127.0.0.1',
-      5000,
-      ['default', 'branch-main'],
-      60_000,
-    );
-    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenNthCalledWith(1, 4321);
+    expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+      workspace: 'my-org/my-project',
+      tag: 'docker-cache',
+      host: '127.0.0.1',
+      port: 5000,
+      noGit: true,
+      noPlatform: true,
+      readOnly: true,
+      ociRequiredReadableRefs: ['default', 'branch-main'],
+      requireOciImportReady: true,
+      ociImportReadyTimeoutMs: 180_000,
+    }));
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenNthCalledWith(2, 9876);
   });
 
   it('fails docker save when OCI promotion refs never become readable', async () => {
-    actionCoreMocks.waitForOciRefsReadable.mockResolvedValueOnce({
-      requestedRefs: ['default', 'branch-main'],
-      readableRefs: ['branch-main'],
-      unreadableRefs: ['default'],
-      ready: false,
-    });
+    actionCoreMocks.startRegistryProxy.mockRejectedValueOnce(new Error(
+      'Some OCI cache import refs were unreadable. readable=[branch-main] unreadable=[default]',
+    ));
     mockGetInput({});
     mockGetBooleanInput({});
     mockGetState({
@@ -559,15 +578,17 @@ describe('save action', () => {
       'mode-proxy-pid': '4321',
       'mode-proxy-port': '5000',
       'mode-proxy-host': '127.0.0.1',
+      'mode-workspace': 'my-org/my-project',
+      'mode-cache-tag': 'docker-cache',
       'mode-oci-promotion-ref-tags': 'default,branch-main',
     });
 
     await saveRun();
 
     expect(core.setFailed).toHaveBeenCalledWith(
-      'boringcache/one save failed: OCI promotion refs were not readable through the proxy before shutdown. readable=[branch-main] unreadable=[default]',
+      'boringcache/one save failed: OCI promotion refs were not readable after proxy shutdown. requested=[default, branch-main]: Some OCI cache import refs were unreadable. readable=[branch-main] unreadable=[default]',
     );
-    expect(actionCoreMocks.stopRegistryProxy).not.toHaveBeenCalled();
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
   });
 
   it('warns when proxy sccache sees zero hits for an existing tag', async () => {
