@@ -75,7 +75,7 @@ Docker workflows should use `mode: docker` or `mode: buildkit`. The action follo
 
 For Docker and BuildKit registry caches, the action follows the CLI's ref plan.
 Pull request runs are restore-only by default, so a PR-scoped ref such as `/cache:pr-3208` may legitimately 404, especially on the first PR run.
-That miss should not make the build cold: the action also forwards the base/default and stable fallback imports, ending with the default `/cache:buildcache` ref.
+That miss should not make the build cold: restore-only PRs continue with the CLI-planned base/default imports, while PR writes stay opt-in.
 If a repo deliberately wants PR-scoped Docker cache writes, provide a save-capable token and set `save-on-pull-request: true`; the default derived promotion for a PR is the PR alias, while branch and default aliases remain trusted-branch outputs.
 
 Archive caches use the same trust model through the CLI. Default-branch runs
@@ -99,12 +99,12 @@ If some planned refs are unreadable, the action keeps the build path fail-safe:
 
 If none of the planned refs are readable, the action treats that as a cold seed
 and continues without registry imports. If only some refs are readable, it keeps
-a warning because the fallback set is degraded.
+a warning because the planned warm import set is degraded.
 
 Set `require-oci-import-ready: true` for benchmark or deployment phases where a
 warm OCI import is mandatory. In that mode, the action fails setup when the CLI
 plan has no import refs, when no planned import ref is readable, or when only a
-partial fallback set is readable.
+partial planned import set is readable.
 
 Write-capable Docker and BuildKit runs also include CLI-planned promotion refs
 in post-save verification, so branch/default OCI aliases are checked before the

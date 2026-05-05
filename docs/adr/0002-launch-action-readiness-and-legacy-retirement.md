@@ -55,7 +55,7 @@ fail closed in the emitted outputs. The build path should consume:
 - `docker-cache-unreadable-from-refs` as the unreadable subset; and
 - `docker-cache-import-ready` as the all-refs-readable signal.
 
-The build can proceed as soon as the first CLI-planned fallback ref is readable.
+The build can proceed as soon as the first CLI-planned ref is readable.
 Earlier misses, especially PR-scoped refs on restore-only PRs, should be
 reported as unreadable refs rather than forcing the action to wait the full
 readiness budget before using base/default fallback.
@@ -63,7 +63,7 @@ readiness budget before using base/default fallback.
 When every CLI-planned import ref is unreadable, the action should continue
 without registry imports and report a cold-seed notice, not a release-health
 warning. Partial readability remains a warning because it means at least one
-expected warm fallback was usable while another planned fallback degraded.
+expected warm ref was usable while another planned ref degraded.
 
 Strict benchmark and deployment lanes can opt into `require-oci-import-ready`.
 With that input enabled, missing planned import refs, no-readable states, and
@@ -79,7 +79,7 @@ Benchmark and product workflows should consume those outputs instead of
 re-implementing their own proxy-manifest readiness probes.
 
 Restore-only PR behavior is expected. Missing PR-scoped Docker refs should
-fall back to CLI-planned base/default/stable imports. The action should not
+fall back to CLI-planned base/default imports. The action should not
 turn a missing PR cache into branch/default write permission.
 
 Archive scope follows the same rule. With default PR settings the action runs

@@ -195,7 +195,7 @@ describe('product modes', () => {
               no_git: false,
               read_only: false,
               startup_mode: 'warm',
-              oci_prefetch_refs: ['cache@branch-main', 'cache@default', 'cache@buildcache'],
+              oci_prefetch_refs: ['cache@branch-main', 'cache@default'],
               oci_hydration: 'metadata-only',
               metadata_hints: {
                 docker_cache_ref_tag: 'run-example-42-attempt-1',
@@ -214,7 +214,6 @@ describe('product modes', () => {
               cache_from_refs: [
                 'type=registry,ref=172.17.0.1:5000/cache:branch-main,registry.insecure=true',
                 'type=registry,ref=172.17.0.1:5000/cache:default,registry.insecure=true',
-                'type=registry,ref=172.17.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
               cache_to: 'type=registry,ref=172.17.0.1:5000/cache:run-example-42-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'run-example-42-attempt-1',
@@ -238,7 +237,7 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-run-ref', 'run-example-42-attempt-1');
-      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'branch-main\ndefault\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'branch-main\ndefault');
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-promotion-refs', 'branch-main');
       expect(core.setOutput).toHaveBeenCalledWith('docker-ci-provider', 'example-ci');
       expect(core.setOutput).toHaveBeenCalledWith('docker-ci-run-id', '42');
@@ -251,7 +250,6 @@ describe('product modes', () => {
         [
           'type=registry,ref=172.17.0.1:5000/cache:branch-main,registry.insecure=true',
           'type=registry,ref=172.17.0.1:5000/cache:default,registry.insecure=true',
-          'type=registry,ref=172.17.0.1:5000/cache:buildcache,registry.insecure=true',
         ].join('\n'),
       );
       const dockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
@@ -259,18 +257,17 @@ describe('product modes', () => {
       );
       const dockerBuildArgs = dockerBuildCall?.[1] as string[] | undefined;
       expect(dockerBuildArgs).toBeTruthy();
-      expect(dockerBuildArgs?.filter((arg) => arg === '--cache-from')).toHaveLength(3);
+      expect(dockerBuildArgs?.filter((arg) => arg === '--cache-from')).toHaveLength(2);
       expect(dockerBuildArgs).toEqual(expect.arrayContaining([
         '--cache-from',
         'type=registry,ref=172.17.0.1:5000/cache:branch-main,registry.insecure=true',
         'type=registry,ref=172.17.0.1:5000/cache:default,registry.insecure=true',
-        'type=registry,ref=172.17.0.1:5000/cache:buildcache,registry.insecure=true',
         '--cache-to',
         'type=registry,ref=172.17.0.1:5000/cache:run-example-42-attempt-1,mode=max,registry.insecure=true',
       ]));
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         ociAliasPromotionRefs: ['branch-main'],
-        ociRequiredReadableRefs: ['branch-main', 'default', 'buildcache'],
+        ociRequiredReadableRefs: ['branch-main', 'default'],
         requireOciImportReady: true,
         metadataHints: {
           docker_immutable_run_ref: 'run-example-42-attempt-1',
@@ -311,8 +308,8 @@ describe('product modes', () => {
         port: 5000,
         readOnly: false,
         ociImportReadiness: {
-          requestedRefs: ['pr-3208', 'default', 'buildcache'],
-          readableRefs: ['default', 'buildcache'],
+          requestedRefs: ['pr-3208', 'default'],
+          readableRefs: ['default'],
           unreadableRefs: ['pr-3208'],
           ready: false,
           phase: 'ready',
@@ -356,7 +353,7 @@ describe('product modes', () => {
               no_git: false,
               read_only: false,
               startup_mode: 'warm',
-              oci_prefetch_refs: ['cache@pr-3208', 'cache@default', 'cache@buildcache'],
+              oci_prefetch_refs: ['cache@pr-3208', 'cache@default'],
               oci_hydration: 'metadata-only',
               metadata_hints: {},
             },
@@ -366,7 +363,6 @@ describe('product modes', () => {
               cache_from_refs: [
                 'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
                 'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
-                'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
               cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'buildcache',
@@ -381,15 +377,14 @@ describe('product modes', () => {
 
       await restoreRun();
 
-      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'default\nbuildcache');
-      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-requested-from-refs', 'pr-3208\ndefault\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', 'default');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-requested-from-refs', 'pr-3208\ndefault');
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-unreadable-from-refs', 'pr-3208');
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-import-ready', 'false');
       expect(core.setOutput).toHaveBeenCalledWith(
         'cache-from',
         [
           'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
-          'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
         ].join('\n'),
       );
 
@@ -398,11 +393,10 @@ describe('product modes', () => {
       );
       const dockerBuildArgs = dockerBuildCall?.[1] as string[] | undefined;
       expect(dockerBuildArgs).toBeTruthy();
-      expect(dockerBuildArgs?.filter((arg) => arg === '--cache-from')).toHaveLength(2);
+      expect(dockerBuildArgs?.filter((arg) => arg === '--cache-from')).toHaveLength(1);
       expect(dockerBuildArgs).toEqual(expect.arrayContaining([
         '--cache-from',
         'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
-        'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
         '--cache-to',
         'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
       ]));
@@ -964,7 +958,7 @@ describe('product modes', () => {
               no_git: false,
               read_only: false,
               startup_mode: 'warm',
-              oci_prefetch_refs: ['cache@pr-3208', 'cache@default', 'cache@buildcache'],
+              oci_prefetch_refs: ['cache@pr-3208', 'cache@default'],
               oci_hydration: 'metadata-only',
               metadata_hints: {},
             },
@@ -974,7 +968,6 @@ describe('product modes', () => {
               cache_from_refs: [
                 'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
                 'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
-                'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
               cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'buildcache',
@@ -994,18 +987,17 @@ describe('product modes', () => {
       );
       const buildctlArgs = buildctlCall?.[1] as string[] | undefined;
       expect(buildctlArgs).toBeTruthy();
-      expect(buildctlArgs?.filter((arg) => arg === '--import-cache')).toHaveLength(3);
+      expect(buildctlArgs?.filter((arg) => arg === '--import-cache')).toHaveLength(2);
       expect(buildctlArgs).toEqual(expect.arrayContaining([
         '--import-cache',
         'type=registry,ref=127.0.0.1:5000/cache:pr-3208,registry.insecure=true',
         'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
-        'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
         '--export-cache',
         'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
       ]));
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         ociAliasPromotionRefs: ['pr-3208'],
-        ociRequiredReadableRefs: ['pr-3208', 'default', 'buildcache'],
+        ociRequiredReadableRefs: ['pr-3208', 'default'],
       }));
     } finally {
       await removeTempProject(project);
@@ -1029,9 +1021,9 @@ describe('product modes', () => {
         port: 5000,
         readOnly: false,
         ociImportReadiness: {
-          requestedRefs: ['branch-main', 'default', 'buildcache'],
+          requestedRefs: ['branch-main', 'default'],
           readableRefs: [],
-          unreadableRefs: ['branch-main', 'default', 'buildcache'],
+          unreadableRefs: ['branch-main', 'default'],
           ready: false,
           phase: 'ready',
           publishState: 'published',
@@ -1074,7 +1066,7 @@ describe('product modes', () => {
               no_git: false,
               read_only: false,
               startup_mode: 'warm',
-              oci_prefetch_refs: ['cache@branch-main', 'cache@default', 'cache@buildcache'],
+              oci_prefetch_refs: ['cache@branch-main', 'cache@default'],
               oci_hydration: 'metadata-only',
               metadata_hints: {},
             },
@@ -1084,7 +1076,6 @@ describe('product modes', () => {
               cache_from_refs: [
                 'type=registry,ref=127.0.0.1:5000/cache:branch-main,registry.insecure=true',
                 'type=registry,ref=127.0.0.1:5000/cache:default,registry.insecure=true',
-                'type=registry,ref=127.0.0.1:5000/cache:buildcache,registry.insecure=true',
               ],
               cache_to: 'type=registry,ref=127.0.0.1:5000/cache:run-gha-24771923434-attempt-1,mode=max,registry.insecure=true',
               ref_tag: 'buildcache',
@@ -1100,8 +1091,8 @@ describe('product modes', () => {
       await restoreRun();
 
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-from-refs', '');
-      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-requested-from-refs', 'branch-main\ndefault\nbuildcache');
-      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-unreadable-from-refs', 'branch-main\ndefault\nbuildcache');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-requested-from-refs', 'branch-main\ndefault');
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-unreadable-from-refs', 'branch-main\ndefault');
       expect(core.setOutput).toHaveBeenCalledWith('docker-cache-import-ready', 'false');
       expect(core.setOutput).toHaveBeenCalledWith('cache-from', '');
 

@@ -77,14 +77,13 @@ describe('proxy OCI import readiness', () => {
       refs: {
         'branch-main': 'readable',
         'default': 'readable',
-        'buildcache': 'readable',
       },
     }, async ({ host, port }) => {
-      const readiness = await waitForOciImportReadiness(host, port, ['branch-main', 'default', 'buildcache'], 100);
+      const readiness = await waitForOciImportReadiness(host, port, ['branch-main', 'default'], 100);
 
       expect(readiness).toEqual({
-        requestedRefs: ['branch-main', 'default', 'buildcache'],
-        readableRefs: ['branch-main', 'default', 'buildcache'],
+        requestedRefs: ['branch-main', 'default'],
+        readableRefs: ['branch-main', 'default'],
         unreadableRefs: [],
         ready: true,
         phase: 'ready',
@@ -95,7 +94,7 @@ describe('proxy OCI import readiness', () => {
     });
   });
 
-  it('returns once the first usable fallback ref is readable', async () => {
+  it('returns once the first usable planned ref is readable', async () => {
     await withProxyServer({
       status: {
         phase: 'ready',
@@ -104,15 +103,15 @@ describe('proxy OCI import readiness', () => {
         tags_visible: true,
       },
       refs: {
+        'branch-main': 'missing',
         'default': 'readable',
-        'buildcache': 'missing',
       },
     }, async ({ host, port }) => {
-      const readiness = await waitForOciImportReadiness(host, port, ['default', 'buildcache'], 100);
+      const readiness = await waitForOciImportReadiness(host, port, ['branch-main', 'default'], 100);
 
       expect(readiness.ready).toBe(false);
       expect(readiness.readableRefs).toEqual(['default']);
-      expect(readiness.unreadableRefs).toEqual(['buildcache']);
+      expect(readiness.unreadableRefs).toEqual(['branch-main']);
       expect(readiness.phase).toBe('ready');
       expect(readiness.publishSettled).toBe(true);
       expect(readiness.tagsVisible).toBe(true);
@@ -129,17 +128,17 @@ describe('proxy OCI import readiness', () => {
       },
       refs: {
         'branch-main': 'missing',
-        'buildcache': 'missing',
+        'default': 'missing',
       },
     }, async ({ host, port, state }) => {
       setTimeout(() => {
-        state.refs['buildcache'] = 'readable';
+        state.refs.default = 'readable';
       }, 150);
 
-      const readiness = await waitForOciImportReadiness(host, port, ['branch-main', 'buildcache'], 1500);
+      const readiness = await waitForOciImportReadiness(host, port, ['branch-main', 'default'], 1500);
 
       expect(readiness.ready).toBe(false);
-      expect(readiness.readableRefs).toEqual(['buildcache']);
+      expect(readiness.readableRefs).toEqual(['default']);
       expect(readiness.unreadableRefs).toEqual(['branch-main']);
     });
   });
@@ -199,9 +198,9 @@ describe('proxy OCI import readiness', () => {
 
   it('notices cold starts when no planned OCI import ref is readable', () => {
     logOciImportReadiness({
-      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      requestedRefs: ['branch-main', 'default'],
       readableRefs: [],
-      unreadableRefs: ['branch-main', 'default', 'buildcache'],
+      unreadableRefs: ['branch-main', 'default'],
       ready: false,
       phase: 'ready',
       publishState: 'settled',
@@ -210,16 +209,16 @@ describe('proxy OCI import readiness', () => {
     });
 
     expect(core.notice).toHaveBeenCalledWith(
-      'BoringCache proxy became ready before OCI import refs were fully readable. readable=[] unreadable=[branch-main, default, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true. Continuing without registry imports; this is expected for cold seed jobs.',
+      'BoringCache proxy became ready before OCI import refs were fully readable. readable=[] unreadable=[branch-main, default] phase=ready publish=settled publish_settled=true tags_visible=true. Continuing without registry imports; this is expected for cold seed jobs.',
     );
     expect(core.warning).not.toHaveBeenCalled();
   });
 
   it('warns when only some planned OCI import refs are readable', () => {
     logOciImportReadiness({
-      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      requestedRefs: ['branch-main', 'default'],
       readableRefs: ['default'],
-      unreadableRefs: ['branch-main', 'buildcache'],
+      unreadableRefs: ['branch-main'],
       ready: false,
       phase: 'ready',
       publishState: 'settled',
@@ -228,30 +227,30 @@ describe('proxy OCI import readiness', () => {
     });
 
     expect(core.warning).toHaveBeenCalledWith(
-      'BoringCache proxy became ready before OCI import refs were fully readable. readable=[default] unreadable=[branch-main, buildcache] phase=ready publish=settled publish_settled=true tags_visible=true',
+      'BoringCache proxy became ready before OCI import refs were fully readable. readable=[default] unreadable=[branch-main] phase=ready publish=settled publish_settled=true tags_visible=true',
     );
     expect(core.notice).not.toHaveBeenCalled();
   });
 
   it('fails strict readiness when no planned OCI import ref is readable', () => {
     expect(() => assertOciImportReady({
-      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      requestedRefs: ['branch-main', 'default'],
       readableRefs: [],
-      unreadableRefs: ['branch-main', 'default', 'buildcache'],
+      unreadableRefs: ['branch-main', 'default'],
       ready: false,
     })).toThrow(
-      'No OCI cache import refs were readable. requested=[branch-main, default, buildcache]',
+      'No OCI cache import refs were readable. requested=[branch-main, default]',
     );
   });
 
   it('fails strict readiness when only some planned OCI import refs are readable', () => {
     expect(() => assertOciImportReady({
-      requestedRefs: ['branch-main', 'default', 'buildcache'],
+      requestedRefs: ['branch-main', 'default'],
       readableRefs: ['default'],
-      unreadableRefs: ['branch-main', 'buildcache'],
+      unreadableRefs: ['branch-main'],
       ready: false,
     })).toThrow(
-      'Some OCI cache import refs were unreadable. readable=[default] unreadable=[branch-main, buildcache]',
+      'Some OCI cache import refs were unreadable. readable=[default] unreadable=[branch-main]',
     );
   });
 });
