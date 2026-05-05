@@ -539,7 +539,6 @@ jobs:
           image: ${{ format('one-e2e-{0}', matrix.id) }}
           tags: ${{ format('run-{0}', github.run_id) }}
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
-          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}', matrix.id, env.E2E_RUN_TAG) || '' }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
@@ -549,6 +548,31 @@ jobs:
           save-on-pull-request: true
           verify: check
           verbose: true
+
+      - name: Assert Docker cache refs use CI aliases
+        if: steps.tokens.outputs.enabled == 'true' && (matrix.mode == 'docker' || matrix.mode == 'buildkit')
+        env:
+          CACHE_FROM_REFS: ${{ steps.cache.outputs.docker-cache-from-refs }}
+          CACHE_REQUESTED_REFS: ${{ steps.cache.outputs.docker-cache-requested-from-refs }}
+          CACHE_PROMOTION_REFS: ${{ steps.cache.outputs.docker-cache-promotion-refs }}
+          CACHE_RUN_REF: ${{ steps.cache.outputs.docker-cache-run-ref }}
+        run: |
+          set -euo pipefail
+          refs="${CACHE_FROM_REFS}${CACHE_REQUESTED_REFS}${CACHE_PROMOTION_REFS}${CACHE_RUN_REF}"
+          case "$refs" in
+            *buildcache*)
+              echo "Docker/BuildKit product E2E used local buildcache ref instead of CI aliases" >&2
+              echo "requested refs: ${CACHE_REQUESTED_REFS}" >&2
+              echo "from refs: ${CACHE_FROM_REFS}" >&2
+              echo "promotion refs: ${CACHE_PROMOTION_REFS}" >&2
+              echo "run ref: ${CACHE_RUN_REF}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -z "${CACHE_REQUESTED_REFS}" ]]; then
+            echo "Docker/BuildKit product E2E did not expose planned import refs" >&2
+            exit 1
+          fi
 
       - name: Seed product mode
         if: steps.tokens.outputs.enabled == 'true'
@@ -690,7 +714,6 @@ jobs:
           image: ${{ format('one-e2e-{0}', matrix.id) }}
           tags: ${{ format('run-{0}', github.run_id) }}
           buildkit-host: ${{ format('docker-container://buildx_buildkit_{0}0', steps.buildx.outputs.name) }}
-          registry-ref-tag: ${{ (matrix.mode == 'docker' || matrix.output == 'dynamic') && format('buildcache-{0}-{1}', matrix.id, env.E2E_RUN_TAG) || '' }}
           output: ${{ matrix.output == 'dynamic' && format('type=oci,dest={0}/buildkit-image.tar', env.E2E_WORKDIR) || '' }}
           gradle-home: ${{ format('{0}/.gradle-home', env.E2E_WORKDIR) }}
           maven-local-repo: ${{ format('{0}/.m2/repository', env.E2E_WORKDIR) }}
@@ -706,6 +729,31 @@ jobs:
         run: |
           if [ "${{ steps.cache.outputs.resolved-mode }}" != "${{ matrix.mode }}" ]; then
             echo "Expected mode ${{ matrix.mode }}, got ${{ steps.cache.outputs.resolved-mode }}" >&2
+            exit 1
+          fi
+
+      - name: Assert Docker cache refs use CI aliases
+        if: steps.tokens.outputs.enabled == 'true' && (matrix.mode == 'docker' || matrix.mode == 'buildkit')
+        env:
+          CACHE_FROM_REFS: ${{ steps.cache.outputs.docker-cache-from-refs }}
+          CACHE_REQUESTED_REFS: ${{ steps.cache.outputs.docker-cache-requested-from-refs }}
+          CACHE_PROMOTION_REFS: ${{ steps.cache.outputs.docker-cache-promotion-refs }}
+          CACHE_RUN_REF: ${{ steps.cache.outputs.docker-cache-run-ref }}
+        run: |
+          set -euo pipefail
+          refs="${CACHE_FROM_REFS}${CACHE_REQUESTED_REFS}${CACHE_PROMOTION_REFS}${CACHE_RUN_REF}"
+          case "$refs" in
+            *buildcache*)
+              echo "Docker/BuildKit product E2E used local buildcache ref instead of CI aliases" >&2
+              echo "requested refs: ${CACHE_REQUESTED_REFS}" >&2
+              echo "from refs: ${CACHE_FROM_REFS}" >&2
+              echo "promotion refs: ${CACHE_PROMOTION_REFS}" >&2
+              echo "run ref: ${CACHE_RUN_REF}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -z "${CACHE_REQUESTED_REFS}" ]]; then
+            echo "Docker/BuildKit product E2E did not expose planned import refs" >&2
             exit 1
           fi
 

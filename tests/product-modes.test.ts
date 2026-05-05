@@ -200,7 +200,7 @@ describe('product modes', () => {
               metadata_hints: {
                 docker_cache_ref_tag: 'run-example-42-attempt-1',
                 docker_immutable_run_ref: 'run-example-42-attempt-1',
-                docker_alias_promotion_refs: 'branch-main/default',
+                docker_alias_promotion_refs: 'branch-main',
                 ci_provider: 'example-ci',
                 ci_run_uid: '42',
                 ci_run_attempt: '1',
@@ -271,7 +271,7 @@ describe('product modes', () => {
         requireOciImportReady: true,
         metadataHints: {
           docker_immutable_run_ref: 'run-example-42-attempt-1',
-          docker_alias_promotion_refs: 'branch-main/default',
+          docker_alias_promotion_refs: 'branch-main',
           ci_provider: 'example-ci',
           ci_run_uid: '42',
           ci_run_started_at: '2026-04-21t10:00:00z',
