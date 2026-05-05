@@ -133,8 +133,8 @@ CLI default bumps must keep these files together:
 - generated `dist/**`;
 - `package.json` and `package-lock.json`.
 
-The current release line is action package `1.12.86` with default CLI
-`v1.12.65`. Cut action releases by tagging the already-green commit SHA; do
+The current release line is action package `1.12.87` with default CLI
+`v1.12.66`. Cut action releases by tagging the already-green commit SHA; do
 not add a release-only commit after CI/E2E has passed. Move `one@v1` only after
 the signed semver tag release succeeds.
 
