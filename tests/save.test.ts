@@ -381,7 +381,7 @@ describe('save action', () => {
 
     await saveRun();
 
-    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321, undefined);
     const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
       ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'check',
     );
@@ -509,7 +509,7 @@ describe('save action', () => {
 
     await saveRun();
 
-    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321, undefined);
     expect(exec.exec).toHaveBeenCalledWith(
       'docker',
       ['buildx', 'rm', '--force', 'boringcache-12345-docker-cache-abc123'],
@@ -548,7 +548,7 @@ describe('save action', () => {
 
     await saveRun();
 
-    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenNthCalledWith(1, 4321);
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenNthCalledWith(1, 4321, 5000);
     expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
       workspace: 'my-org/my-project',
       tag: 'docker-cache',
@@ -588,7 +588,7 @@ describe('save action', () => {
     expect(core.setFailed).toHaveBeenCalledWith(
       'boringcache/one save failed: OCI promotion refs were not readable after proxy shutdown. requested=[default, branch-main]: Some OCI cache import refs were unreadable. readable=[branch-main] unreadable=[default]',
     );
-    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321);
+    expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321, 5000);
   });
 
   it('warns when proxy sccache sees zero hits for an existing tag', async () => {

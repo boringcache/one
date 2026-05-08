@@ -30,6 +30,7 @@ export interface ProxyOptions {
   ociImportReadyTimeoutMs?: number;
   ociHydration?: string;
   metadataHints?: Record<string, string>;
+  failOnCacheError?: boolean;
 }
 
 export interface OciImportReadiness {
@@ -483,6 +484,10 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
   if (effectiveReadOnly) {
     args.push('--read-only');
   }
+  const strictCacheErrors = options.failOnCacheError ?? !effectiveReadOnly;
+  if (strictCacheErrors) {
+    args.push('--fail-on-cache-error');
+  }
   if (options.verbose) {
     args.push('--verbose');
   }
@@ -537,7 +542,7 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
     return handle;
   } catch (error) {
     try {
-      await stopRegistryProxy(child.pid);
+      await stopRegistryProxy(child.pid, options.port);
     } catch {
       // Keep the original readiness failure as the primary error.
     }
@@ -551,7 +556,7 @@ export async function startRegistryProxy(options: ProxyOptions): Promise<ProxyHa
  * The proxy handles SIGTERM by flushing all pending blobs to the backend,
  * then exits. Never send SIGKILL — the proxy owns its own shutdown timing.
  */
-export async function stopRegistryProxy(pid: number): Promise<void> {
+export async function stopRegistryProxy(pid: number, port?: number): Promise<void> {
   if (pid <= 0) {
     core.info('No proxy PID to stop (was reused from another invocation)');
     return;
@@ -577,6 +582,18 @@ export async function stopRegistryProxy(pid: number): Promise<void> {
   let lastLog = start;
   while (true) {
     if (!isProcessAlive(pid)) {
+      if (port) {
+        const logs = readProxyLogs(port);
+        const shutdownTimeout = logs.match(/Shutdown: flush timeout reached[^\n]*/i);
+        const checkpointTimeout = logs.match(/Shutdown: checkpoint promotion timeout reached[^\n]*/i);
+        const shutdownError = logs.match(
+          /Error:\s+[^\n]*(pending entries|checkpoint|cache publish)[^\n]*/i,
+        );
+        const failure = shutdownTimeout || checkpointTimeout || shutdownError;
+        if (failure) {
+          throw new Error(`BoringCache proxy shutdown failed: ${failure[0]}`);
+        }
+      }
       core.info(`BoringCache proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
       return;
     }

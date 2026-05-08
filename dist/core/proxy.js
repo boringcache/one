@@ -336,7 +336,7 @@ function assertOciImportReady(readiness) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function startRegistryProxy(options) {
-    var _a;
+    var _a, _b;
     (0, auth_1.warnIfUsingLegacyApiToken)();
     const { restoreToken, saveToken } = (0, auth_1.getAuthTokens)();
     let effectiveReadOnly = options.readOnly === true;
@@ -401,6 +401,10 @@ async function startRegistryProxy(options) {
     if (effectiveReadOnly) {
         args.push('--read-only');
     }
+    const strictCacheErrors = (_a = options.failOnCacheError) !== null && _a !== void 0 ? _a : !effectiveReadOnly;
+    if (strictCacheErrors) {
+        args.push('--fail-on-cache-error');
+    }
     if (options.verbose) {
         args.push('--verbose');
     }
@@ -425,7 +429,7 @@ async function startRegistryProxy(options) {
     const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
     try {
         await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
-        if ((_a = options.ociRequiredReadableRefs) === null || _a === void 0 ? void 0 : _a.length) {
+        if ((_b = options.ociRequiredReadableRefs) === null || _b === void 0 ? void 0 : _b.length) {
             const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs, options.ociImportReadyTimeoutMs);
             logOciImportReadiness(ociImportReadiness);
             if (options.requireOciImportReady) {
@@ -443,7 +447,7 @@ async function startRegistryProxy(options) {
     }
     catch (error) {
         try {
-            await stopRegistryProxy(child.pid);
+            await stopRegistryProxy(child.pid, options.port);
         }
         catch {
             // Keep the original readiness failure as the primary error.
@@ -457,7 +461,7 @@ async function startRegistryProxy(options) {
  * The proxy handles SIGTERM by flushing all pending blobs to the backend,
  * then exits. Never send SIGKILL — the proxy owns its own shutdown timing.
  */
-async function stopRegistryProxy(pid) {
+async function stopRegistryProxy(pid, port) {
     if (pid <= 0) {
         core.info('No proxy PID to stop (was reused from another invocation)');
         return;
@@ -481,6 +485,16 @@ async function stopRegistryProxy(pid) {
     let lastLog = start;
     while (true) {
         if (!isProcessAlive(pid)) {
+            if (port) {
+                const logs = readProxyLogs(port);
+                const shutdownTimeout = logs.match(/Shutdown: flush timeout reached[^\n]*/i);
+                const checkpointTimeout = logs.match(/Shutdown: checkpoint promotion timeout reached[^\n]*/i);
+                const shutdownError = logs.match(/Error:\s+[^\n]*(pending entries|checkpoint|cache publish)[^\n]*/i);
+                const failure = shutdownTimeout || checkpointTimeout || shutdownError;
+                if (failure) {
+                    throw new Error(`BoringCache proxy shutdown failed: ${failure[0]}`);
+                }
+            }
             core.info(`BoringCache proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
             return;
         }

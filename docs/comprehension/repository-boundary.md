@@ -1,6 +1,6 @@
 # Repository Boundary
 
-`boringcache/one` owns the standalone maintained GitHub Action product surface:
+`boringcache/one` owns the standalone maintained GitHub Action runtime surface:
 
 - action inputs, outputs, defaults, and validation;
 - mode orchestration for archive, Docker, BuildKit, Bazel, Go, Gradle, Turbo, and Rust sccache flows;
@@ -23,11 +23,16 @@ The action owns the user-facing `metadata-hints` input, but the CLI owns hint va
 
 Rails owns workspace, token, storage, publish, restore, session, billing, and API truth. Action changes that need a new API contract should update the web ADR/comprehension path and the CLI request path in the same rollout.
 
-The retired `@boringcache/action-core` package is not part of the maintained action path. Do not add it as a dependency or route new behavior through a separate npm release. New product behavior should land here, in CLI, or in Rails.
+The retired `@boringcache/action-core` package is not part of the maintained action path. Do not add it as a dependency or route new behavior through a separate npm release. New runtime behavior should land here, in CLI, or in Rails.
 
 ADR note: [docs/adr/0001-cli-plan-owned-action-contract.md](../adr/0001-cli-plan-owned-action-contract.md) is the current launch-readiness boundary. It keeps `.boringcache.toml`, Docker ref derivation, and adapter planning owned by the CLI, with the action acting as GitHub Actions orchestration around CLI dry-run JSON.
 
 Bazel, Gradle, and Maven on-disk tool setup is also CLI-planned. The action may materialize files, directories, and environment variables from `adapter.setup`, but `.bazelrc`, Gradle init/properties, Maven extensions/build-cache XML content, and default path resolution should stay in the CLI plan instead of being recreated in TypeScript.
+
+`mode: bazel` means Bazel remote-cache setup. It should not silently add archive
+caches for Bazel output roots or disk-cache directories. Use explicit archive
+`entries` or a CLI-resolved opt-in cache profile when a workflow should restore
+local Bazel state alongside the remote cache.
 
 Turbo, Nx, and sccache proxy environment wiring is CLI-planned too. The action may rewrite the planned local proxy port after startup, apply explicit GitHub Actions token/team overrides for Turbo/Nx, and set action-lifecycle values such as `SCCACHE_IDLE_TIMEOUT`, but it should otherwise export the CLI dry-run `env_vars` instead of carrying a second adapter plan in TypeScript.
 
@@ -65,6 +70,14 @@ Preset cache environment exports are a CLI dry-run contract. The action should e
 Benchmark evidence for launch copy should come from action artifacts that name the action ref, CLI version/ref, cache mode, immutable run refs, alias promotion status, and `cache_session_summary` diagnostics.
 
 Verification is action orchestration, not Rails policy. Normal restores inherit strict server-signature verification from the action environment, but post-save `verify` checks must honor `verify-require-server-signature`; when that input is false, the action clears the inherited strict env only for the `boringcache check` subprocess. Post-save verification may accept structured `pending`/`uploading` check results only for tags marked `saveExpected`, so valid contention does not wait on tag visibility while true misses and restore-time verification remain strict.
+
+Writer proxies run with CLI `--fail-on-cache-error` by default. The action passes
+that flag and treats explicit proxy shutdown failures as action failures, but it
+does not decide whether a native remote-cache publish is usable. Rails owns entry
+readiness, immutable version truth, and tag pointers; the CLI owns checkpoint
+flushes, final stable promotion, and the user-facing shutdown error. The action
+only makes those product failures visible in GitHub Actions instead of printing a
+misleading graceful-exit line.
 
 `trusted-workspace-signing-key-fingerprint` is action input plumbing for the CLI trust boundary. The action exports `BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT`; the CLI verifies the returned workspace signing key and server signature payload.
 

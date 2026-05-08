@@ -22,6 +22,8 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 
 - Start at `docs/comprehension/README.md` for durable action context.
 - Keep the repository boundary in `docs/comprehension/repository-boundary.md` aligned with this file.
+- Keep the public README slim. Put user-facing how-to material under `docs/`,
+  grouped by mode, preset, or shared workflow concern.
 
 ## Key Features
 
@@ -63,9 +65,9 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 
 ## Repository Boundary
 
-`boringcache/one` is the standalone repository for maintained GitHub Actions implementation work. Keep action helpers under `lib/core/` so product changes ship with the action that consumes them.
+`boringcache/one` is the standalone repository for maintained GitHub Actions implementation work. Keep action helpers under `lib/core` so runtime changes ship with the action that consumes them.
 
-Do not depend on the retired `@boringcache/action-core` package. New product behavior belongs here, in the CLI, or in Rails.
+Do not depend on the retired `@boringcache/action-core` package. New runtime behavior belongs here, in the CLI, or in Rails.
 
 ## Build
 

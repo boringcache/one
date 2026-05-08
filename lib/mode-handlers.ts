@@ -531,7 +531,8 @@ function errorMessage(error: unknown): string {
 
 async function verifyOciPromotionRefsThenStopProxy(proxyPid: string): Promise<void> {
   try {
-    await stopRegistryProxy(parseInt(proxyPid, 10));
+    const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
+    await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined);
   } catch (stopError) {
     throw new Error(`Failed to stop BoringCache proxy cleanly before OCI promotion verification: ${errorMessage(stopError)}`);
   }
@@ -2989,6 +2990,7 @@ async function runRustSave(): Promise<void> {
 async function stopProxyFromState(): Promise<void> {
   const proxyPid = getModeState('proxy-pid');
   if (proxyPid) {
-    await stopRegistryProxy(parseInt(proxyPid, 10));
+    const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
+    await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined);
   }
 }
