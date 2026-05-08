@@ -1,9 +1,15 @@
 import * as http from 'http';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { AddressInfo } from 'net';
+import { spawn } from 'child_process';
 import * as core from '@actions/core';
 import {
   assertOciImportReady,
+  findAvailablePort,
   logOciImportReadiness,
+  stopRegistryProxy,
   waitForOciImportReadiness,
   waitForOciRefsReadable,
 } from '../lib/core/proxy';
@@ -252,5 +258,34 @@ describe('proxy OCI import readiness', () => {
     })).toThrow(
       'Some OCI cache import refs were unreadable. readable=[default] unreadable=[branch-main]',
     );
+  });
+});
+
+describe('proxy shutdown', () => {
+  it('fails when proxy logs report unflushed publish state', async () => {
+    const port = await findAvailablePort();
+    const logPath = path.join(os.tmpdir(), `boringcache-proxy-${port}.log`);
+    fs.writeFileSync(logPath, 'Error: cache publish failed: pending entries remain\n');
+
+    const child = spawn(process.execPath, [
+      '-e',
+      "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 10)); setInterval(() => {}, 1000);",
+    ], {
+      stdio: 'ignore',
+    });
+
+    try {
+      expect(child.pid).toBeGreaterThan(0);
+      await expect(stopRegistryProxy(child.pid as number, port)).rejects.toThrow(
+        'BoringCache proxy shutdown failed: Error: cache publish failed: pending entries',
+      );
+    } finally {
+      try {
+        process.kill(child.pid as number, 'SIGKILL');
+      } catch {
+        // Process already exited.
+      }
+      fs.rmSync(logPath, { force: true });
+    }
   });
 });

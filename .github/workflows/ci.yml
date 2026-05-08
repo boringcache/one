@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run core action contract tests
+        run: npm test -- --runTestsByPath tests/proxy.test.ts tests/product-modes.test.ts tests/save.test.ts tests/utils.test.ts
+
       - name: Run unit tests
         run: npm test
 

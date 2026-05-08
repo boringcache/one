@@ -79,6 +79,11 @@ flushes, final stable promotion, and the user-facing shutdown error. The action
 only makes those product failures visible in GitHub Actions instead of printing a
 misleading graceful-exit line.
 
+CI now has an explicit `Run core action contract tests` gate for proxy readiness,
+strict OCI import handling, proxy shutdown failure detection, save verification,
+and product-mode wiring. Do not weaken that gate to paper over a benchmark run:
+fix the Rails, CLI, or action owner named by the failed contract.
+
 `trusted-workspace-signing-key-fingerprint` is action input plumbing for the CLI trust boundary. The action exports `BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT`; the CLI verifies the returned workspace signing key and server signature payload.
 
 Archive restore should happen before mise tool probes or installs. Tool discovery can execute language binaries in the project directory, and those binaries must not get a chance to populate archive cache targets before `boringcache restore` sees them.
