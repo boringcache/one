@@ -688,8 +688,11 @@ function detectGitContext(pathHint: string | undefined, workingDirectory: string
   const context: GitContext = {};
 
   if (gitDir) {
-    context.branch = detectBranchFromHead(gitDir);
-    context.defaultBranch = detectDefaultBranch(gitDir);
+    const gitBranch = detectBranchFromHead(gitDir);
+    if (gitBranch) {
+      context.branch = gitBranch;
+      context.defaultBranch = detectDefaultBranch(gitDir);
+    }
   }
 
   if (!context.branch) {

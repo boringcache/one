@@ -813,6 +813,58 @@ describe('one utils', () => {
     }
   });
 
+  it('does not mix a detached submodule default branch with the workflow branch', async () => {
+    const project = await makeTempProject({
+      'upstream/.git': 'gitdir: ../.git/modules/upstream\n',
+      '.git/modules/upstream/HEAD': 'a'.repeat(40),
+      '.git/modules/upstream/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/master\n',
+    });
+    const previousCi = process.env.CI;
+    const previousRefName = process.env.GITHUB_REF_NAME;
+    const previousHeadRef = process.env.GITHUB_HEAD_REF;
+    const previousDefaultBranch = process.env.BORINGCACHE_DEFAULT_BRANCH;
+
+    try {
+      process.env.CI = '1';
+      process.env.GITHUB_REF_NAME = 'main';
+      delete process.env.GITHUB_HEAD_REF;
+      delete process.env.BORINGCACHE_DEFAULT_BRANCH;
+
+      expect(resolveVerificationTags([{
+        tag: 'deps',
+        noPlatform: true,
+        noGit: false,
+        pathHint: path.join(project, 'upstream/.go/pkg/mod'),
+      }], path.join(project, 'upstream'))).toEqual(['deps']);
+    } finally {
+      if (previousCi === undefined) {
+        delete process.env.CI;
+      } else {
+        process.env.CI = previousCi;
+      }
+
+      if (previousRefName === undefined) {
+        delete process.env.GITHUB_REF_NAME;
+      } else {
+        process.env.GITHUB_REF_NAME = previousRefName;
+      }
+
+      if (previousHeadRef === undefined) {
+        delete process.env.GITHUB_HEAD_REF;
+      } else {
+        process.env.GITHUB_HEAD_REF = previousHeadRef;
+      }
+
+      if (previousDefaultBranch === undefined) {
+        delete process.env.BORINGCACHE_DEFAULT_BRANCH;
+      } else {
+        process.env.BORINGCACHE_DEFAULT_BRANCH = previousDefaultBranch;
+      }
+
+      await removeTempProject(project);
+    }
+  });
+
   it('keeps maven mode pure remote by default', async () => {
     const plan = await buildPlan(buildInputs({
       setup: 'none',
