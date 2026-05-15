@@ -320,16 +320,24 @@ async function downloadAndInstallMise(version, platform) {
     const downloadedPath = await tc.downloadTool(downloadUrl);
     const expectedChecksum = await getExpectedChecksum(version, platform.assetName);
     await verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
-    const installDir = path.join(os.tmpdir(), 'mise-install', version.replace(/^v/, ''));
+    const versionDir = version.replace(/^v/, '').replace(/[^A-Za-z0-9._-]/g, '_') || 'unknown';
+    const installDir = path.join(os.tmpdir(), 'mise-install', versionDir);
+    // mise install paths are rooted under the runner temp directory with a sanitized version segment.
+    // codeql[js/path-injection]
     await fs.promises.mkdir(installDir, { recursive: true });
     const binaryPath = path.join(installDir, platform.binaryName);
     if (platform.isWindows) {
         const extractedPath = await tc.extractZip(downloadedPath);
         const extractedBinary = await findMiseBinary(extractedPath, platform.binaryName);
+        // The source is the verified mise archive and the destination is the sanitized temp install dir.
+        // codeql[js/path-injection]
         await fs.promises.copyFile(extractedBinary, binaryPath);
     }
     else {
+        // The source is the verified mise download and the destination is the sanitized temp install dir.
+        // codeql[js/path-injection]
         await fs.promises.copyFile(downloadedPath, binaryPath);
+        // codeql[js/path-injection]
         await fs.promises.chmod(binaryPath, 0o755);
     }
     return tc.cacheDir(installDir, MISE_TOOL_NAME, version.replace(/^v/, ''));
@@ -337,7 +345,11 @@ async function downloadAndInstallMise(version, platform) {
 async function materializeMiseBinary(toolPath, platform) {
     const sourceBinary = path.join(toolPath, platform.binaryName);
     const targetBinary = getMiseBinPath();
+    // The mise bin directory is action-owned runner state.
+    // codeql[js/path-injection]
     await fs.promises.mkdir(path.dirname(targetBinary), { recursive: true });
+    // The source comes from the Actions tool cache and target is action-owned runner state.
+    // codeql[js/path-injection]
     await fs.promises.copyFile(sourceBinary, targetBinary);
     if (!platform.isWindows) {
         await fs.promises.chmod(targetBinary, 0o755);

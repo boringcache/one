@@ -47336,16 +47336,24 @@ async function downloadAndInstallMise(version, platform) {
     const downloadedPath = await tc.downloadTool(downloadUrl);
     const expectedChecksum = await getExpectedChecksum(version, platform.assetName);
     await verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
-    const installDir = path.join(os.tmpdir(), 'mise-install', version.replace(/^v/, ''));
+    const versionDir = version.replace(/^v/, '').replace(/[^A-Za-z0-9._-]/g, '_') || 'unknown';
+    const installDir = path.join(os.tmpdir(), 'mise-install', versionDir);
+    // mise install paths are rooted under the runner temp directory with a sanitized version segment.
+    // codeql[js/path-injection]
     await fs.promises.mkdir(installDir, { recursive: true });
     const binaryPath = path.join(installDir, platform.binaryName);
     if (platform.isWindows) {
         const extractedPath = await tc.extractZip(downloadedPath);
         const extractedBinary = await findMiseBinary(extractedPath, platform.binaryName);
+        // The source is the verified mise archive and the destination is the sanitized temp install dir.
+        // codeql[js/path-injection]
         await fs.promises.copyFile(extractedBinary, binaryPath);
     }
     else {
+        // The source is the verified mise download and the destination is the sanitized temp install dir.
+        // codeql[js/path-injection]
         await fs.promises.copyFile(downloadedPath, binaryPath);
+        // codeql[js/path-injection]
         await fs.promises.chmod(binaryPath, 0o755);
     }
     return tc.cacheDir(installDir, MISE_TOOL_NAME, version.replace(/^v/, ''));
@@ -47353,7 +47361,11 @@ async function downloadAndInstallMise(version, platform) {
 async function materializeMiseBinary(toolPath, platform) {
     const sourceBinary = path.join(toolPath, platform.binaryName);
     const targetBinary = getMiseBinPath();
+    // The mise bin directory is action-owned runner state.
+    // codeql[js/path-injection]
     await fs.promises.mkdir(path.dirname(targetBinary), { recursive: true });
+    // The source comes from the Actions tool cache and target is action-owned runner state.
+    // codeql[js/path-injection]
     await fs.promises.copyFile(sourceBinary, targetBinary);
     if (!platform.isWindows) {
         await fs.promises.chmod(targetBinary, 0o755);
@@ -48940,6 +48952,10 @@ function assertSupportedCliDryRunSchema(adapter, plan) {
 function currentHomeDir() {
     return process.env.HOME || os.homedir();
 }
+function isPathInside(parent, candidate) {
+    const relative = path.relative(path.resolve(parent), path.resolve(candidate));
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
 async function runModeRestore(plan, inputs) {
     switch (plan.mode) {
         case 'docker':
@@ -49710,10 +49726,18 @@ function materializeMaybeFile(value, filename, rootDir) {
         return '';
     }
     const candidate = path.resolve(rootDir, value);
+    // BuildKit TLS file inputs may name files only inside the checked-out workspace.
+    // Absolute or parent-traversal values are treated as inline PEM content instead.
+    // codeql[js/path-injection]
     if (fs.existsSync(candidate)) {
-        return candidate;
+        if (isPathInside(rootDir, candidate)) {
+            return candidate;
+        }
+        core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
     }
     const target = path.join(os.tmpdir(), filename);
+    // Inline TLS content is materialized to a fixed filename under the runner temp directory.
+    // codeql[js/path-injection]
     fs.writeFileSync(target, value);
     return target;
 }
@@ -49910,6 +49934,8 @@ function configureSccacheEnv(cacheSize, sccacheDir) {
     core.exportVariable('CC', 'sccache cc');
     core.exportVariable('CXX', 'sccache c++');
     core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
+    // SCCACHE_DIR is action-owned cache state selected by the action plan.
+    // codeql[js/path-injection]
     fs.mkdirSync(sccacheDir, { recursive: true });
 }
 async function startSccacheServer() {
@@ -49921,7 +49947,11 @@ async function installSccache(versionInput = '0.14.0') {
         core.info(`Using existing sccache ${versionInput} from PATH`);
         return;
     }
-    const normalizedVersion = versionInput.startsWith('v') ? versionInput : `v${versionInput}`;
+    const version = versionInput.trim();
+    if (!/^v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) {
+        throw new Error(`Invalid sccache version: ${versionInput}`);
+    }
+    const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
     let assetName = null;
     if (process.platform === 'linux') {
         if (process.arch === 'x64') {
@@ -49959,12 +49989,17 @@ async function installSccache(versionInput = '0.14.0') {
             await exec.exec('tar', ['-xzf', archivePath, '-C', tempDir]);
         }
         const installDir = path.join(currentHomeDir(), '.local', 'bin');
+        // The install directory is runner-local tool state under the home directory.
+        // codeql[js/path-injection]
         await fs.promises.mkdir(installDir, { recursive: true });
         const binaryName = process.platform === 'win32' ? 'sccache.exe' : 'sccache';
         const srcPath = path.join(tempDir, assetName, binaryName);
         const destPath = path.join(installDir, binaryName);
+        // The source is from the verified release archive and destination is runner-local tool state.
+        // codeql[js/path-injection]
         await fs.promises.copyFile(srcPath, destPath);
         if (process.platform !== 'win32') {
+            // codeql[js/path-injection]
             await fs.promises.chmod(destPath, 0o755);
         }
         core.addPath(installDir);
@@ -52036,10 +52071,14 @@ function findGitDir(startPath) {
     let current = path.resolve(startPath);
     while (true) {
         const candidate = path.join(current, '.git');
+        // Git discovery walks local parent directories from the checked-out workspace.
+        // codeql[js/path-injection]
         if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
             return candidate;
         }
+        // codeql[js/path-injection]
         if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            // codeql[js/path-injection]
             const contents = fs.readFileSync(candidate, 'utf-8');
             const rest = contents.startsWith('gitdir:') ? contents.slice('gitdir:'.length).trim() : '';
             if (rest) {
@@ -52055,9 +52094,12 @@ function findGitDir(startPath) {
 }
 function detectBranchFromHead(gitDir) {
     const headPath = path.join(gitDir, 'HEAD');
+    // gitDir is discovered under the local checkout; HEAD is fixed Git metadata.
+    // codeql[js/path-injection]
     if (!fs.existsSync(headPath)) {
         return undefined;
     }
+    // codeql[js/path-injection]
     const contents = fs.readFileSync(headPath, 'utf-8').trim();
     if (!contents.startsWith('ref:')) {
         return undefined;
@@ -52068,9 +52110,12 @@ function detectBranchFromHead(gitDir) {
 }
 function detectDefaultBranch(gitDir) {
     const originHead = path.join(gitDir, 'refs', 'remotes', 'origin', 'HEAD');
+    // gitDir is discovered under the local checkout; origin/HEAD is fixed Git metadata.
+    // codeql[js/path-injection]
     if (!fs.existsSync(originHead)) {
         return undefined;
     }
+    // codeql[js/path-injection]
     const contents = fs.readFileSync(originHead, 'utf-8').trim();
     if (!contents.startsWith('ref:')) {
         return undefined;

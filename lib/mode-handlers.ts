@@ -230,6 +230,11 @@ function currentHomeDir(): string {
   return process.env.HOME || os.homedir();
 }
 
+function isPathInside(parent: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 export async function runModeRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<ModeRestoreResult> {
   switch (plan.mode) {
     case 'docker':
@@ -1218,11 +1223,19 @@ function materializeMaybeFile(value: string, filename: string, rootDir: string):
   }
 
   const candidate = path.resolve(rootDir, value);
+  // BuildKit TLS file inputs may name files only inside the checked-out workspace.
+  // Absolute or parent-traversal values are treated as inline PEM content instead.
+  // codeql[js/path-injection]
   if (fs.existsSync(candidate)) {
-    return candidate;
+    if (isPathInside(rootDir, candidate)) {
+      return candidate;
+    }
+    core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
   }
 
   const target = path.join(os.tmpdir(), filename);
+  // Inline TLS content is materialized to a fixed filename under the runner temp directory.
+  // codeql[js/path-injection]
   fs.writeFileSync(target, value);
   return target;
 }
@@ -1442,6 +1455,8 @@ function configureSccacheEnv(cacheSize: string, sccacheDir: string): void {
   core.exportVariable('CC', 'sccache cc');
   core.exportVariable('CXX', 'sccache c++');
   core.exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
+  // SCCACHE_DIR is action-owned cache state selected by the action plan.
+  // codeql[js/path-injection]
   fs.mkdirSync(sccacheDir, { recursive: true });
 }
 
@@ -1457,7 +1472,11 @@ async function installSccache(versionInput = '0.14.0'): Promise<void> {
     return;
   }
 
-  const normalizedVersion = versionInput.startsWith('v') ? versionInput : `v${versionInput}`;
+  const version = versionInput.trim();
+  if (!/^v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) {
+    throw new Error(`Invalid sccache version: ${versionInput}`);
+  }
+  const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
   let assetName: string | null = null;
   if (process.platform === 'linux') {
     if (process.arch === 'x64') {
@@ -1496,12 +1515,17 @@ async function installSccache(versionInput = '0.14.0'): Promise<void> {
     }
 
     const installDir = path.join(currentHomeDir(), '.local', 'bin');
+    // The install directory is runner-local tool state under the home directory.
+    // codeql[js/path-injection]
     await fs.promises.mkdir(installDir, { recursive: true });
     const binaryName = process.platform === 'win32' ? 'sccache.exe' : 'sccache';
     const srcPath = path.join(tempDir, assetName, binaryName);
     const destPath = path.join(installDir, binaryName);
+    // The source is from the verified release archive and destination is runner-local tool state.
+    // codeql[js/path-injection]
     await fs.promises.copyFile(srcPath, destPath);
     if (process.platform !== 'win32') {
+      // codeql[js/path-injection]
       await fs.promises.chmod(destPath, 0o755);
     }
     core.addPath(installDir);

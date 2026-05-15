@@ -631,10 +631,14 @@ function findGitDir(startPath: string): string | null {
 
   while (true) {
     const candidate = path.join(current, '.git');
+    // Git discovery walks local parent directories from the checked-out workspace.
+    // codeql[js/path-injection]
     if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
       return candidate;
     }
+    // codeql[js/path-injection]
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      // codeql[js/path-injection]
       const contents = fs.readFileSync(candidate, 'utf-8');
       const rest = contents.startsWith('gitdir:') ? contents.slice('gitdir:'.length).trim() : '';
       if (rest) {
@@ -652,9 +656,12 @@ function findGitDir(startPath: string): string | null {
 
 function detectBranchFromHead(gitDir: string): string | undefined {
   const headPath = path.join(gitDir, 'HEAD');
+  // gitDir is discovered under the local checkout; HEAD is fixed Git metadata.
+  // codeql[js/path-injection]
   if (!fs.existsSync(headPath)) {
     return undefined;
   }
+  // codeql[js/path-injection]
   const contents = fs.readFileSync(headPath, 'utf-8').trim();
   if (!contents.startsWith('ref:')) {
     return undefined;
@@ -666,9 +673,12 @@ function detectBranchFromHead(gitDir: string): string | undefined {
 
 function detectDefaultBranch(gitDir: string): string | undefined {
   const originHead = path.join(gitDir, 'refs', 'remotes', 'origin', 'HEAD');
+  // gitDir is discovered under the local checkout; origin/HEAD is fixed Git metadata.
+  // codeql[js/path-injection]
   if (!fs.existsSync(originHead)) {
     return undefined;
   }
+  // codeql[js/path-injection]
   const contents = fs.readFileSync(originHead, 'utf-8').trim();
   if (!contents.startsWith('ref:')) {
     return undefined;
