@@ -395,11 +395,7 @@ async function execBoringCache(args, options = {}) {
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         if (isWindows && msg.includes('Unable to locate executable file')) {
-            const quoted = ['boringcache', ...args.map(a => {
-                    const escaped = a.replace(/"/g, '\\"');
-                    return /\s/.test(escaped) ? `"${escaped}"` : escaped;
-                })].join(' ');
-            return await exec.exec('bash', ['-lc', quoted], options);
+            return await exec.exec('bash', ['-lc', 'exec "$0" "$@"', 'boringcache', ...args], options);
         }
         throw error;
     }
