@@ -53,6 +53,23 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Verify signed release tag
+        run: |
+          cat > "$RUNNER_TEMP/allowed_signers" <<'EOF'
+          gaurav@gauravtiwari.co.uk ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVC6w5HTvW0TZwuN0/J3axNnAfNclejNgpCWs0b2KAM
+          EOF
+
+          git config gpg.format ssh
+          git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed_signers"
+          git tag -v "$RELEASE_TAG"
+
+          tag_target="$(git rev-list -n 1 "$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$tag_target" != "$head_commit" ]; then
+            echo "Release tag $RELEASE_TAG points at $tag_target, but checkout is $head_commit" >&2
+            exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
