@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@dffb23f65a78bba8db45d387d5ea1bbd6be3ef18 # v1
+        uses: ruby/setup-ruby@97ecb7b512899eb71ab1bf2310a624c6f1589ac6 # v1
         with:
           ruby-version: "3.4.4"
 
@@ -79,7 +79,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@dffb23f65a78bba8db45d387d5ea1bbd6be3ef18 # v1
+        uses: ruby/setup-ruby@97ecb7b512899eb71ab1bf2310a624c6f1589ac6 # v1
         with:
           ruby-version: "3.4.4"
 
