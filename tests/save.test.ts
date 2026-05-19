@@ -591,7 +591,7 @@ describe('save action', () => {
     expect(actionCoreMocks.stopRegistryProxy).toHaveBeenCalledWith(4321, 5000);
   });
 
-  it('warns when proxy sccache sees zero hits for an existing tag', async () => {
+  it('warns when proxy sccache sees zero hits despite preflight KV rows', async () => {
     const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     (exec.exec as jest.Mock).mockImplementation(async (
       command: string,
@@ -605,6 +605,27 @@ describe('save action', () => {
           'Cache misses                       1125\n' +
           'Cache hits rate (Rust)             0.00 %\n',
         ));
+        return 0;
+      }
+      if (command === 'boringcache' && args?.includes('check') && args.includes('--json')) {
+        const checkIndex = args.indexOf('check');
+        const tag = args[checkIndex + 2] || '';
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          schema_version: 1,
+          workspace: args[checkIndex + 1] || 'my-org/my-project',
+          total: 1,
+          hits: 1,
+          misses: 0,
+          results: [{
+            tag,
+            requested_tag: tag,
+            status: 'hit',
+            cache_type: 'cache_entry',
+            cache_entry_id: 'entry-123',
+            kv_entry_count: 1125,
+            kv_total_size: 123456,
+          }],
+        })));
         return 0;
       }
       return 0;
@@ -625,14 +646,85 @@ describe('save action', () => {
       'mode-sccache-mode': 'proxy',
       'mode-sccache-tag': 'rust-1.94.1-ci-test-sccache-rust1.94',
       'mode-sccache-preflight-hit': 'true',
+      'mode-sccache-preflight-cache-entry-hit': 'true',
+      'mode-sccache-preflight-kv-hit': 'true',
       'mode-proxy-pid': '4321',
     });
 
     await saveRun();
 
     expect(core.warning).toHaveBeenCalledWith(
-      "sccache proxy saw 0 cache hits across 1352 compile requests for existing tag 'rust-1.94.1-ci-test-sccache-rust1.94'. Check emitted tag semantics and BORINGCACHE_SAVE_TOKEN/BORINGCACHE_RESTORE_TOKEN alignment.",
+      "sccache proxy saw 0 cache hits across 1352 compile requests even though direct KV rows existed for 'rust-1.94.1-ci-test-sccache-rust1.94' before startup. Check sccache key churn, emitted tag semantics, and proxy read logs.",
     );
+    chdirSpy.mockRestore();
+  });
+
+  it('reports proxy sccache zero hits as KV migration when only a signed cache entry existed before startup', async () => {
+    const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      if (command === 'sccache' && args?.[0] === '--show-stats') {
+        options?.listeners?.stdout?.(Buffer.from(
+          'Compile requests                   1352\n' +
+          'Cache hits                            0\n' +
+          'Cache misses                       1125\n' +
+          'Cache hits rate (Rust)             0.00 %\n',
+        ));
+        return 0;
+      }
+      if (command === 'boringcache' && args?.includes('check') && args.includes('--json')) {
+        const checkIndex = args.indexOf('check');
+        const tag = args[checkIndex + 2] || '';
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          schema_version: 1,
+          workspace: args[checkIndex + 1] || 'my-org/my-project',
+          total: 1,
+          hits: 1,
+          misses: 0,
+          results: [{
+            tag,
+            requested_tag: tag,
+            status: 'hit',
+            cache_type: 'cache_entry',
+            cache_entry_id: 'entry-123',
+            kv_entry_count: 1125,
+            kv_total_size: 123456,
+          }],
+        })));
+        return 0;
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'rust-sccache',
+      'cli-version': 'skip',
+      'working-directory': '/tmp/project',
+      'generic-cache-workspace': 'my-org/my-project',
+      'mode-workspace': 'my-org/my-project',
+      'mode-cache-cargo': 'false',
+      'mode-cache-cargo-bin': 'false',
+      'mode-cache-target': 'false',
+      'mode-use-sccache': 'true',
+      'mode-sccache-mode': 'proxy',
+      'mode-sccache-tag': 'rust-1.94.1-ci-test-sccache-rust1.94',
+      'mode-sccache-preflight-hit': 'true',
+      'mode-sccache-preflight-cache-entry-hit': 'true',
+      'mode-sccache-preflight-kv-hit': 'false',
+      'mode-proxy-pid': '4321',
+    });
+
+    await saveRun();
+
+    expect(core.notice).toHaveBeenCalledWith(
+      "sccache proxy saw 0 cache hits across 1352 compile requests for 'rust-1.94.1-ci-test-sccache-rust1.94'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.",
+    );
+    expect(core.warning).not.toHaveBeenCalled();
     chdirSpy.mockRestore();
   });
 
@@ -683,6 +775,8 @@ describe('save action', () => {
       'mode-sccache-mode': 'proxy',
       'mode-sccache-tag': 'rust-1.94.1-ci-test-sccache-rust1.94',
       'mode-sccache-preflight-hit': 'false',
+      'mode-sccache-preflight-cache-entry-hit': 'false',
+      'mode-sccache-preflight-kv-hit': 'false',
       'mode-proxy-pid': '4321',
     });
 

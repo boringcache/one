@@ -162,9 +162,20 @@ interface CliAdapterDryRunPlan {
 
 interface CliCheckSummary {
   hits?: number;
-  results?: Array<{
-    status?: string;
-  }>;
+  results?: CliCheckResult[];
+}
+
+interface CliCheckResult {
+  status?: string;
+  cache_type?: string;
+  kv_entry_count?: number;
+  kv_total_size?: number;
+}
+
+interface RustTagCheckStatus {
+  hit: boolean;
+  cacheEntryHit: boolean;
+  kvHit: boolean;
 }
 
 const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
@@ -1617,7 +1628,29 @@ function summarizeSccacheStats(output: string): SccacheStatsSummary | null {
   };
 }
 
-async function checkRustTagHit(
+function emptyRustTagCheckStatus(): RustTagCheckStatus {
+  return {
+    hit: false,
+    cacheEntryHit: false,
+    kvHit: false,
+  };
+}
+
+function checkResultHasKvRows(result: CliCheckResult): boolean {
+  if (typeof result.kv_entry_count === 'number') {
+    return result.kv_entry_count > 0;
+  }
+  return result.status === 'hit' && result.cache_type === 'kv';
+}
+
+function checkResultHasCacheEntryHit(result: CliCheckResult): boolean {
+  if (result.status !== 'hit') {
+    return false;
+  }
+  return result.cache_type !== 'kv';
+}
+
+async function checkRustTagStatus(
   workspace: string,
   tag: string,
   {
@@ -1625,7 +1658,7 @@ async function checkRustTagHit(
     noGit = false,
     requireServerSignature = false,
   }: { noPlatform?: boolean; noGit?: boolean; requireServerSignature?: boolean } = {},
-): Promise<boolean> {
+): Promise<RustTagCheckStatus> {
   const args = ['check', workspace, tag, '--json'];
   if (requireServerSignature) {
     args.unshift('--require-server-signature');
@@ -1648,19 +1681,32 @@ async function checkRustTagHit(
     },
   });
   if (exitCode !== 0) {
-    return false;
+    return emptyRustTagCheckStatus();
   }
 
   try {
     const summary = JSON.parse(stdout) as CliCheckSummary;
-    if (typeof summary.hits === 'number') {
-      return summary.hits > 0;
-    }
-    return (summary.results || []).some((result) => result.status === 'hit');
+    const results = summary.results || [];
+    const cacheEntryHit = results.some(checkResultHasCacheEntryHit);
+    const kvHit = results.some(checkResultHasKvRows);
+    const legacyHit = results.length === 0 && typeof summary.hits === 'number' && summary.hits > 0;
+    return {
+      hit: cacheEntryHit || kvHit || legacyHit,
+      cacheEntryHit: cacheEntryHit || legacyHit,
+      kvHit,
+    };
   } catch (error) {
     core.warning(`Failed to parse boringcache check JSON for ${tag}: ${(error as Error).message}`);
-    return false;
+    return emptyRustTagCheckStatus();
   }
+}
+
+async function checkRustTagHit(
+  workspace: string,
+  tag: string,
+  options: { noPlatform?: boolean; noGit?: boolean; requireServerSignature?: boolean } = {},
+): Promise<boolean> {
+  return (await checkRustTagStatus(workspace, tag, options)).hit;
 }
 
 function configureTurboRemoteEnv(apiUrl: string, token: string, team?: string): void {
@@ -2801,11 +2847,12 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
           metadataHintsInput: inputs.metadataHints,
         },
       );
-      sccacheRestored = await checkRustTagHit(proxyPlan.workspace, proxyPlan.tag, {
+      const sccachePreflightStatus = await checkRustTagStatus(proxyPlan.workspace, proxyPlan.tag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
         requireServerSignature: true,
       });
+      sccacheRestored = sccachePreflightStatus.kvHit;
       const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace: proxyPlan.workspace,
@@ -2826,13 +2873,17 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
         tag: proxyPlan.tag,
         tagPathPair: `${proxyPlan.tag}:${sccacheEntry.path}`,
       });
-      saveModeState('sccache-preflight-hit', String(sccacheRestored));
+      saveModeState('sccache-preflight-hit', String(sccachePreflightStatus.hit));
+      saveModeState('sccache-preflight-cache-entry-hit', String(sccachePreflightStatus.cacheEntryHit));
+      saveModeState('sccache-preflight-kv-hit', String(sccachePreflightStatus.kvHit));
       setProxyOutputs(proxy.port);
     } else {
       sccacheRestored = await restoreRustArchiveEntry(workspace, sccacheEntry, inputs.verbose);
       await startSccacheServer();
       saveRustArchiveEntryState('sccache', sccacheEntry);
       saveModeState('sccache-preflight-hit', String(sccacheRestored));
+      saveModeState('sccache-preflight-cache-entry-hit', String(sccacheRestored));
+      saveModeState('sccache-preflight-kv-hit', 'false');
     }
   }
 
@@ -2951,20 +3002,23 @@ async function runRustSave(): Promise<void> {
   if (useSccache) {
     if (sccacheMode === 'proxy') {
       const sccacheTag = getModeState('sccache-tag');
-      const preflightHit = getModeState('sccache-preflight-hit') === 'true';
+      const preflightCacheEntryHit = getModeState('sccache-preflight-cache-entry-hit') === 'true';
+      const preflightKvHit = getModeState('sccache-preflight-kv-hit') === 'true';
       const sccacheStats = await stopSccacheServer();
       await stopProxyFromState();
       if (sccacheTag && (!sccacheStats || sccacheStats.compileRequests === 0)) {
         markModeVerifyTagSkipped(sccacheTag);
-        if (preflightHit) {
+        if (preflightKvHit) {
           core.info(`Skipping sccache post-save verification for ${sccacheTag}: no compile requests were observed.`);
+        } else if (preflightCacheEntryHit) {
+          core.info(`Skipping sccache post-save verification for ${sccacheTag}: signed cache entry existed, but no compile requests were observed.`);
         } else {
           core.info(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
         }
         return;
       }
       if (sccacheTag && sccacheStats && sccacheStats.compileRequests > 0) {
-        const postShutdownHit = await checkRustTagHit(workspace, sccacheTag, {
+        const postShutdownStatus = await checkRustTagStatus(workspace, sccacheTag, {
           noPlatform: true,
           noGit: true,
           requireServerSignature: true,
@@ -2975,13 +3029,21 @@ async function runRustSave(): Promise<void> {
         );
 
         if (sccacheStats.cacheHits === 0) {
-          if (preflightHit) {
+          if (preflightKvHit) {
             core.warning(
-              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for existing tag '${sccacheTag}'. Check emitted tag semantics and BORINGCACHE_SAVE_TOKEN/BORINGCACHE_RESTORE_TOKEN alignment.`,
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests even though direct KV rows existed for '${sccacheTag}' before startup. Check sccache key churn, emitted tag semantics, and proxy read logs.`,
             );
-          } else if (!postShutdownHit) {
+          } else if (preflightCacheEntryHit && postShutdownStatus.kvHit) {
+            core.notice(
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`,
+            );
+          } else if (preflightCacheEntryHit) {
             core.warning(
-              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not available as a signed cache entry after shutdown. Check server-side signing, BORINGCACHE_SAVE_TOKEN scope, and proxy publish logs.`,
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`,
+            );
+          } else if (!postShutdownStatus.hit) {
+            core.warning(
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not available as direct KV rows or a signed cache entry after shutdown. Check server-side signing, BORINGCACHE_SAVE_TOKEN scope, and proxy publish logs.`,
             );
           } else {
             core.notice(

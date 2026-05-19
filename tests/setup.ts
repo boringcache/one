@@ -1314,6 +1314,9 @@ beforeEach(() => {
           tag: requestedTag,
           requested_tag: requestedTag,
           status: 'hit',
+          cache_type: 'cache_entry',
+          kv_entry_count: 1,
+          kv_total_size: 1,
         }],
       })));
       return 0;
