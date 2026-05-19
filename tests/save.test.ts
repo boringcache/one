@@ -890,6 +890,68 @@ describe('save action', () => {
     chdirSpy.mockRestore();
   });
 
+  it('treats cold proxy sccache publishes that are still settling as notices', async () => {
+    const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      if (command === 'sccache' && args?.[0] === '--show-stats') {
+        options?.listeners?.stdout?.(Buffer.from(
+          'Compile requests                     13\n' +
+          'Cache hits                            0\n' +
+          'Cache misses                          5\n' +
+          'Cache hits rate (Rust)             0.00 %\n',
+        ));
+        return 0;
+      }
+      if (command === 'boringcache' && args?.includes('check') && args.includes('--json')) {
+        const checkIndex = args.indexOf('check');
+        const tag = args[checkIndex + 2] || '';
+        options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+          schema_version: 1,
+          workspace: args[checkIndex + 1] || 'my-org/my-project',
+          total: 1,
+          hits: 0,
+          misses: 1,
+          results: [{ tag, requested_tag: tag, status: 'miss' }],
+        })));
+        return 0;
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'rust-sccache',
+      'cli-version': 'skip',
+      'working-directory': '/tmp/project',
+      'generic-cache-workspace': 'my-org/my-project',
+      'mode-workspace': 'my-org/my-project',
+      'mode-cache-cargo': 'false',
+      'mode-cache-cargo-bin': 'false',
+      'mode-cache-target': 'false',
+      'mode-use-sccache': 'true',
+      'mode-sccache-mode': 'proxy',
+      'mode-sccache-tag': 'rust-1.94.1-ci-test-sccache-rust1.94',
+      'mode-sccache-preflight-hit': 'false',
+      'mode-sccache-preflight-cache-entry-hit': 'false',
+      'mode-sccache-preflight-kv-hit': 'false',
+      'mode-sccache-preflight-kv-checked': 'false',
+      'mode-proxy-pid': '4321',
+    });
+
+    await saveRun();
+
+    expect(core.notice).toHaveBeenCalledWith(
+      "sccache proxy saw 0 cache hits across 13 compile requests and 'rust-1.94.1-ci-test-sccache-rust1.94' was not immediately visible as direct KV rows after shutdown. This looks like a cold fill whose remote KV visibility is still settling.",
+    );
+    expect(core.warning).not.toHaveBeenCalled();
+    chdirSpy.mockRestore();
+  });
+
   it('reports proxy sccache zero hits as a cold fill when the tag was absent before the build', async () => {
     const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     (exec.exec as jest.Mock).mockImplementation(async (
