@@ -1288,6 +1288,25 @@ async function checkRustTagStatus(workspace, tag, { noPlatform = false, noGit = 
 async function checkRustTagHit(workspace, tag, options = {}) {
     return (await checkRustTagStatus(workspace, tag, options)).hit;
 }
+async function checkRustProxyTagStatus(workspace, tag, options = {}) {
+    const strictStatus = await checkRustTagStatus(workspace, tag, {
+        ...options,
+        requireServerSignature: true,
+    });
+    if (strictStatus.kvChecked || strictStatus.kvHit) {
+        return strictStatus;
+    }
+    const kvStatus = await checkRustTagStatus(workspace, tag, {
+        ...options,
+        requireServerSignature: false,
+    });
+    return {
+        hit: strictStatus.cacheEntryHit || kvStatus.kvHit,
+        cacheEntryHit: strictStatus.cacheEntryHit,
+        kvHit: kvStatus.kvHit,
+        kvChecked: kvStatus.kvChecked || kvStatus.kvHit,
+    };
+}
 function configureTurboRemoteEnv(apiUrl, token, team) {
     core.exportVariable('TURBO_API', apiUrl);
     core.exportVariable('TURBO_TOKEN', token);
@@ -2164,10 +2183,9 @@ async function runRustRestore(plan, inputs) {
             const proxyPlan = await resolveAdapterCliPlan('sccache', workspace, workingDir, sccacheEntry.tag, requestedPort, true, true, proxyPlanningReadOnly(inputs.readOnly), {
                 metadataHintsInput: inputs.metadataHints,
             });
-            const sccachePreflightStatus = await checkRustTagStatus(proxyPlan.workspace, proxyPlan.tag, {
+            const sccachePreflightStatus = await checkRustProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
                 noPlatform: proxyPlan.proxy.no_platform,
                 noGit: proxyPlan.proxy.no_git,
-                requireServerSignature: true,
             });
             sccacheRestored = sccachePreflightStatus.kvHit;
             const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
@@ -2324,10 +2342,9 @@ async function runRustSave() {
                 return;
             }
             if (sccacheTag && sccacheStats && sccacheStats.compileRequests > 0) {
-                const postShutdownStatus = await checkRustTagStatus(workspace, sccacheTag, {
+                const postShutdownStatus = await checkRustProxyTagStatus(workspace, sccacheTag, {
                     noPlatform: true,
                     noGit: true,
-                    requireServerSignature: true,
                 });
                 const rustHitRate = sccacheStats.rustHitRate || 'unknown';
                 core.info(`sccache proxy stats for ${sccacheTag}: compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`);

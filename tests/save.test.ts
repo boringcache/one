@@ -797,6 +797,99 @@ describe('save action', () => {
     chdirSpy.mockRestore();
   });
 
+  it('uses a non-strict KV probe when strict proxy sccache check cannot report KV rows', async () => {
+    const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
+    (exec.exec as jest.Mock).mockImplementation(async (
+      command: string,
+      args?: string[],
+      options?: { listeners?: { stdout?: (data: Buffer) => void } },
+    ) => {
+      if (command === 'sccache' && args?.[0] === '--show-stats') {
+        options?.listeners?.stdout?.(Buffer.from(
+          'Compile requests                   1352\n' +
+          'Cache hits                            0\n' +
+          'Cache misses                       1125\n' +
+          'Cache hits rate (Rust)             0.00 %\n',
+        ));
+        return 0;
+      }
+      if (command === 'boringcache' && args?.includes('check') && args.includes('--json')) {
+        const checkIndex = args.indexOf('check');
+        const tag = args[checkIndex + 2] || '';
+        if (args[0] === '--require-server-signature') {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
+            workspace: args[checkIndex + 1] || 'my-org/my-project',
+            total: 1,
+            hits: 0,
+            misses: 1,
+            results: [{ tag, requested_tag: tag, status: 'miss' }],
+          })));
+        } else {
+          options?.listeners?.stdout?.(Buffer.from(JSON.stringify({
+            schema_version: 1,
+            workspace: args[checkIndex + 1] || 'my-org/my-project',
+            total: 1,
+            hits: 1,
+            misses: 0,
+            results: [{
+              tag,
+              requested_tag: tag,
+              status: 'hit',
+              cache_type: 'kv',
+            }],
+          })));
+        }
+        return 0;
+      }
+      return 0;
+    });
+
+    mockGetInput({});
+    mockGetBooleanInput({});
+    mockGetState({
+      'resolved-mode': 'rust-sccache',
+      'cli-version': 'skip',
+      'working-directory': '/tmp/project',
+      'generic-cache-workspace': 'my-org/my-project',
+      'mode-workspace': 'my-org/my-project',
+      'mode-cache-cargo': 'false',
+      'mode-cache-cargo-bin': 'false',
+      'mode-cache-target': 'false',
+      'mode-use-sccache': 'true',
+      'mode-sccache-mode': 'proxy',
+      'mode-sccache-tag': 'rust-1.94.1-ci-test-sccache-rust1.94',
+      'mode-sccache-preflight-hit': 'false',
+      'mode-sccache-preflight-cache-entry-hit': 'false',
+      'mode-sccache-preflight-kv-hit': 'false',
+      'mode-sccache-preflight-kv-checked': 'false',
+      'mode-proxy-pid': '4321',
+    });
+
+    await saveRun();
+
+    expect(exec.exec).toHaveBeenCalledWith(
+      'boringcache',
+      expect.arrayContaining([
+        '--require-server-signature',
+        'check',
+        'my-org/my-project',
+        'rust-1.94.1-ci-test-sccache-rust1.94',
+        '--json',
+      ]),
+      expect.objectContaining({ ignoreReturnCode: true, silent: true }),
+    );
+    const checkCalls = (exec.exec as jest.Mock).mock.calls.filter(
+      ([command, args]) => command === 'boringcache' && Array.isArray(args) && args.includes('check'),
+    );
+    expect(checkCalls.some(([, args]) => !args.includes('--require-server-signature'))).toBe(true);
+    expect(core.notice).toHaveBeenCalledWith(
+      "sccache proxy saw 0 cache hits across 1352 compile requests, but 'rust-1.94.1-ci-test-sccache-rust1.94' published successfully. This looks like a cold fill.",
+    );
+    expect(core.warning).not.toHaveBeenCalled();
+    chdirSpy.mockRestore();
+  });
+
   it('reports proxy sccache zero hits as a cold fill when the tag was absent before the build', async () => {
     const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     (exec.exec as jest.Mock).mockImplementation(async (
