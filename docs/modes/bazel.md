@@ -32,12 +32,24 @@ containers and local laptops still have their own `PATH`, compiler discovery,
 and toolchain identity, so cross-environment cache sharing depends on your Bazel
 toolchain configuration being intentionally portable.
 
-Bazel still owns the rest of the build identity. If your rules discover
-compilers or other host tools from the environment, pin those inputs in your
-project or CI `.bazelrc` with `bazelrc-lines`, for example by setting explicit
-`--action_env` and `--repo_env` values or by using a repository-defined
-toolchain. The first run after changing those lines seeds a new Bazel key space;
-subsequent runs should reuse it.
+BoringCache's CLI Bazel adapter also writes deterministic host-env defaults into
+the generated Bazel setup: strict action env, a stable `PATH` for action and
+repository-rule keys, and resolved local C/C++ toolchain env where the runner has
+standard tools. That keeps BoringCache and GitHub runner setup paths out of
+Bazel cache identity while leaving source, flags, platform, and explicit
+toolchain choices as real inputs.
+
+The same adapter defaults apply when you use the CLI directly with
+`boringcache bazel` or `boringcache run --proxy ... -- bazel ...`. They stabilize
+the environment around the Bazel process that BoringCache launches; they do not
+rewrite a nested environment inside `docker run` unless Bazel itself is launched
+through BoringCache inside that container.
+
+Bazel still owns the rest of the build identity. If your rules need non-standard
+host tools, pin those inputs in your project or CI `.bazelrc` with
+`bazelrc-lines`, for example by setting explicit `--repo_env` values or by using
+a repository-defined toolchain. The first run after changing those lines seeds a
+new Bazel key space; subsequent runs should reuse it.
 
 Inputs:
 
