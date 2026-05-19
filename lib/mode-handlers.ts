@@ -176,6 +176,7 @@ interface RustTagCheckStatus {
   hit: boolean;
   cacheEntryHit: boolean;
   kvHit: boolean;
+  kvChecked: boolean;
 }
 
 const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
@@ -1633,7 +1634,14 @@ function emptyRustTagCheckStatus(): RustTagCheckStatus {
     hit: false,
     cacheEntryHit: false,
     kvHit: false,
+    kvChecked: false,
   };
+}
+
+function checkResultHasKvProbe(result: CliCheckResult): boolean {
+  return typeof result.kv_entry_count === 'number'
+    || typeof result.kv_total_size === 'number'
+    || (result.status === 'hit' && result.cache_type === 'kv');
 }
 
 function checkResultHasKvRows(result: CliCheckResult): boolean {
@@ -1689,11 +1697,13 @@ async function checkRustTagStatus(
     const results = summary.results || [];
     const cacheEntryHit = results.some(checkResultHasCacheEntryHit);
     const kvHit = results.some(checkResultHasKvRows);
+    const kvChecked = results.some(checkResultHasKvProbe);
     const legacyHit = results.length === 0 && typeof summary.hits === 'number' && summary.hits > 0;
     return {
       hit: cacheEntryHit || kvHit || legacyHit,
       cacheEntryHit: cacheEntryHit || legacyHit,
       kvHit,
+      kvChecked,
     };
   } catch (error) {
     core.warning(`Failed to parse boringcache check JSON for ${tag}: ${(error as Error).message}`);
@@ -2876,6 +2886,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
       saveModeState('sccache-preflight-hit', String(sccachePreflightStatus.hit));
       saveModeState('sccache-preflight-cache-entry-hit', String(sccachePreflightStatus.cacheEntryHit));
       saveModeState('sccache-preflight-kv-hit', String(sccachePreflightStatus.kvHit));
+      saveModeState('sccache-preflight-kv-checked', String(sccachePreflightStatus.kvChecked));
       setProxyOutputs(proxy.port);
     } else {
       sccacheRestored = await restoreRustArchiveEntry(workspace, sccacheEntry, inputs.verbose);
@@ -2884,6 +2895,7 @@ async function runRustRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<Mo
       saveModeState('sccache-preflight-hit', String(sccacheRestored));
       saveModeState('sccache-preflight-cache-entry-hit', String(sccacheRestored));
       saveModeState('sccache-preflight-kv-hit', 'false');
+      saveModeState('sccache-preflight-kv-checked', 'false');
     }
   }
 
@@ -3004,6 +3016,7 @@ async function runRustSave(): Promise<void> {
       const sccacheTag = getModeState('sccache-tag');
       const preflightCacheEntryHit = getModeState('sccache-preflight-cache-entry-hit') === 'true';
       const preflightKvHit = getModeState('sccache-preflight-kv-hit') === 'true';
+      const preflightKvChecked = getModeState('sccache-preflight-kv-checked') === 'true';
       const sccacheStats = await stopSccacheServer();
       await stopProxyFromState();
       if (sccacheTag && (!sccacheStats || sccacheStats.compileRequests === 0)) {
@@ -3037,9 +3050,13 @@ async function runRustSave(): Promise<void> {
             core.notice(
               `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`,
             );
-          } else if (preflightCacheEntryHit) {
+          } else if (preflightCacheEntryHit && preflightKvChecked && postShutdownStatus.kvChecked) {
             core.warning(
               `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`,
+            );
+          } else if (preflightCacheEntryHit) {
+            core.warning(
+              `sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`,
             );
           } else if (!postShutdownStatus.hit) {
             core.warning(

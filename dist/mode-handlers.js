@@ -1222,7 +1222,13 @@ function emptyRustTagCheckStatus() {
         hit: false,
         cacheEntryHit: false,
         kvHit: false,
+        kvChecked: false,
     };
+}
+function checkResultHasKvProbe(result) {
+    return typeof result.kv_entry_count === 'number'
+        || typeof result.kv_total_size === 'number'
+        || (result.status === 'hit' && result.cache_type === 'kv');
 }
 function checkResultHasKvRows(result) {
     if (typeof result.kv_entry_count === 'number') {
@@ -1265,11 +1271,13 @@ async function checkRustTagStatus(workspace, tag, { noPlatform = false, noGit = 
         const results = summary.results || [];
         const cacheEntryHit = results.some(checkResultHasCacheEntryHit);
         const kvHit = results.some(checkResultHasKvRows);
+        const kvChecked = results.some(checkResultHasKvProbe);
         const legacyHit = results.length === 0 && typeof summary.hits === 'number' && summary.hits > 0;
         return {
             hit: cacheEntryHit || kvHit || legacyHit,
             cacheEntryHit: cacheEntryHit || legacyHit,
             kvHit,
+            kvChecked,
         };
     }
     catch (error) {
@@ -2185,6 +2193,7 @@ async function runRustRestore(plan, inputs) {
             saveModeState('sccache-preflight-hit', String(sccachePreflightStatus.hit));
             saveModeState('sccache-preflight-cache-entry-hit', String(sccachePreflightStatus.cacheEntryHit));
             saveModeState('sccache-preflight-kv-hit', String(sccachePreflightStatus.kvHit));
+            saveModeState('sccache-preflight-kv-checked', String(sccachePreflightStatus.kvChecked));
             setProxyOutputs(proxy.port);
         }
         else {
@@ -2194,6 +2203,7 @@ async function runRustRestore(plan, inputs) {
             saveModeState('sccache-preflight-hit', String(sccacheRestored));
             saveModeState('sccache-preflight-cache-entry-hit', String(sccacheRestored));
             saveModeState('sccache-preflight-kv-hit', 'false');
+            saveModeState('sccache-preflight-kv-checked', 'false');
         }
     }
     if (!(plan.setup === 'mise' && toolEnabled(plan, 'rust'))) {
@@ -2297,6 +2307,7 @@ async function runRustSave() {
             const sccacheTag = getModeState('sccache-tag');
             const preflightCacheEntryHit = getModeState('sccache-preflight-cache-entry-hit') === 'true';
             const preflightKvHit = getModeState('sccache-preflight-kv-hit') === 'true';
+            const preflightKvChecked = getModeState('sccache-preflight-kv-checked') === 'true';
             const sccacheStats = await stopSccacheServer();
             await stopProxyFromState();
             if (sccacheTag && (!sccacheStats || sccacheStats.compileRequests === 0)) {
@@ -2327,8 +2338,11 @@ async function runRustSave() {
                     else if (preflightCacheEntryHit && postShutdownStatus.kvHit) {
                         core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
                     }
-                    else if (preflightCacheEntryHit) {
+                    else if (preflightCacheEntryHit && preflightKvChecked && postShutdownStatus.kvChecked) {
                         core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`);
+                    }
+                    else if (preflightCacheEntryHit) {
+                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`);
                     }
                     else if (!postShutdownStatus.hit) {
                         core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not available as direct KV rows or a signed cache entry after shutdown. Check server-side signing, BORINGCACHE_SAVE_TOKEN scope, and proxy publish logs.`);
