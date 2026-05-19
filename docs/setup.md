@@ -13,6 +13,12 @@ The action installs the CLI version from `cli-version`.
     cli-version: v1.12.68
 ```
 
+The downloaded binary is cached internally under the GitHub runner tool cache,
+then exposed to the workflow through `~/.boringcache/bin/boringcache`. That
+stable PATH entry keeps action releases from changing build-tool cache keys that
+inspect `PATH`, while preserving the normal `boringcache` command for later
+steps.
+
 Set `cli-version: skip` only when a previous step has already installed a
 compatible `boringcache` binary.
 

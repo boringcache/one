@@ -48401,6 +48401,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getToolCacheInfo = getToolCacheInfo;
+exports.getStableCliBinDir = getStableCliBinDir;
+exports.exposeBoringCacheCli = exposeBoringCacheCli;
 exports.isCliAvailable = isCliAvailable;
 exports.ensureBoringCache = ensureBoringCache;
 exports.execBoringCache = execBoringCache;
@@ -48432,6 +48434,23 @@ function getToolCacheInfo(version, platformOverride) {
         cacheKey: `${TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.cacheKey}`,
         platformKey: platform.cacheKey,
     };
+}
+function getStableCliBinDir() {
+    return path.join(os.homedir(), '.boringcache', 'bin');
+}
+async function exposeBoringCacheCli(toolPath, binaryName = process.platform === 'win32' ? 'boringcache.exe' : 'boringcache', stableBinDir = getStableCliBinDir()) {
+    const sourcePath = path.join(toolPath, binaryName);
+    const stablePath = path.join(stableBinDir, binaryName);
+    // The source is the selected CLI binary in the hosted tool cache; the destination is runner-local action state.
+    // codeql[js/path-injection]
+    await fs.promises.mkdir(stableBinDir, { recursive: true });
+    // codeql[js/path-injection]
+    await fs.promises.copyFile(sourcePath, stablePath);
+    if (process.platform !== 'win32') {
+        // codeql[js/path-injection]
+        await fs.promises.chmod(stablePath, 0o755);
+    }
+    return stableBinDir;
 }
 function getPlatformInfo(platformOverride) {
     if (platformOverride) {
@@ -48751,7 +48770,9 @@ async function ensureBoringCache(options) {
             }
         }
     }
-    core.addPath(toolPath);
+    const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
+    const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName);
+    core.addPath(stableToolPath);
     core.info(`BoringCache CLI ${normalizedVersion} ready`);
 }
 async function execBoringCache(args, options = {}) {

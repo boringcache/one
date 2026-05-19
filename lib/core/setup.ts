@@ -61,6 +61,31 @@ export function getToolCacheInfo(version: string, platformOverride?: string): To
   };
 }
 
+export function getStableCliBinDir(): string {
+  return path.join(os.homedir(), '.boringcache', 'bin');
+}
+
+export async function exposeBoringCacheCli(
+  toolPath: string,
+  binaryName = process.platform === 'win32' ? 'boringcache.exe' : 'boringcache',
+  stableBinDir = getStableCliBinDir(),
+): Promise<string> {
+  const sourcePath = path.join(toolPath, binaryName);
+  const stablePath = path.join(stableBinDir, binaryName);
+
+  // The source is the selected CLI binary in the hosted tool cache; the destination is runner-local action state.
+  // codeql[js/path-injection]
+  await fs.promises.mkdir(stableBinDir, { recursive: true });
+  // codeql[js/path-injection]
+  await fs.promises.copyFile(sourcePath, stablePath);
+  if (process.platform !== 'win32') {
+    // codeql[js/path-injection]
+    await fs.promises.chmod(stablePath, 0o755);
+  }
+
+  return stableBinDir;
+}
+
 interface PlatformInfo {
   os: string;
   arch: string;
@@ -438,7 +463,9 @@ export async function ensureBoringCache(options: SetupOptions): Promise<void> {
     }
   }
 
-  core.addPath(toolPath);
+  const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
+  const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName);
+  core.addPath(stableToolPath);
   core.info(`BoringCache CLI ${normalizedVersion} ready`);
 }
 

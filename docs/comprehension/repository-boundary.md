@@ -34,6 +34,12 @@ caches for Bazel output roots or disk-cache directories. Use explicit archive
 `entries` or a CLI-resolved opt-in cache profile when a workflow should restore
 local Bazel state alongside the remote cache.
 
+The action must not expose the versioned BoringCache CLI hosted-tool-cache
+directory to Bazel. Bazel action and repository-rule keys can include environment
+state such as `PATH`, and a BoringCache release should not invalidate a user's
+Bazel cache. `ensureBoringCache` should copy the selected CLI to the stable
+`~/.boringcache/bin` workflow path and add only that directory to `PATH`.
+
 Turbo, Nx, and sccache proxy environment wiring is CLI-planned too. The action may rewrite the planned local proxy port after startup, apply explicit GitHub Actions token/team overrides for Turbo/Nx, and set action-lifecycle values such as `SCCACHE_IDLE_TIMEOUT`, but it should otherwise export the CLI dry-run `env_vars` instead of carrying a second adapter plan in TypeScript.
 
 Adapter diagnostics belong in the CLI when they are part of the local adapter UX: proxy status, session summaries, OCI body-plane counters, and `boringcache sccache`'s best-effort `sccache --show-stats` summary should work on a laptop, generic CI runner, or container. The action may still consume native tool diagnostics when it owns split restore/save lifecycle or GitHub outputs. Current example: `mode: rust-sccache` starts and stops the `sccache` server across action phases, so the action reads `sccache --show-stats` to decide whether to save/verify and to emit concise workflow notices. That parser must not become a second source for adapter env, tag, or proxy setup. If another adapter needs workflow-facing cache stats, add a CLI structured diagnostics surface first unless the action alone owns the lifecycle being measured.

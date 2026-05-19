@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import { getMiseInstallsDir } from '../lib/core';
+import { exposeBoringCacheCli } from '../lib/core/setup';
 import {
   applyMiseSetup,
   buildPlan,
@@ -85,6 +86,30 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
 }
 
 describe('one utils', () => {
+  it('exposes the CLI through a stable bin directory', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'boringcache-cli-path-'));
+
+    try {
+      const versionedToolPath = path.join(root, 'toolcache', 'boringcache', '1.13.6', 'x64');
+      const stableBinDir = path.join(root, 'home', '.boringcache', 'bin');
+      await fs.mkdir(versionedToolPath, { recursive: true });
+      await fs.writeFile(path.join(versionedToolPath, 'boringcache'), '#!/bin/sh\necho boringcache\n');
+
+      const exposedPath = await exposeBoringCacheCli(versionedToolPath, 'boringcache', stableBinDir);
+
+      expect(exposedPath).toBe(stableBinDir);
+      await expect(fs.readFile(path.join(stableBinDir, 'boringcache'), 'utf8'))
+        .resolves
+        .toContain('echo boringcache');
+      if (process.platform !== 'win32') {
+        const stat = await fs.stat(path.join(stableBinDir, 'boringcache'));
+        expect(stat.mode & 0o111).not.toBe(0);
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps cli-version defaults aligned between action.yml and runtime fallback', async () => {
     const actionYamlPath = path.join(__dirname, '..', 'action.yml');
     const actionYaml = await fs.readFile(actionYamlPath, 'utf8');
