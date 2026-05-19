@@ -19,6 +19,11 @@ stable PATH entry keeps action releases from changing build-tool cache keys that
 inspect `PATH`, while preserving the normal `boringcache` command for later
 steps.
 
+When `setup: mise` installs missing runtimes, the action keeps the versioned
+mise tool-cache path internal too. It exposes `mise` from `~/.local/bin` and
+runtime shims from mise's stable shims directory; the selected runtime versions
+remain part of the workflow's build identity.
+
 Set `cli-version: skip` only when a previous step has already installed a
 compatible `boringcache` binary.
 

@@ -215,7 +215,6 @@ export async function installMise(): Promise<void> {
   }
 
   await materializeMiseBinary(toolPath, platform);
-  core.addPath(toolPath);
   core.addPath(path.dirname(getMiseBinPath()));
   core.addPath(getMiseShimsDir());
   core.info(`mise ${version} ready`);

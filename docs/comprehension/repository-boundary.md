@@ -34,11 +34,15 @@ caches for Bazel output roots or disk-cache directories. Use explicit archive
 `entries` or a CLI-resolved opt-in cache profile when a workflow should restore
 local Bazel state alongside the remote cache.
 
-The action must not expose the versioned BoringCache CLI hosted-tool-cache
-directory to Bazel. Bazel action and repository-rule keys can include environment
-state such as `PATH`, and a BoringCache release should not invalidate a user's
-Bazel cache. `ensureBoringCache` should copy the selected CLI to the stable
-`~/.boringcache/bin` workflow path and add only that directory to `PATH`.
+The action must not expose versioned BoringCache-owned hosted-tool-cache
+directories to Bazel. Bazel action and repository-rule keys can include
+environment state such as `PATH`, and a BoringCache release should not invalidate
+a user's Bazel cache. `ensureBoringCache` should copy the selected CLI to the
+stable `~/.boringcache/bin` workflow path and add only that directory to `PATH`.
+The mise bootstrap follows the same rule: keep the hosted-tool-cache path
+internal, materialize `mise` under `~/.local/bin`, and expose the stable
+`~/.local/bin` plus mise shims paths. User-selected runtime/toolchain versions
+installed through mise remain real build inputs and should stay visible.
 
 Turbo, Nx, and sccache proxy environment wiring is CLI-planned too. The action may rewrite the planned local proxy port after startup, apply explicit GitHub Actions token/team overrides for Turbo/Nx, and set action-lifecycle values such as `SCCACHE_IDLE_TIMEOUT`, but it should otherwise export the CLI dry-run `env_vars` instead of carrying a second adapter plan in TypeScript.
 

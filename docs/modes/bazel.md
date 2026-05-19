@@ -22,6 +22,16 @@ versioned hosted-tool-cache directory is not added to `PATH`; the workflow sees
 changing Bazel action or repository-rule keys just because the action installed a
 new CLI version.
 
+The action also keeps the versioned hosted-tool-cache path for its `mise`
+bootstrap internal. When `setup: mise` installs Bazel or another runtime, the
+workflow sees stable home paths (`~/.local/bin` and mise shims), while the
+requested Bazel/toolchain versions stay explicit build inputs.
+
+This stabilizes action-owned paths on the GitHub Actions runner. Docker
+containers and local laptops still have their own `PATH`, compiler discovery,
+and toolchain identity, so cross-environment cache sharing depends on your Bazel
+toolchain configuration being intentionally portable.
+
 Bazel still owns the rest of the build identity. If your rules discover
 compilers or other host tools from the environment, pin those inputs in your
 project or CI `.bazelrc` with `bazelrc-lines`, for example by setting explicit

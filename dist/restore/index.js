@@ -47221,7 +47221,6 @@ async function installMise() {
         core.debug(`mise cache restored but tool cache lookup for ${version} remained empty`);
     }
     await materializeMiseBinary(toolPath, platform);
-    core.addPath(toolPath);
     core.addPath(path.dirname(getMiseBinPath()));
     core.addPath(getMiseShimsDir());
     core.info(`mise ${version} ready`);

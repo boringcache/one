@@ -3,7 +3,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
+import * as tc from '@actions/tool-cache';
 import { getMiseInstallsDir } from '../lib/core';
+import { getMiseBinPath, getMiseShimsDir, installMise } from '../lib/core/mise';
 import { exposeBoringCacheCli } from '../lib/core/setup';
 import {
   applyMiseSetup,
@@ -106,6 +108,47 @@ describe('one utils', () => {
         expect(stat.mode & 0o111).not.toBe(0);
       }
     } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the versioned mise tool-cache path internal', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'boringcache-mise-path-'));
+    const originalHome = process.env.HOME;
+    const originalRunnerOS = process.env.RUNNER_OS;
+    const originalRunnerArch = process.env.RUNNER_ARCH;
+
+    try {
+      const toolPath = path.join(root, 'toolcache', 'mise', '2026.3.8', 'x64');
+      await fs.mkdir(toolPath, { recursive: true });
+      await fs.writeFile(path.join(toolPath, 'mise'), '#!/bin/sh\necho mise\n');
+      process.env.HOME = path.join(root, 'home');
+      process.env.RUNNER_OS = 'Linux';
+      process.env.RUNNER_ARCH = 'X64';
+      (tc.find as jest.Mock).mockReturnValue(toolPath);
+
+      await installMise();
+
+      await expect(fs.readFile(getMiseBinPath(), 'utf8')).resolves.toContain('echo mise');
+      expect(core.addPath).toHaveBeenCalledWith(path.dirname(getMiseBinPath()));
+      expect(core.addPath).toHaveBeenCalledWith(getMiseShimsDir());
+      expect(core.addPath).not.toHaveBeenCalledWith(toolPath);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalRunnerOS === undefined) {
+        delete process.env.RUNNER_OS;
+      } else {
+        process.env.RUNNER_OS = originalRunnerOS;
+      }
+      if (originalRunnerArch === undefined) {
+        delete process.env.RUNNER_ARCH;
+      } else {
+        process.env.RUNNER_ARCH = originalRunnerArch;
+      }
       await fs.rm(root, { recursive: true, force: true });
     }
   });
