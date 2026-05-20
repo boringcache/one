@@ -20,7 +20,7 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 
 ## First Reads
 
-- Start at `/Users/gaurav/boringcache/web/.planning/product-hardening-feature-inventory.md` and the relevant `/Users/gaurav/boringcache/web/.planning/features/one-*.md` file for durable action context.
+- Start at `/Users/gaurav/boringcache/web/.planning/product-hardening-feature-inventory.md`, resolve the feature in `/Users/gaurav/boringcache/web/.planning/feature-index.yml`, and read the relevant `/Users/gaurav/boringcache/web/.planning/features/one-*.md` file for durable action context.
 - Keep action product boundaries aligned with the `one` feature inventory and the public docs under `docs/`.
 - Keep the public README slim. Put user-facing how-to material under `docs/`,
   grouped by mode, preset, or shared workflow concern.
@@ -77,6 +77,7 @@ npm install && npm run build && npm test
 
 ## Release Guidance
 
+- Update the owning feature file under `/Users/gaurav/boringcache/web/.planning/features/` when action inputs, outputs, token wiring, summaries, `dist`, release behavior, or compatibility paths change. If the feature is marked `token_sensitive` in the index, scrub examples/logs/tests and keep split restore/save token wording first.
 - For any `boringcache/one` version bump, release tag, or `v1` major tag move, load `/Users/gaurav/boringcache/skills/categories/release-operations/release-paths/SKILL.md` first.
 - Then load `/Users/gaurav/boringcache/skills/categories/github-actions-maintenance/one-action/SKILL.md` for action-specific behavior.
 - Keep the release commit and tag signed. Update `v1` only after the versioned release succeeds.
