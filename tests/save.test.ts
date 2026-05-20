@@ -890,7 +890,7 @@ describe('save action', () => {
     chdirSpy.mockRestore();
   });
 
-  it('treats cold proxy sccache publishes that are still settling as notices', async () => {
+  it('treats cold proxy sccache publishes without post-shutdown KV verification as notices', async () => {
     const chdirSpy = jest.spyOn(process, 'chdir').mockImplementation(() => undefined);
     (exec.exec as jest.Mock).mockImplementation(async (
       command: string,
@@ -946,7 +946,7 @@ describe('save action', () => {
     await saveRun();
 
     expect(core.notice).toHaveBeenCalledWith(
-      "sccache proxy saw 0 cache hits across 13 compile requests and 'rust-1.94.1-ci-test-sccache-rust1.94' was not immediately visible as direct KV rows after shutdown. This looks like a cold fill whose remote KV visibility is still settling.",
+      "sccache proxy saw 0 cache hits across 13 compile requests and 'rust-1.94.1-ci-test-sccache-rust1.94' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.",
     );
     expect(core.warning).not.toHaveBeenCalled();
     chdirSpy.mockRestore();
