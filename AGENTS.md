@@ -20,8 +20,8 @@ Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Do
 
 ## First Reads
 
-- Start at `docs/comprehension/README.md` for durable action context.
-- Keep the repository boundary in `docs/comprehension/repository-boundary.md` aligned with this file.
+- Start at `/Users/gaurav/boringcache/web/.planning/product-hardening-feature-inventory.md` and the relevant `/Users/gaurav/boringcache/web/.planning/features/one-*.md` file for durable action context.
+- Keep action product boundaries aligned with the `one` feature inventory and the public docs under `docs/`.
 - Keep the public README slim. Put user-facing how-to material under `docs/`,
   grouped by mode, preset, or shared workflow concern.
 

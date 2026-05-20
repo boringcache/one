@@ -17,4 +17,3 @@ Then choose the path your workflow uses:
 Reference:
 
 - [`action.yml`](../action.yml) is the full input and output reference.
-- [ADR notes](adr/README.md) record accepted implementation decisions.
