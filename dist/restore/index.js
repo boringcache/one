@@ -47081,17 +47081,20 @@ const isWindows = process.platform === 'win32';
 const MISE_TOOL_NAME = 'mise';
 const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
 const DEFAULT_MISE_VERSION = 'v2026.3.8';
+function runnerHomeDir() {
+    return process.env.HOME || process.env.USERPROFILE || os.homedir();
+}
 function getMiseBinPath() {
-    const homedir = os.homedir();
+    const homedir = runnerHomeDir();
     return isWindows
         ? path.join(homedir, '.local', 'bin', 'mise.exe')
         : path.join(homedir, '.local', 'bin', 'mise');
 }
 function getMiseDataDir() {
     if (isWindows) {
-        return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'mise');
+        return path.join(process.env.LOCALAPPDATA || path.join(runnerHomeDir(), 'AppData', 'Local'), 'mise');
     }
-    return path.join(os.homedir(), '.local', 'share', 'mise');
+    return path.join(runnerHomeDir(), '.local', 'share', 'mise');
 }
 function getMiseInstallsDir() {
     return process.env.MISE_INSTALLS_DIR || path.join(getMiseDataDir(), 'installs');

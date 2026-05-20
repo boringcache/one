@@ -45,8 +45,12 @@ interface MisePlatformInfo {
   isWindows: boolean;
 }
 
+function runnerHomeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || os.homedir();
+}
+
 export function getMiseBinPath(): string {
-  const homedir = os.homedir();
+  const homedir = runnerHomeDir();
   return isWindows
     ? path.join(homedir, '.local', 'bin', 'mise.exe')
     : path.join(homedir, '.local', 'bin', 'mise');
@@ -54,9 +58,9 @@ export function getMiseBinPath(): string {
 
 export function getMiseDataDir(): string {
   if (isWindows) {
-    return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'mise');
+    return path.join(process.env.LOCALAPPDATA || path.join(runnerHomeDir(), 'AppData', 'Local'), 'mise');
   }
-  return path.join(os.homedir(), '.local', 'share', 'mise');
+  return path.join(runnerHomeDir(), '.local', 'share', 'mise');
 }
 
 export function getMiseInstallsDir(): string {

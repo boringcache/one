@@ -119,18 +119,22 @@ describe('one utils', () => {
     const originalRunnerArch = process.env.RUNNER_ARCH;
 
     try {
+      const testHome = path.join(root, 'home');
       const toolPath = path.join(root, 'toolcache', 'mise', '2026.3.8', 'x64');
       await fs.mkdir(toolPath, { recursive: true });
       await fs.writeFile(path.join(toolPath, 'mise'), '#!/bin/sh\necho mise\n');
-      process.env.HOME = path.join(root, 'home');
+      process.env.HOME = testHome;
       process.env.RUNNER_OS = 'Linux';
       process.env.RUNNER_ARCH = 'X64';
       (tc.find as jest.Mock).mockReturnValue(toolPath);
 
+      const miseBinPath = getMiseBinPath();
+      expect(miseBinPath).toBe(path.join(testHome, '.local', 'bin', 'mise'));
+
       await installMise();
 
-      await expect(fs.readFile(getMiseBinPath(), 'utf8')).resolves.toContain('echo mise');
-      expect(core.addPath).toHaveBeenCalledWith(path.dirname(getMiseBinPath()));
+      await expect(fs.readFile(miseBinPath, 'utf8')).resolves.toContain('echo mise');
+      expect(core.addPath).toHaveBeenCalledWith(path.dirname(miseBinPath));
       expect(core.addPath).toHaveBeenCalledWith(getMiseShimsDir());
       expect(core.addPath).not.toHaveBeenCalledWith(toolPath);
     } finally {
