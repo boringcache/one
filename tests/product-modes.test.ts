@@ -22,6 +22,29 @@ async function removeTempProject(directory: string): Promise<void> {
   await fs.rm(directory, { recursive: true, force: true });
 }
 
+async function readCliMachineOutputFixture(name: string): Promise<Record<string, unknown>> {
+  const raw = await fs.readFile(path.join(__dirname, 'fixtures', 'cli-machine-output', name), 'utf8');
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function mockCliAdapterFixture(adapter: string, fixture: Record<string, unknown>): void {
+  const defaultExecImpl = (exec.exec as jest.Mock).getMockImplementation();
+  (exec.exec as jest.Mock).mockImplementation(async (
+    command: string,
+    args?: string[],
+    options?: Parameters<typeof exec.exec>[2],
+  ) => {
+    if (command === 'boringcache' && args?.[0] === adapter && args.includes('--dry-run') && args.includes('--json')) {
+      options?.listeners?.stdout?.(Buffer.from(JSON.stringify(fixture)));
+      return 0;
+    }
+    if (defaultExecImpl) {
+      return defaultExecImpl(command, args, options);
+    }
+    return 0;
+  });
+}
+
 describe('product modes', () => {
   it('fails archive restore when fail-on-cache-miss is enabled', async () => {
     const project = await makeTempProject({ 'cache-dir/.keep': '' });
@@ -1876,6 +1899,222 @@ describe('product modes', () => {
 
       expect(core.setOutput).toHaveBeenCalledWith('cargo-git-tag', 'rust-cargo-git-rust1.89');
       expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('consumes the Docker CLI dry-run fixture for registry setup mode', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+    const fixture = await readCliMachineOutputFixture('docker_dry_run_v1.json');
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'ignored/ignored',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        driver: 'docker',
+        'docker-command': 'setup',
+      });
+      mockGetBooleanInput({});
+      mockCliAdapterFixture('docker', fixture);
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'test-org/test-workspace',
+        tag: 'docker-cache',
+        host: '127.0.0.1',
+        port: 5000,
+        noPlatform: true,
+        noGit: true,
+        ociRequiredReadableRefs: ['docker-cache'],
+      }));
+      expect(core.setOutput).toHaveBeenCalledWith('registry-ref', '127.0.0.1:5000/cache:docker-cache');
+      expect(core.setOutput).toHaveBeenCalledWith(
+        'cache-from',
+        'type=registry,ref=127.0.0.1:5000/cache:docker-cache,registry.insecure=true',
+      );
+      expect(core.setOutput).toHaveBeenCalledWith(
+        'cache-to',
+        'type=registry,ref=127.0.0.1:5000/cache:docker-cache,mode=max,registry.insecure=true',
+      );
+      expect(core.setOutput).toHaveBeenCalledWith('docker-cache-requested-from-refs', 'docker-cache');
+      expect(core.setOutput).toHaveBeenCalledWith('workspace', 'test-org/test-workspace');
+      expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'docker-cache');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('consumes the BuildKit CLI dry-run fixture for registry cache flags', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+    const fixture = await readCliMachineOutputFixture('buildkit_dry_run_v1.json');
+
+    try {
+      mockGetInput({
+        mode: 'buildkit',
+        setup: 'none',
+        workspace: 'ignored/ignored',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'buildkit-host': 'tcp://buildkitd:1234',
+      });
+      mockGetBooleanInput({});
+      mockCliAdapterFixture('buildkit', fixture);
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'test-org/test-workspace',
+        tag: 'buildkit-cache',
+        host: '127.0.0.1',
+        port: 6001,
+        noPlatform: true,
+        noGit: true,
+        ociRequiredReadableRefs: ['buildkit-cache'],
+      }));
+      const buildctlCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'buildctl' && Array.isArray(args) && args.includes('build'),
+      );
+      expect(buildctlCall?.[1]).toEqual(expect.arrayContaining([
+        '--import-cache',
+        'type=registry,ref=host.docker.internal:6001/cache:buildkit-cache,registry.insecure=true',
+        '--export-cache',
+        'type=registry,ref=host.docker.internal:6001/cache:buildkit-cache,mode=max,registry.insecure=true',
+      ]));
+      expect(core.setOutput).toHaveBeenCalledWith('workspace', 'test-org/test-workspace');
+      expect(core.setOutput).toHaveBeenCalledWith('cache-tag', 'buildkit-cache');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  const cliProxyFixtureCases: Array<{
+    mode: string;
+    adapter: string;
+    fixtureName: string;
+    files: Record<string, string>;
+    expectedTag: string;
+    expectedEnvName: string;
+    expectedEnvValue: string;
+  }> = [
+    {
+      mode: 'turbo-proxy',
+      adapter: 'turbo',
+      fixtureName: 'turbo_setup_plan_v1.json',
+      files: {
+        'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+        'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+      },
+      expectedTag: 'turbo-cache',
+      expectedEnvName: 'TURBO_API',
+      expectedEnvValue: 'http://host.docker.internal:5000',
+    },
+    {
+      mode: 'nx-proxy',
+      adapter: 'nx',
+      fixtureName: 'nx_setup_plan_v1.json',
+      files: {
+        'package.json': '{"name":"demo","packageManager":"pnpm@9.15.1"}\n',
+        'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+      },
+      expectedTag: 'nx-cache',
+      expectedEnvName: 'NX_SELF_HOSTED_REMOTE_CACHE_SERVER',
+      expectedEnvValue: 'http://host.docker.internal:5000',
+    },
+    {
+      mode: 'go',
+      adapter: 'go',
+      fixtureName: 'go_setup_plan_v1.json',
+      files: {
+        '.go-version': '1.25.0\n',
+        'go.mod': 'module example.com/demo\n',
+      },
+      expectedTag: 'go-cache',
+      expectedEnvName: 'GOCACHEPROG',
+      expectedEnvValue: '$BORINGCACHE_BIN go-cacheprog --endpoint http://host.docker.internal:5000',
+    },
+  ];
+
+  it.each(cliProxyFixtureCases)('consumes the $adapter CLI dry-run fixture for proxy setup', async ({
+    mode,
+    adapter,
+    fixtureName,
+    files,
+    expectedTag,
+    expectedEnvName,
+    expectedEnvValue,
+  }) => {
+    const project = await makeTempProject(files);
+    const fixture = await readCliMachineOutputFixture(fixtureName);
+
+    try {
+      mockGetInput({
+        mode,
+        setup: 'none',
+        workspace: 'ignored/ignored',
+        'working-directory': project,
+      });
+      mockGetBooleanInput({});
+      mockCliAdapterFixture(adapter, fixture);
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'test-org/test-workspace',
+        tag: expectedTag,
+        host: '127.0.0.1',
+        port: 6001,
+        noPlatform: true,
+        noGit: true,
+      }));
+      expect(core.exportVariable).toHaveBeenCalledWith(expectedEnvName, expectedEnvValue);
+      if (adapter !== 'go') {
+        expect(core.exportVariable).toHaveBeenCalledWith('BORINGCACHE_PROXY_PORT', '5000');
+      }
+      expect(core.setOutput).toHaveBeenCalledWith('workspace', 'test-org/test-workspace');
+      expect(core.setOutput).toHaveBeenCalledWith('cache-tag', expectedTag);
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('consumes the sccache CLI dry-run fixture for rust proxy mode', async () => {
+    const project = await makeTempProject({
+      'Cargo.lock': '',
+      'rust-toolchain.toml': '[toolchain]\nchannel = "1.89.0"\n',
+    });
+    const fixture = await readCliMachineOutputFixture('sccache_setup_plan_v1.json');
+
+    try {
+      actionCoreMocks.hasToolVersionOnPath.mockImplementation(async (toolName: string) => toolName === 'sccache');
+      mockGetInput({
+        mode: 'rust-sccache',
+        setup: 'none',
+        workspace: 'ignored/ignored',
+        'working-directory': project,
+        sccache: 'true',
+        'sccache-mode': 'proxy',
+      });
+      mockGetBooleanInput({});
+      mockCliAdapterFixture('sccache', fixture);
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
+        workspace: 'test-org/test-workspace',
+        tag: 'rust-cache',
+        host: '127.0.0.1',
+        port: 6001,
+        noPlatform: true,
+        noGit: true,
+      }));
+      expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_WEBDAV_ENDPOINT', 'http://host.docker.internal:5000/');
+      expect(core.exportVariable).toHaveBeenCalledWith('SCCACHE_WEBDAV_KEY_PREFIX', '');
+      expect(core.exportVariable).toHaveBeenCalledWith('RUSTC_WRAPPER', 'sccache');
     } finally {
       await removeTempProject(project);
     }
