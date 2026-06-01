@@ -119,6 +119,7 @@ interface CliAdapterDryRunPlan {
   workspace_source: 'explicit' | 'repo-config' | 'configured-default';
   repo_config_path?: string;
   tag: string;
+  cache_backend?: string;
   command: string[];
   archive_entries: CliDryRunArchiveEntry[];
   env_vars: Record<string, string>;
@@ -149,7 +150,9 @@ interface CliAdapterDryRunPlan {
     cache_from: string;
     cache_from_refs?: string[];
     cache_to?: string;
-    ref_tag: string;
+    cache_tag?: string;
+    cache_to_tag?: string;
+    ref_tag?: string;
     immutable_run_ref_tag?: string;
     cache_from_ref_tags?: string[];
     promotion_ref_tags?: string[];
@@ -912,6 +915,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   let readOnly = false;
   let cacheMode = '';
   let cacheRefTag = '';
+  let cacheBackend = 'registry';
   let ociHydration = 'metadata-only';
   const metadataHints: Record<string, string> = {};
   const bazelrcLines: string[] = [];
@@ -966,6 +970,11 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     }
     if (arg === '--cache-ref-tag') {
       cacheRefTag = args[index + 1] || cacheRefTag;
+      index += 1;
+      continue;
+    }
+    if (arg === '--backend') {
+      cacheBackend = args[index + 1] || cacheBackend;
       index += 1;
       continue;
     }
@@ -1049,6 +1058,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
   const resolvedReadOnly = readOnly || repoSettings.readOnly || false;
   const resolvedCacheMode = cacheMode || repoSettings.cacheMode || 'max';
   const resolvedCacheRefTag = cacheRefTag || repoSettings.cacheRefTag || 'buildcache';
+  const resolvedCacheBackend = cacheBackend || 'registry';
   let ociCache: CliAdapterDryRunPlan['oci_cache'];
   let ociPrefetchRefs: string[] = [];
   let envVars: Record<string, string> = {};
@@ -1099,7 +1109,11 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
       registry_ref: registryRef,
       cache_from: `type=registry,ref=${registryRef},registry.insecure=true`,
       cache_from_refs: [`type=registry,ref=${registryRef},registry.insecure=true`],
-      cache_to: resolvedReadOnly ? undefined : `type=registry,ref=${registryRef},mode=${resolvedCacheMode},registry.insecure=true`,
+      cache_to: resolvedReadOnly || resolvedCacheBackend === 'auto'
+        ? undefined
+        : `type=registry,ref=${registryRef},mode=${resolvedCacheMode},registry.insecure=true`,
+      cache_tag: dockerTarget.refTag,
+      cache_to_tag: dockerTarget.refTag,
       ref_tag: dockerTarget.refTag,
     };
     ociPrefetchRefs = [`cache@${dockerTarget.refTag}`];
@@ -1191,6 +1205,7 @@ function cliAdapterDryRunPlan(adapterName: string, args: string[], workingDirect
     workspace_source: workspaceSource,
     repo_config_path: repoConfigPath || undefined,
     tag: finalTag,
+    cache_backend: adapterName === 'docker' || adapterName === 'buildkit' ? resolvedCacheBackend : undefined,
     command: [],
     archive_entries: [],
     env_vars: envVars,

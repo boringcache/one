@@ -171,6 +171,69 @@ describe('product modes', () => {
     }
   });
 
+  it('runs docker auto mode through the CLI cache accelerator', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'cache-backend': 'auto',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
+
+      const dryRunCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache'
+          && Array.isArray(args)
+          && args[0] === 'docker'
+          && args.includes('--dry-run'),
+      );
+      expect(dryRunCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+
+      const acceleratorCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache'
+          && Array.isArray(args)
+          && args[0] === 'docker'
+          && !args.includes('--dry-run')
+          && args.includes('--'),
+      );
+      expect(acceleratorCall).toBeTruthy();
+      expect(acceleratorCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+
+      const acceleratorArgs = acceleratorCall?.[1] as string[] | undefined;
+      const separatorIndex = acceleratorArgs?.indexOf('--') ?? -1;
+      expect(separatorIndex).toBeGreaterThanOrEqual(0);
+      const wrappedArgs = acceleratorArgs?.slice(separatorIndex + 1) || [];
+      expect(wrappedArgs.slice(0, 3)).toEqual(['docker', 'buildx', 'build']);
+      expect(wrappedArgs).toEqual(expect.arrayContaining([
+        '--builder',
+        '--metadata-file',
+      ]));
+      expect(wrappedArgs).not.toContain('--cache-from');
+      expect(wrappedArgs).not.toContain('--cache-to');
+
+      const directDockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker'
+          && Array.isArray(args)
+          && args[0] === 'buildx'
+          && args[1] === 'build',
+      );
+      expect(directDockerBuildCall).toBeUndefined();
+      expect(core.setOutput).toHaveBeenCalledWith('cache-from', expect.stringContaining('/cache:buildcache'));
+      expect(core.setOutput).toHaveBeenCalledWith('cache-to', '');
+      expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'docker');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('surfaces provider-neutral Docker run refs from CLI dry-run planning', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 
@@ -928,6 +991,64 @@ describe('product modes', () => {
         '--export-cache',
         expect.stringContaining('/cache:buildcache,mode=max,registry.insecure=true'),
       ]));
+      expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'buildkit');
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('runs buildkit auto mode through the CLI cache accelerator', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'buildkit',
+        setup: 'none',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        'buildkit-host': 'tcp://buildkit:1234',
+        'cache-backend': 'auto',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
+
+      const dryRunCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache'
+          && Array.isArray(args)
+          && args[0] === 'buildkit'
+          && args.includes('--dry-run'),
+      );
+      expect(dryRunCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+
+      const acceleratorCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache'
+          && Array.isArray(args)
+          && args[0] === 'buildkit'
+          && !args.includes('--dry-run')
+          && args.includes('--'),
+      );
+      expect(acceleratorCall).toBeTruthy();
+      expect(acceleratorCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+
+      const acceleratorArgs = acceleratorCall?.[1] as string[] | undefined;
+      const separatorIndex = acceleratorArgs?.indexOf('--') ?? -1;
+      expect(separatorIndex).toBeGreaterThanOrEqual(0);
+      const wrappedArgs = acceleratorArgs?.slice(separatorIndex + 1) || [];
+      expect(wrappedArgs.slice(0, 3)).toEqual(['buildctl', '--addr', 'tcp://buildkit:1234']);
+      expect(wrappedArgs).toContain('build');
+      expect(wrappedArgs).toContain('--metadata-file');
+      expect(wrappedArgs).not.toContain('--import-cache');
+      expect(wrappedArgs).not.toContain('--export-cache');
+
+      const directBuildctlCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'buildctl' && Array.isArray(args) && args.includes('build'),
+      );
+      expect(directBuildctlCall).toBeUndefined();
+      expect(core.setOutput).toHaveBeenCalledWith('cache-from', expect.stringContaining('/cache:buildcache'));
+      expect(core.setOutput).toHaveBeenCalledWith('cache-to', '');
       expect(core.setOutput).toHaveBeenCalledWith('resolved-mode', 'buildkit');
     } finally {
       await removeTempProject(project);
