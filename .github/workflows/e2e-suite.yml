@@ -166,6 +166,7 @@ jobs:
     env:
       BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
       BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+      BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
 
     steps:
@@ -184,11 +185,13 @@ jobs:
         id: tokens
         shell: bash
         run: |
-          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+          effective_restore_token="${BORINGCACHE_RESTORE_TOKEN:-${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}}"
+          effective_save_token="${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}"
+          if [ -n "${effective_restore_token}" ] && [ -n "${effective_save_token}" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping language E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+            echo "Skipping language E2E because split BoringCache tokens or BORINGCACHE_API_TOKEN are not configured." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Set work directory
@@ -338,6 +341,7 @@ jobs:
     env:
       BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
       BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+      BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
 
     steps:
@@ -356,11 +360,13 @@ jobs:
         id: tokens
         shell: bash
         run: |
-          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+          effective_restore_token="${BORINGCACHE_RESTORE_TOKEN:-${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}}"
+          effective_save_token="${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}"
+          if [ -n "${effective_restore_token}" ] && [ -n "${effective_save_token}" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping language E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+            echo "Skipping language E2E because split BoringCache tokens or BORINGCACHE_API_TOKEN are not configured." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Set work directory
@@ -484,6 +490,7 @@ jobs:
     env:
       BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
       BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+      BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
 
     steps:
@@ -502,11 +509,13 @@ jobs:
         id: tokens
         shell: bash
         run: |
-          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+          effective_restore_token="${BORINGCACHE_RESTORE_TOKEN:-${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}}"
+          effective_save_token="${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}"
+          if [ -n "${effective_restore_token}" ] && [ -n "${effective_save_token}" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping product E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+            echo "Skipping product E2E because split BoringCache tokens or BORINGCACHE_API_TOKEN are not configured." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Set work directory
@@ -659,6 +668,7 @@ jobs:
     env:
       BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
       BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+      BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
 
     steps:
@@ -677,11 +687,13 @@ jobs:
         id: tokens
         shell: bash
         run: |
-          if [ -n "${BORINGCACHE_RESTORE_TOKEN}" ] && [ -n "${BORINGCACHE_SAVE_TOKEN}" ]; then
+          effective_restore_token="${BORINGCACHE_RESTORE_TOKEN:-${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}}"
+          effective_save_token="${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}"
+          if [ -n "${effective_restore_token}" ] && [ -n "${effective_save_token}" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping product E2E because BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
+            echo "Skipping product E2E because split BoringCache tokens or BORINGCACHE_API_TOKEN are not configured." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Set work directory
