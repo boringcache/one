@@ -53,6 +53,24 @@
       "turbo",
       "sccache"
     ],
+    "tags": [
+      {
+        "tool": "turbo",
+        "requested_tag": "turbo-cache",
+        "save_tag": "turbo-cache",
+        "restore_tags": [
+          "turbo-cache"
+        ]
+      },
+      {
+        "tool": "sccache",
+        "requested_tag": "rust-cache",
+        "save_tag": "rust-cache",
+        "restore_tags": [
+          "rust-cache"
+        ]
+      }
+    ],
     "secret_id": "boringcache-tool-cache-env",
     "secret_env": "BORINGCACHE_TOOL_CACHE_ENV"
   },

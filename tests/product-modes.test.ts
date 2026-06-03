@@ -2026,7 +2026,7 @@ describe('product modes', () => {
         image: 'ghcr.io/boringcache/demo',
         driver: 'docker',
         'proxy-port': '6001',
-        'docker-tool-cache': 'turbo,sccache',
+        'docker-tool-cache': 'turbo:turbo-cache,sccache:rust-cache',
       });
       mockGetBooleanInput({});
       mockCliAdapterFixture('docker', fixture);
@@ -2043,9 +2043,9 @@ describe('product modes', () => {
       );
       expect(dryRunCall?.[1]).toEqual(expect.arrayContaining([
         '--tool-cache',
-        'turbo',
+        'turbo:turbo-cache',
         '--tool-cache',
-        'sccache',
+        'sccache:rust-cache',
       ]));
 
       const cliBuildCall = (exec.exec as jest.Mock).mock.calls.find(
@@ -2059,9 +2059,9 @@ describe('product modes', () => {
         '--backend',
         'registry',
         '--tool-cache',
-        'turbo',
+        'turbo:turbo-cache',
         '--tool-cache',
-        'sccache',
+        'sccache:rust-cache',
       ]));
 
       const cliBuildArgs = cliBuildCall?.[1] as string[] | undefined;
