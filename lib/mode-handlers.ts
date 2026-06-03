@@ -138,6 +138,11 @@ interface CliAdapterDryRunPlan {
   workspace: string;
   tag: string;
   cache_backend?: string;
+  tool_cache?: {
+    tools: string[];
+    secret_id: string;
+    secret_env: string;
+  };
   env_vars?: Record<string, string>;
   setup?: CliAdapterSetupPlan;
   proxy: CliProxyDryRunPlan;
@@ -711,6 +716,7 @@ async function resolveOciCliPlan(
   ociHydration: string,
   metadataHintsInput = '',
   cacheBackend: DockerCacheBackend = 'registry',
+  dockerToolCacheInput = '',
 ): Promise<CliAdapterDryRunPlan> {
   const args = [adapter, '--workspace', workspace];
   const trimmedCacheTag = inputCacheTag.trim();
@@ -748,6 +754,11 @@ async function resolveOciCliPlan(
   const trimmedOciHydration = ociHydration.trim();
   if (trimmedOciHydration) {
     args.push('--oci-hydration', trimmedOciHydration);
+  }
+  if (adapter === 'docker') {
+    for (const tool of parseList(dockerToolCacheInput)) {
+      args.push('--tool-cache', tool);
+    }
   }
   appendMetadataHintArgs(args, metadataHintsInput);
   args.push('--dry-run', '--json', '--', ...adapterCommand);
@@ -816,6 +827,7 @@ async function resolveDockerCliPlan(
   ociHydration: string,
   metadataHintsInput = '',
   cacheBackend: DockerCacheBackend = 'registry',
+  dockerToolCacheInput = '',
 ): Promise<CliAdapterDryRunPlan> {
   return resolveOciCliPlan(
     'docker',
@@ -834,6 +846,7 @@ async function resolveDockerCliPlan(
     ociHydration,
     metadataHintsInput,
     cacheBackend,
+    dockerToolCacheInput,
   );
 }
 
@@ -1312,12 +1325,17 @@ function ociAdapterCliArgsForAcceleratedBuild(
   if (inputs.ociHydration.trim()) {
     args.push('--oci-hydration', inputs.ociHydration.trim());
   }
+  if (adapter === 'docker') {
+    for (const tool of parseList(inputs.dockerToolCache)) {
+      args.push('--tool-cache', tool);
+    }
+  }
   appendMetadataHintArgs(args, inputs.metadataHints);
   args.push('--', command, ...commandArgs);
   return args;
 }
 
-async function buildDockerImageWithCliAccelerator(
+async function buildDockerImageWithCliAdapter(
   workspace: string,
   cacheTag: string,
   cacheBackend: DockerCacheBackend,
@@ -2168,6 +2186,8 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
   const tags = parseList(core.getInput('tags') || 'latest');
   const buildArgs = parseMultiline(core.getInput('build-args') || '');
   const secrets = parseMultiline(core.getInput('secrets') || '');
+  const dockerToolCache = inputs.dockerToolCache;
+  const dockerToolCaches = parseList(dockerToolCache);
   const target = core.getInput('target') || '';
   const platforms = core.getInput('platforms') || '';
   const push = parseBoolean(core.getInput('push'), false);
@@ -2183,6 +2203,9 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     : requestedCacheBackend;
   if (cacheBackend !== requestedCacheBackend) {
     core.warning('cache-backend=auto needs docker-command=build; using registry cache setup for docker-command=setup.');
+  }
+  if (dockerToolCaches.length > 0 && !shouldBuild) {
+    throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
   }
   const registryTagInput = core.getInput('registry-tag') || '';
   const registryRefTagInput = core.getInput('registry-ref-tag') || '';
@@ -2234,11 +2257,13 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       inputs.ociHydration,
       inputs.metadataHints,
       cacheBackend,
+      dockerToolCache,
     );
     const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
     const cacheTag = dockerPlan.tag;
 
-    if (usesCliCacheAccelerator(cacheBackend)) {
+    const usesCliWrappedBuild = usesCliCacheAccelerator(cacheBackend) || dockerToolCaches.length > 0;
+    if (usesCliWrappedBuild) {
       const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
       resolvedWorkspace = planState.resolvedWorkspace;
       resolvedCacheTag = planState.resolvedCacheTag;
@@ -2256,7 +2281,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       });
 
       if (shouldBuild) {
-        await buildDockerImageWithCliAccelerator(
+        await buildDockerImageWithCliAdapter(
           dockerPlan.workspace,
           getEffectiveRegistryTag(localCacheTag, registryTagInput),
           cacheBackend,

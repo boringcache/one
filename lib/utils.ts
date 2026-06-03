@@ -101,6 +101,7 @@ export interface OneInputs {
   proxyNoGit: boolean;
   proxyNoPlatform: boolean;
   ociHydration: OciHydrationPolicy;
+  dockerToolCache: string;
   cacheProfiles: string;
   entries: string;
   path: string;
@@ -212,6 +213,7 @@ export function getInputs(): OneInputs {
     proxyNoGit: core.getBooleanInput('proxy-no-git'),
     proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
     ociHydration: normalizeOciHydrationPolicy(core.getInput('oci-hydration')),
+    dockerToolCache: core.getInput('docker-tool-cache'),
     cacheProfiles: core.getInput('cache-profiles'),
     entries: core.getInput('entries'),
     path: core.getInput('path'),

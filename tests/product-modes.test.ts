@@ -2013,6 +2013,107 @@ describe('product modes', () => {
     }
   });
 
+  it('runs docker tool-cache builds through the CLI wrapper', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+    const fixture = await readCliMachineOutputFixture('docker_tool_cache_dry_run_v1.json');
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'ignored/ignored',
+        'working-directory': project,
+        image: 'ghcr.io/boringcache/demo',
+        driver: 'docker',
+        'proxy-port': '6001',
+        'docker-tool-cache': 'turbo,sccache',
+      });
+      mockGetBooleanInput({});
+      mockCliAdapterFixture('docker', fixture);
+
+      await restoreRun();
+
+      expect(actionCoreMocks.startRegistryProxy).not.toHaveBeenCalled();
+
+      const dryRunCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache'
+          && Array.isArray(args)
+          && args[0] === 'docker'
+          && args.includes('--dry-run'),
+      );
+      expect(dryRunCall?.[1]).toEqual(expect.arrayContaining([
+        '--tool-cache',
+        'turbo',
+        '--tool-cache',
+        'sccache',
+      ]));
+
+      const cliBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache'
+          && Array.isArray(args)
+          && args[0] === 'docker'
+          && !args.includes('--dry-run')
+          && args.includes('--'),
+      );
+      expect(cliBuildCall?.[1]).toEqual(expect.arrayContaining([
+        '--backend',
+        'registry',
+        '--tool-cache',
+        'turbo',
+        '--tool-cache',
+        'sccache',
+      ]));
+
+      const cliBuildArgs = cliBuildCall?.[1] as string[] | undefined;
+      const separatorIndex = cliBuildArgs?.indexOf('--') ?? -1;
+      expect(separatorIndex).toBeGreaterThanOrEqual(0);
+      const wrappedArgs = cliBuildArgs?.slice(separatorIndex + 1) || [];
+      expect(wrappedArgs.slice(0, 3)).toEqual(['docker', 'buildx', 'build']);
+      expect(wrappedArgs).not.toContain('--cache-from');
+      expect(wrappedArgs).not.toContain('--cache-to');
+      expect(wrappedArgs).not.toContain('--secret');
+
+      const directDockerBuildCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'docker'
+          && Array.isArray(args)
+          && args[0] === 'buildx'
+          && args[1] === 'build',
+      );
+      expect(directDockerBuildCall).toBeUndefined();
+      expect(core.setOutput).toHaveBeenCalledWith('registry-ref', 'host.docker.internal:6001/cache:docker-cache');
+      expect(core.setOutput).toHaveBeenCalledWith(
+        'cache-to',
+        'type=registry,ref=host.docker.internal:6001/cache:docker-cache,mode=max,registry.insecure=true',
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
+  it('rejects docker tool-cache for setup-only mode', async () => {
+    const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
+
+    try {
+      mockGetInput({
+        mode: 'docker',
+        setup: 'none',
+        workspace: 'boringcache/test-workspace',
+        'working-directory': project,
+        'docker-command': 'setup',
+        'docker-tool-cache': 'turbo',
+      });
+      mockGetBooleanInput({});
+
+      await restoreRun();
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        expect.stringContaining('docker-tool-cache requires docker-command=build'),
+      );
+    } finally {
+      await removeTempProject(project);
+    }
+  });
+
   it('consumes the BuildKit CLI dry-run fixture for registry cache flags', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
     const fixture = await readCliMachineOutputFixture('buildkit_dry_run_v1.json');

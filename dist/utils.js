@@ -149,6 +149,7 @@ function getInputs() {
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
         ociHydration: normalizeOciHydrationPolicy(core.getInput('oci-hydration')),
+        dockerToolCache: core.getInput('docker-tool-cache'),
         cacheProfiles: core.getInput('cache-profiles'),
         entries: core.getInput('entries'),
         path: core.getInput('path'),
