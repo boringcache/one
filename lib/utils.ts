@@ -183,7 +183,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 export function getInputs(): OneInputs {
   return {
-    cliVersion: core.getInput('cli-version') || 'v1.13.30',
+    cliVersion: core.getInput('cli-version') || 'v1.13.31',
     cliPlatform: core.getInput('cli-platform'),
     setup: normalizeSetup(core.getInput('setup')),
     mode: normalizeMode(core.getInput('mode')),
