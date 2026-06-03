@@ -133,6 +133,9 @@ inputs:
   secrets:
     description: 'Docker or BuildKit secrets, newline-separated.'
     required: false
+  docker-tool-cache:
+    description: 'Docker mode only: expose BoringCache proxy env for native remote-cache tools inside Dockerfile RUN steps. Comma- or newline-separated values: turbo, nx, sccache.'
+    required: false
   driver:
     description: 'Buildx driver for Docker mode.'
     default: 'docker-container'

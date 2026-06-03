@@ -31,6 +31,9 @@ Common Docker inputs:
 - `load`: load the image into the local daemon when supported.
 - `no-cache`: disable cache usage.
 - `secrets`: newline-separated BuildKit secret specs.
+- `docker-tool-cache`: Docker mode only, comma- or newline-separated native
+  remote-cache tools to expose inside Dockerfile `RUN` steps. Supported values:
+  `turbo`, `nx`, and `sccache`.
 - `ssh`: newline-separated SSH specs.
 
 Docker-specific setup inputs:
@@ -78,3 +81,32 @@ Useful outputs for Docker and BuildKit setup:
 
 Set `require-oci-import-ready: true` when a workflow should fail instead of
 continuing after an incomplete warm import.
+
+## Dockerfile tool caches
+
+Use `docker-tool-cache` when a Dockerfile build step runs a tool that already
+speaks a native remote-cache protocol:
+
+```yaml
+- uses: boringcache/one@v1
+  with:
+    mode: docker
+    workspace: my-org/my-project
+    image: ghcr.io/${{ github.repository }}
+    docker-tool-cache: turbo,sccache
+```
+
+Then opt in inside the Dockerfile with the stable BuildKit secret id:
+
+```Dockerfile
+RUN --mount=type=secret,id=boringcache-tool-cache-env \
+  . /run/secrets/boringcache-tool-cache-env && \
+  turbo run build
+```
+
+The action does not build this secret itself. It delegates the build to
+`boringcache docker --tool-cache ...`, so the CLI owns the proxy URL and local
+tool-token values outside the Docker build graph.
+
+`docker-tool-cache` requires `docker-command: build`; setup-only mode cannot
+inject the CLI-owned secret into a later user-run `docker buildx build`.

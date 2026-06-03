@@ -69,6 +69,7 @@ function buildInputs(overrides: Partial<OneInputs>): OneInputs {
     proxyNoGit: false,
     proxyNoPlatform: false,
     ociHydration: 'metadata-only',
+    dockerToolCache: '',
     cacheProfiles: '',
     entries: 'deps:node_modules',
     path: '',
