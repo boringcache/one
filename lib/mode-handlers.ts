@@ -745,9 +745,7 @@ async function resolveOciCliPlan(
   if (cacheMode.trim()) {
     args.push('--cache-mode', cacheMode.trim());
   }
-  if (cacheBackend !== 'registry') {
-    args.push('--backend', cacheBackend);
-  }
+  args.push('--backend', cacheBackend);
   if (trimmedCacheRefTag) {
     args.push('--cache-ref-tag', trimmedCacheRefTag);
   }

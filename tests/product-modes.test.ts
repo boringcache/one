@@ -139,6 +139,8 @@ describe('product modes', () => {
         ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'docker',
       );
       expect(cliPlanCall?.[1]).toEqual(expect.arrayContaining([
+        '--backend',
+        'registry',
         '--oci-hydration',
         'metadata-only',
       ]));
@@ -971,6 +973,11 @@ describe('product modes', () => {
       mockGetBooleanInput({});
 
       await restoreRun();
+
+      const cliPlanCall = (exec.exec as jest.Mock).mock.calls.find(
+        ([command, args]) => command === 'boringcache' && Array.isArray(args) && args[0] === 'buildkit',
+      );
+      expect(cliPlanCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'registry']));
 
       expect(actionCoreMocks.startRegistryProxy).toHaveBeenCalledWith(expect.objectContaining({
         command: 'cache-registry',
