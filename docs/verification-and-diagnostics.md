@@ -76,6 +76,18 @@ signing key fingerprint:
 
 `verbose: true` forwards verbose CLI output.
 
+The default action path keeps logs quiet. It should show enough state for a
+workflow author to know the cache setup ran, then leave detailed proxy/native
+evidence in grouped diagnostics, log tails, and uploaded artifacts. Use
+`diagnostics: summary` for support-friendly grouped state, `diagnostics:
+verbose` when proxy logs are needed, and `verbose: true` only when the wrapped
+CLI command itself needs detailed output.
+
+Docker native evidence is produced after the build through the native BuildKit
+publisher summary. Do not interpret blank OCI import outputs as a native import
+miss; native runs should be classified from the action outputs, BuildKit cached
+steps, and native evidence artifact.
+
 ## Metadata hints
 
 `metadata-hints` passes low-cardinality labels to proxy-backed sessions.
