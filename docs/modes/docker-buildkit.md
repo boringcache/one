@@ -61,9 +61,9 @@ are ignored in BuildKit mode.
 
 Docker and BuildKit share:
 
-- `cache-backend`: `registry`, `local`, or `auto`, default `registry`. `auto`
-  is a dogfood path that keeps registry restore semantics while delegating
-  cache publication to the CLI cache-to accelerator.
+- `cache-backend`: `registry`, `local`, or `native`, default `registry`.
+  `native` keeps OCI import planning while delegating cache publication to the
+  CLI publisher that runs inside the BuildKit builder.
 - `cache-mode`: `min` or `max`, default `max`.
 - `registry-tag`: proxy cache namespace tag.
 - `registry-ref-tag`: local/no-CI OCI tag suffix, default `buildcache`.

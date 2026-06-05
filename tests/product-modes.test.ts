@@ -173,7 +173,7 @@ describe('product modes', () => {
     }
   });
 
-  it('runs docker auto mode through the CLI cache accelerator', async () => {
+  it('runs docker native mode through the CLI cache accelerator', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 
     try {
@@ -183,7 +183,7 @@ describe('product modes', () => {
         workspace: 'boringcache/test-workspace',
         'working-directory': project,
         image: 'ghcr.io/boringcache/demo',
-        'cache-backend': 'auto',
+        'cache-backend': 'native',
       });
       mockGetBooleanInput({});
 
@@ -197,7 +197,7 @@ describe('product modes', () => {
           && args[0] === 'docker'
           && args.includes('--dry-run'),
       );
-      expect(dryRunCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+      expect(dryRunCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'native']));
 
       const acceleratorCall = (exec.exec as jest.Mock).mock.calls.find(
         ([command, args]) => command === 'boringcache'
@@ -207,7 +207,7 @@ describe('product modes', () => {
           && args.includes('--'),
       );
       expect(acceleratorCall).toBeTruthy();
-      expect(acceleratorCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+      expect(acceleratorCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'native']));
 
       const acceleratorArgs = acceleratorCall?.[1] as string[] | undefined;
       const separatorIndex = acceleratorArgs?.indexOf('--') ?? -1;
@@ -1004,7 +1004,7 @@ describe('product modes', () => {
     }
   });
 
-  it('runs buildkit auto mode through the CLI cache accelerator', async () => {
+  it('runs buildkit native mode through the CLI cache accelerator', async () => {
     const project = await makeTempProject({ Dockerfile: 'FROM scratch\n' });
 
     try {
@@ -1014,7 +1014,7 @@ describe('product modes', () => {
         'working-directory': project,
         image: 'ghcr.io/boringcache/demo',
         'buildkit-host': 'tcp://buildkit:1234',
-        'cache-backend': 'auto',
+        'cache-backend': 'native',
       });
       mockGetBooleanInput({});
 
@@ -1028,7 +1028,7 @@ describe('product modes', () => {
           && args[0] === 'buildkit'
           && args.includes('--dry-run'),
       );
-      expect(dryRunCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+      expect(dryRunCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'native']));
 
       const acceleratorCall = (exec.exec as jest.Mock).mock.calls.find(
         ([command, args]) => command === 'boringcache'
@@ -1038,7 +1038,7 @@ describe('product modes', () => {
           && args.includes('--'),
       );
       expect(acceleratorCall).toBeTruthy();
-      expect(acceleratorCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'auto']));
+      expect(acceleratorCall?.[1]).toEqual(expect.arrayContaining(['--backend', 'native']));
 
       const acceleratorArgs = acceleratorCall?.[1] as string[] | undefined;
       const separatorIndex = acceleratorArgs?.indexOf('--') ?? -1;

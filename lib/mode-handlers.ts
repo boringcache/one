@@ -167,7 +167,7 @@ interface CliAdapterDryRunPlan {
   };
 }
 
-type DockerCacheBackend = 'registry' | 'local' | 'auto';
+type DockerCacheBackend = 'registry' | 'local' | 'native';
 
 interface CliCheckSummary {
   hits?: number;
@@ -587,10 +587,10 @@ function emitCliPlannerWarnings(stderr: string): void {
 
 function normalizeDockerCacheBackend(value: string): DockerCacheBackend {
   const backend = (value.trim() || 'registry') as DockerCacheBackend;
-  if (backend === 'registry' || backend === 'local' || backend === 'auto') {
+  if (backend === 'registry' || backend === 'local' || backend === 'native') {
     return backend;
   }
-  throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}`);
+  throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected registry, local, or native.`);
 }
 
 function usesRegistryCachePlan(backend: DockerCacheBackend): boolean {
@@ -598,7 +598,7 @@ function usesRegistryCachePlan(backend: DockerCacheBackend): boolean {
 }
 
 function usesCliCacheAccelerator(backend: DockerCacheBackend): boolean {
-  return backend === 'auto';
+  return backend === 'native';
 }
 
 async function resolveAdapterCliPlan(
@@ -2200,7 +2200,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
     ? 'registry'
     : requestedCacheBackend;
   if (cacheBackend !== requestedCacheBackend) {
-    core.warning('cache-backend=auto needs docker-command=build; using registry cache setup for docker-command=setup.');
+    core.warning('cache-backend=native needs docker-command=build; using registry cache setup for docker-command=setup.');
   }
   if (dockerToolCaches.length > 0 && !shouldBuild) {
     throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
@@ -2271,7 +2271,7 @@ async function runDockerRestore(plan: ResolvedPlan, inputs: OneInputs): Promise<
       setRegistryCacheOutputs({
         ref: dockerPlan.oci_cache!.registry_ref,
         from: effectiveImports.importSpecs,
-        to: dockerPlan.oci_cache!.cache_to,
+        to: usesCliCacheAccelerator(cacheBackend) ? undefined : dockerPlan.oci_cache!.cache_to,
         ociCache: dockerPlan.oci_cache,
         usedRefTags: effectiveImports.readableRefTags,
         unreadableRefTags: effectiveImports.unreadableRefTags,
@@ -2543,7 +2543,7 @@ async function runBuildkitRestore(plan: ResolvedPlan, inputs: OneInputs): Promis
       setRegistryCacheOutputs({
         ref: dockerPlan.oci_cache!.registry_ref,
         from: effectiveImports.importSpecs,
-        to: dockerPlan.oci_cache!.cache_to,
+        to: undefined,
         ociCache: dockerPlan.oci_cache,
         usedRefTags: effectiveImports.readableRefTags,
         unreadableRefTags: effectiveImports.unreadableRefTags,

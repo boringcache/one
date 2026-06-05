@@ -49270,16 +49270,16 @@ function emitCliPlannerWarnings(stderr) {
 }
 function normalizeDockerCacheBackend(value) {
     const backend = (value.trim() || 'registry');
-    if (backend === 'registry' || backend === 'local' || backend === 'auto') {
+    if (backend === 'registry' || backend === 'local' || backend === 'native') {
         return backend;
     }
-    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}`);
+    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected registry, local, or native.`);
 }
 function usesRegistryCachePlan(backend) {
     return backend !== 'local';
 }
 function usesCliCacheAccelerator(backend) {
-    return backend === 'auto';
+    return backend === 'native';
 }
 async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, noPlatform, noGit, readOnly, options = {}) {
     var _a, _b, _c, _d, _e, _f;
@@ -50492,7 +50492,7 @@ async function runDockerRestore(plan, inputs) {
         ? 'registry'
         : requestedCacheBackend;
     if (cacheBackend !== requestedCacheBackend) {
-        core.warning('cache-backend=auto needs docker-command=build; using registry cache setup for docker-command=setup.');
+        core.warning('cache-backend=native needs docker-command=build; using registry cache setup for docker-command=setup.');
     }
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
@@ -50541,7 +50541,7 @@ async function runDockerRestore(plan, inputs) {
             setRegistryCacheOutputs({
                 ref: dockerPlan.oci_cache.registry_ref,
                 from: effectiveImports.importSpecs,
-                to: dockerPlan.oci_cache.cache_to,
+                to: usesCliCacheAccelerator(cacheBackend) ? undefined : dockerPlan.oci_cache.cache_to,
                 ociCache: dockerPlan.oci_cache,
                 usedRefTags: effectiveImports.readableRefTags,
                 unreadableRefTags: effectiveImports.unreadableRefTags,
@@ -50766,7 +50766,7 @@ async function runBuildkitRestore(plan, inputs) {
             setRegistryCacheOutputs({
                 ref: dockerPlan.oci_cache.registry_ref,
                 from: effectiveImports.importSpecs,
-                to: dockerPlan.oci_cache.cache_to,
+                to: undefined,
                 ociCache: dockerPlan.oci_cache,
                 usedRefTags: effectiveImports.readableRefTags,
                 unreadableRefTags: effectiveImports.unreadableRefTags,
@@ -51991,7 +51991,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.37',
+        cliVersion: core.getInput('cli-version') || 'v1.13.38',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),

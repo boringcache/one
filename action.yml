@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.37'
+    default: 'v1.13.38'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -151,7 +151,7 @@ inputs:
     description: 'Inline BuildKit daemon TOML config for Docker mode.'
     required: false
   cache-backend:
-    description: 'Backend for Docker or BuildKit cache: registry, local, or auto. Auto is a dogfood path that keeps registry restore semantics while letting the CLI try the native cache-to accelerator.'
+    description: 'Backend for Docker or BuildKit cache: registry, local, or native. Native keeps OCI import planning and lets the CLI publish the native BuildKit cache from inside the builder.'
     default: 'registry'
     required: false
   cache-mode:
