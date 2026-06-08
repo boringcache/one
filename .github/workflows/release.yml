@@ -1,0 +1,132 @@
+name: Release Action
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g., v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: one-release-${{ github.workflow }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build and Release Action
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.release_meta.outputs.release_tag }}
+
+    steps:
+      - name: Determine release tag
+        id: release_meta
+        run: |
+          tag_input="${{ github.event.inputs.tag }}"
+          ref="${GITHUB_REF:-}"
+
+          if [ -n "$tag_input" ]; then
+            tag="$tag_input"
+          elif [ "${ref#refs/tags/}" != "$ref" ]; then
+            tag="${ref#refs/tags/}"
+          else
+            echo "This workflow must be triggered from a tag or provided a tag input." >&2
+            exit 1
+          fi
+
+          echo "Using release tag: $tag"
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify signed release tag
+        run: |
+          cat > "$RUNNER_TEMP/allowed_signers" <<'EOF'
+          gaurav@gauravtiwari.co.uk ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVC6w5HTvW0TZwuN0/J3axNnAfNclejNgpCWs0b2KAM
+          release@boringcache.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA9aJJNs2BJ13PLtEY3n/nm43fyjYIlXzPzoTTmGekOO release@boringcache.com
+          EOF
+
+          git config gpg.format ssh
+          git config gpg.ssh.program ssh-keygen
+          git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed_signers"
+          git tag -v "$RELEASE_TAG"
+
+          tag_target="$(git rev-list -n 1 "$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$tag_target" != "$head_commit" ]; then
+            echo "Release tag $RELEASE_TAG points at $tag_target, but checkout is $head_commit" >&2
+            exit 1
+          fi
+
+      - name: Validate distribution bundle
+        run: |
+          tag="${RELEASE_TAG}"
+          default_version="$(awk '
+            $1 == "cli-version:" { in_cli = 1 }
+            in_cli == 1 && $1 == "default:" {
+              value = $2
+              gsub(/\047|"/, "", value)
+              print value
+              exit
+            }
+          ' action.yml)"
+
+          if [ "$default_version" != "$tag" ]; then
+            echo "action.yml cli-version default is ${default_version:-<missing>}, expected $tag" >&2
+            exit 1
+          fi
+
+          test -s dist/restore/index.js
+          test -s dist/save/index.js
+          test -s dist/utils.js
+          find dist -name '*.js' -print0 | xargs -0 -n1 node --check
+
+          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/utils.js
+          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/restore/index.js
+          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/save/index.js
+
+      - name: Create package archive
+        run: |
+          mkdir -p release-package
+
+          cp -r dist/ release-package/
+          cp action.yml release-package/
+          cp README.md release-package/
+          cp LICENSE release-package/
+
+          echo "ACTION_VERSION=${RELEASE_TAG}" > release-package/VERSION
+
+          cd release-package
+          tar -czf ../release-package.tar.gz .
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "BoringCache One ${{ env.RELEASE_TAG }}"
+          body: |
+            **One action for the BoringCache product suite.**
+
+            A single GitHub Action entrypoint for archive caching, mise-powered tool setup, and proxy-backed Docker, BuildKit, Bazel, Gradle, Turbo, and Rust+sccache flows.
+
+            Includes the bundled release artifact for this tag.
+
+            See [README](https://github.com/boringcache/one) for usage.
+          draft: false
+          prerelease: false
+          files: ./release-package.tar.gz
