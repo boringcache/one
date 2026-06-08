@@ -1,86 +1,20 @@
 # BoringCache One
 
-## What It Does
+This is the public distribution repo for `boringcache/one`.
 
-Primary mise-powered GitHub Action for the BoringCache suite. Archive, Turbo, Docker, BuildKit, Bazel, Go, Gradle, and Rust `sccache` modes now live here.
+## Boundary
 
-## Quick Reference
+- Keep this repo tiny: `action.yml`, bundled `dist/**`, `LICENSE`, README, and
+  minimal GitHub release checks.
+- Do not add source, tests, examples, docs, dependency lockfiles, generated
+  package-manager folders, or benchmark/E2E workflows here.
+- Source, tests, examples, docs, and release planning live in
+  `boringcache/monorepo` under `gha/` and `.planning/`.
 
-```yaml
-- uses: boringcache/one@v1
-  with:
-    setup: none
-    mode: archive
-    workspace: my-org/my-project
-    entries: deps:node_modules,build:dist
-  env:
-    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-    BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
-```
+## Maintenance
 
-## First Reads
-
-- Start at `/Users/gaurav/boringcache/web/.planning/product-hardening-feature-inventory.md`, resolve the feature in `/Users/gaurav/boringcache/web/.planning/feature-index.yml`, and read the relevant `/Users/gaurav/boringcache/web/.planning/features/one-*.md` file for durable action context.
-- Keep action product boundaries aligned with the `one` feature inventory and the public docs under `docs/`.
-- Keep the public README slim. Put user-facing how-to material under `docs/`,
-  grouped by mode, preset, or shared workflow concern.
-
-## Key Features
-
-- **Mise-powered**: Can detect and install runtimes via `mise`
-- **Platform-aware**: OS/arch scoping by default (disable with `no-platform: true`)
-- **Mode-driven**: Archive, Turbo, Docker, BuildKit, Bazel, Go, Gradle, and Rust `sccache` all route through the same action
-- **Compatible modes**: Supports both `entries` format and `actions/cache` format (`path`/`key`/`restore-keys`)
-
-## Inputs
-
-| Input | Description |
-|-------|-------------|
-| `setup` | Runtime setup owner: `mise`, `external`, or `none` |
-| `mode` | Product mode (`archive`, `turbo-proxy`, `docker`, `buildkit`, `bazel`, `go`, `gradle`, `rust-sccache`) |
-| `preset` | Workflow preset (`none`, `rails`, `node-turbo`) |
-| `workspace` | BoringCache workspace (`org/repo`) |
-| `entries` | Cache entries (`tag:path,tag2:path2`) |
-| `no-platform` | Disable OS/arch suffix for portable caches |
-| `fail-on-cache-miss` | Fail if cache not found |
-| `force` | Overwrite existing cache on save |
-| `save-always` | Save even if job fails |
-
-## Outputs
-
-| Output | Description |
-|--------|-------------|
-| `cache-hit` | `true` if exact match found |
-| `runtime-cache-hit` | `true` if the `mise` runtime cache hit |
-| `resolved-mode` | Effective mode used |
-| `resolved-tools` | Resolved runtime tools |
-
-## Code Structure
-
-- `lib/restore.ts` - Main phase: restore cache entries
-- `lib/save.ts` - Post phase: save cache entries
-- `lib/modes.ts` - Mode registry and compatibility-wrapper mapping
-- `lib/utils.ts` - Shared utilities (CLI install, exec, cache helpers)
-- `lib/core/` - Self-contained GitHub Actions helpers used directly by this action
-
-## Repository Boundary
-
-`boringcache/one` is the standalone repository for maintained GitHub Actions implementation work. Keep action helpers under `lib/core` so runtime changes ship with the action that consumes them.
-
-Do not depend on the retired `@boringcache/action-core` package. New runtime behavior belongs here, in the CLI, or in Rails.
-
-## Build
-
-```bash
-npm install && npm run build && npm test
-```
-
-## Release Guidance
-
-- Update the owning feature file under `/Users/gaurav/boringcache/web/.planning/features/` when action inputs, outputs, token wiring, summaries, `dist`, release behavior, or compatibility paths change. If the feature is marked `token_sensitive` in the index, scrub examples/logs/tests and keep split restore/save token wording first.
-- For any `boringcache/one` version bump, release tag, or `v1` major tag move, load `/Users/gaurav/boringcache/skills/categories/release-operations/release-paths/SKILL.md` first.
-- Then load `/Users/gaurav/boringcache/skills/categories/github-actions-maintenance/one-action/SKILL.md` for action-specific behavior.
-- Keep the release commit and tag signed. Update `v1` only after the versioned release succeeds.
-
----
-**See [../AGENTS.md](../AGENTS.md) for shared conventions.**
+- Make runtime changes in the monorepo, rebuild there, then sync this repo from
+  the monorepo distribution tooling.
+- Keep `action.yml` and `dist/**` on the same version.
+- Keep the floating `v1` tag pointed at the current validated distribution
+  commit after release closure.

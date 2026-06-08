@@ -1,9 +1,13 @@
 # boringcache/one
 
-`boringcache/one` is the maintained GitHub Action entrypoint for BoringCache.
-It can install tools with `mise`, restore archive entries, and set up supported
-cache modes such as Docker, BuildKit, Bazel, Go, Gradle, Maven, Turbo, Nx, and
-Rust `sccache`.
+`boringcache/one` is the public distribution repo for the BoringCache GitHub
+Action.
+
+This repo is intentionally tiny: `action.yml`, bundled `dist/**`, `LICENSE`,
+this README, and the minimal release checks needed to keep the shipped action
+valid. Source, tests, examples, and product docs live in
+[`boringcache/monorepo`](https://github.com/boringcache/monorepo) under `gha/`
+and the shared planning/docs tree.
 
 ## Quick start
 
@@ -17,7 +21,7 @@ Rust `sccache`.
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-For Docker:
+Docker mode:
 
 ```yaml
 - uses: boringcache/one@v1
@@ -31,21 +35,12 @@ For Docker:
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
-## Docs
+## Inputs
 
-- [Docs index](docs/README.md)
-- [Trust model](docs/trust-model.md)
-- [Modes](docs/modes/README.md)
-- [Presets](docs/presets/README.md)
-- [Action inputs and outputs](action.yml)
+The shipped input and output contract is in [`action.yml`](action.yml).
 
-## Development
+## Maintenance
 
-```bash
-npm install
-npm run build
-npm test
-```
-
-Generated `dist/**` files must be committed with source changes that affect the
-action runtime.
+Do not edit the bundled runtime directly in this repo. Maintainers update
+`gha/` in `boringcache/monorepo`, build the action there, and sync this
+distribution repo from the monorepo release tooling.

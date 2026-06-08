@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   distribution:
-    name: Validate Distribution
+    name: Build and Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -35,7 +35,7 @@ jobs:
           test -s dist/save/index.js
           test -s dist/utils.js
 
-          for source_path in lib tests package.json package-lock.json tsconfig.json jest.config.js node_modules; do
+          for source_path in docs examples scripts lib tests package.json package-lock.json tsconfig.json jest.config.js node_modules; do
             if [ -e "$source_path" ]; then
               echo "$source_path belongs in the private monorepo gha source, not the public distribution repo." >&2
               exit 1
@@ -44,9 +44,3 @@ jobs:
 
       - name: Validate bundled JavaScript
         run: find dist -name '*.js' -print0 | xargs -0 -n1 node --check
-
-      - name: Validate shell scripts
-        run: |
-          if [ -d scripts ]; then
-            find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
-          fi

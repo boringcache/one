@@ -105,7 +105,6 @@ jobs:
           cp action.yml release-package/
           cp README.md release-package/
           cp LICENSE release-package/
-          cp -r docs/ release-package/
 
           echo "ACTION_VERSION=${RELEASE_TAG}" > release-package/VERSION
 
@@ -125,7 +124,7 @@ jobs:
 
             Includes the bundled release artifact for this tag.
 
-            See [README](https://github.com/boringcache/one-action) for usage.
+            See [README](https://github.com/boringcache/one) for usage.
           draft: false
           prerelease: false
           files: ./release-package.tar.gz
