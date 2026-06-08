@@ -57,9 +57,11 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/allowed_signers" <<'EOF'
           gaurav@gauravtiwari.co.uk ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVC6w5HTvW0TZwuN0/J3axNnAfNclejNgpCWs0b2KAM
+          release@boringcache.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA9aJJNs2BJ13PLtEY3n/nm43fyjYIlXzPzoTTmGekOO release@boringcache.com
           EOF
 
           git config gpg.format ssh
+          git config gpg.ssh.program ssh-keygen
           git config gpg.ssh.allowedSignersFile "$RUNNER_TEMP/allowed_signers"
           git tag -v "$RELEASE_TAG"
 
