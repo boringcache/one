@@ -1,32 +1,6 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: "/"
-    schedule:
-      interval: weekly
-      day: monday
-      time: "05:00"
-      timezone: "Etc/UTC"
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-    commit-message:
-      prefix: deps
-      include: scope
-    groups:
-      npm-security:
-        applies-to: security-updates
-        patterns:
-          - "*"
-      npm-minor-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: npm
     directory: "/examples/nextjs_app"
     schedule:
       interval: weekly

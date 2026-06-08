@@ -70,47 +70,45 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build action
-        run: npm run build
-
-      - name: Test action
-        run: npm test
-
-      - name: Verify package version matches tag
+      - name: Validate distribution bundle
         run: |
           tag="${RELEASE_TAG}"
-          pkg_version=$(node -p "require('./package.json').version")
-          expected="v${pkg_version}"
-          if [ "$expected" != "$tag" ]; then
-            echo "Tag $tag does not match package.json version $pkg_version (expected $expected)" >&2
+          default_version="$(awk '
+            $1 == "cli-version:" { in_cli = 1 }
+            in_cli == 1 && $1 == "default:" {
+              value = $2
+              gsub(/\047|"/, "", value)
+              print value
+              exit
+            }
+          ' action.yml)"
+
+          if [ "$default_version" != "$tag" ]; then
+            echo "action.yml cli-version default is ${default_version:-<missing>}, expected $tag" >&2
             exit 1
           fi
 
+          test -s dist/restore/index.js
+          test -s dist/save/index.js
+          test -s dist/utils.js
+          find dist -name '*.js' -print0 | xargs -0 -n1 node --check
+
+          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/utils.js
+          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/restore/index.js
+          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/save/index.js
+
       - name: Create package archive
         run: |
-          # Create release package
           mkdir -p release-package
 
-          # Copy action files
           cp -r dist/ release-package/
           cp action.yml release-package/
           cp README.md release-package/
           cp LICENSE release-package/
-          cp package.json release-package/
+          cp -r docs/ release-package/
 
-          # Create version info
           echo "ACTION_VERSION=${RELEASE_TAG}" > release-package/VERSION
 
-          # Create archive
           cd release-package
           tar -czf ../release-package.tar.gz .
           cd ..
