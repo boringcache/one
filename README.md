@@ -1,13 +1,9 @@
 # boringcache/one
 
-`boringcache/one` is the public distribution repo for the BoringCache GitHub
-Action.
-
-This repo is intentionally tiny: `action.yml`, bundled `dist/**`, `LICENSE`,
-this README, and the minimal release checks needed to keep the shipped action
-valid. Source, tests, examples, and product docs live in
-[`boringcache/monorepo`](https://github.com/boringcache/monorepo) under `gha/`
-and the shared planning/docs tree.
+`boringcache/one` is the maintained GitHub Action entrypoint for BoringCache.
+It installs the BoringCache CLI, restores and saves archive entries, and sets up
+supported cache modes such as Docker, BuildKit, Bazel, Go, Gradle, Maven,
+Turbo, Nx, and Rust `sccache`.
 
 ## Quick start
 
@@ -39,8 +35,7 @@ Docker mode:
 
 The shipped input and output contract is in [`action.yml`](action.yml).
 
-## Maintenance
+## Updates
 
-Do not edit the bundled runtime directly in this repo. Maintainers update
-`gha/` in `boringcache/monorepo`, build the action there, and sync this
-distribution repo from the monorepo release tooling.
+Use the latest `v1` tag for the current stable action. Pin a full semver tag
+when a workflow needs an immutable action version.
