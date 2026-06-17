@@ -787,6 +787,9 @@ async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, reg
     for (const driverOpt of effectiveDriverOpts) {
         args.push('--driver-opt', driverOpt);
     }
+    if (driverToUse === 'docker-container') {
+        args.push('--buildkitd-flags', '--oci-worker-gc=false');
+    }
     if (configPath) {
         args.push('--config', configPath);
     }
