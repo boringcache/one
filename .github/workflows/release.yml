@@ -57,6 +57,7 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/allowed_signers" <<'EOF'
           gaurav@gauravtiwari.co.uk ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILVC6w5HTvW0TZwuN0/J3axNnAfNclejNgpCWs0b2KAM
+          gaurav@gauravtiwari.co.uk ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDD+KK3nI9HuQIJobaOc/nsgno1fjS/04Usro4VXGduHBRmdUUQN0OgM70X4L3Jc0cddgWb2MxzDeM+aF5GPU2Rv2qwEnuLbSzfO23f6b3+9CJ8JsiU05tsmsaaAvVywQ+sTO4NNbQj9xY0JU2mvnhBEee+UvO7vZtu3z72JH4O8YssLThzGw/bNoSumASHOxOKe2oEFtIM6Rnazzv4SoX7I8rmMRPUss62cu4jAKkl5Gz5Vjol/E8j23SNJQpptYX28ayM/wVVD57tC+vBeGFn/7utjmpBMyQchEFRL+UW0I3BAtgDhCW/IgdXThswjvU81FmiiV2c6W9b7+2e0HVEg7bnLG5Qs+L/mSAD2ZqXmRu1hgM3MtJWY8VTnrwRRZjmOiVuf+V7+81+dz83BVuKB2D8Re0ECSGS+paBtrL7ZUAHi8HD1xxZ8J31oUxQMMfTC8Y0zlll1jK660MpJpK69sTGQI524H1V6S7KkuLu5saa5QdciRRzRkBWNMVBk6M=
           release@boringcache.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA9aJJNs2BJ13PLtEY3n/nm43fyjYIlXzPzoTTmGekOO release@boringcache.com
           EOF
 
