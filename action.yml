@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.72'
+    default: 'v1.13.73'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -152,6 +152,10 @@ inputs:
     required: false
   cache-backend:
     description: 'Backend for Docker or BuildKit cache: registry, local, or native. Native keeps OCI import planning and lets the CLI publish the native BuildKit cache from inside the builder.'
+    default: 'registry'
+    required: false
+  buildkit-cache-backend:
+    description: 'BuildKit cache exporter/importer backend for Docker or BuildKit modes: registry or boringcache. This is separate from cache-backend; boringcache requires a managed BuildKit image that supports type=boringcache.'
     default: 'registry'
     required: false
   cache-mode:
@@ -388,6 +392,8 @@ outputs:
     description: 'Resolved Docker --cache-from or BuildKit --import-cache values for Docker or BuildKit modes, newline-separated when the CLI plan includes multiple import refs. PR-scoped refs may be absent on restore-only PR runs.'
   cache-to:
     description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
+  buildkit-cache-backend:
+    description: 'Resolved BuildKit cache exporter/importer backend for Docker or BuildKit modes.'
   docker-cache-run-ref:
     description: 'Provider-neutral immutable Docker or BuildKit OCI cache run ref tag when CI run-ref derivation is active'
   docker-cache-from-refs:
