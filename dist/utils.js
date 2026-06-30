@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_OCI_HYDRATION_POLICY = exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
+exports.MAX_VERIFY_CHECK_ATTEMPT_SECONDS = exports.MAX_VERIFY_TIMEOUT_SECONDS = exports.DEFAULT_VERIFY_TIMEOUT_SECONDS = exports.MAX_DIAGNOSTICS_LOG_BYTES = exports.MAX_DIAGNOSTICS_LOG_LINES = exports.DEFAULT_OCI_HYDRATION_POLICY = exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
 exports.getInputs = getInputs;
 exports.isPullRequestEvent = isPullRequestEvent;
 exports.saveConfigured = saveConfigured;
@@ -41,9 +41,13 @@ exports.saveAllowedForEvent = saveAllowedForEvent;
 exports.saveSkippedByConfigurationMessage = saveSkippedByConfigurationMessage;
 exports.saveSkippedByPolicyMessage = saveSkippedByPolicyMessage;
 exports.applyPullRequestSaveScopeEnv = applyPullRequestSaveScopeEnv;
+exports.applyRestoreOnlyTokenPolicy = applyRestoreOnlyTokenPolicy;
 exports.applySaveTokenPolicy = applySaveTokenPolicy;
 exports.readSavedSaveAllowance = readSavedSaveAllowance;
 exports.readSavedSaveConfiguration = readSavedSaveConfiguration;
+exports.buildActionTrustState = buildActionTrustState;
+exports.restorePhaseSummary = restorePhaseSummary;
+exports.postPhaseSummary = postPhaseSummary;
 exports.normalizeSavePolicy = normalizeSavePolicy;
 exports.normalizeDiagnosticsMode = normalizeDiagnosticsMode;
 exports.normalizeDiagnosticsLogLines = normalizeDiagnosticsLogLines;
@@ -51,6 +55,9 @@ exports.normalizeOciHydrationPolicy = normalizeOciHydrationPolicy;
 exports.resolveDiagnosticsConfig = resolveDiagnosticsConfig;
 exports.loadDiagnosticsConfig = loadDiagnosticsConfig;
 exports.runDiagnosticsGroup = runDiagnosticsGroup;
+exports.writeActionEvidence = writeActionEvidence;
+exports.writeActionFailureEvidence = writeActionFailureEvidence;
+exports.actionErrorMessage = actionErrorMessage;
 exports.readLogTail = readLogTail;
 exports.normalizeVerifyMode = normalizeVerifyMode;
 exports.normalizeVerifyTimeoutSeconds = normalizeVerifyTimeoutSeconds;
@@ -79,9 +86,11 @@ exports.serializeTools = serializeTools;
 exports.getRestoreKeyCandidates = getRestoreKeyCandidates;
 const core = __importStar(require("@actions/core"));
 const exec = __importStar(require("@actions/exec"));
+const childProcess = __importStar(require("child_process"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
+const timers = __importStar(require("timers"));
 const core_1 = require("./core");
 Object.defineProperty(exports, "activateMiseTool", { enumerable: true, get: function () { return core_1.activateMiseTool; } });
 Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return core_1.ensureBoringCache; } });
@@ -95,6 +104,11 @@ Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: funct
 Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return core_1.parseEntries; } });
 const modes_1 = require("./modes");
 exports.DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+exports.MAX_DIAGNOSTICS_LOG_LINES = 500;
+exports.MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
+exports.DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
+exports.MAX_VERIFY_TIMEOUT_SECONDS = 900;
+exports.MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
@@ -119,7 +133,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.73',
+        cliVersion: core.getInput('cli-version') || 'v1.13.74',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),
@@ -138,6 +152,7 @@ function getInputs() {
         readOnly: core.getBooleanInput('read-only'),
         savePolicy: normalizeSavePolicy(core.getInput('save-policy') || 'auto'),
         saveOnPullRequest: core.getBooleanInput('save-on-pull-request'),
+        saveAlways: core.getBooleanInput('save-always'),
         verify: normalizeVerifyMode(core.getInput('verify')),
         verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
         verifyRequireServerSignature: core.getBooleanInput('verify-require-server-signature'),
@@ -188,15 +203,7 @@ function applyPullRequestSaveScopeEnv() {
     core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
     core.exportVariable('BORINGCACHE_RESTORE_PR_CACHE', '1');
 }
-function applySaveTokenPolicy(inputs) {
-    delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
-    if (isPullRequestEvent() && inputs.saveOnPullRequest) {
-        applyPullRequestSaveScopeEnv();
-    }
-    const saveAllowed = saveAllowedForEvent(inputs);
-    if (saveAllowed) {
-        return true;
-    }
+function applyRestoreOnlyTokenPolicy() {
     const restoreFallback = process.env.BORINGCACHE_RESTORE_TOKEN ||
         process.env.BORINGCACHE_SAVE_TOKEN ||
         process.env.BORINGCACHE_API_TOKEN;
@@ -206,7 +213,18 @@ function applySaveTokenPolicy(inputs) {
     }
     delete process.env.BORINGCACHE_SAVE_TOKEN;
     delete process.env.BORINGCACHE_API_TOKEN;
-    if (hadSaveCapableToken) {
+    return hadSaveCapableToken;
+}
+function applySaveTokenPolicy(inputs) {
+    delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
+    if (isPullRequestEvent() && inputs.saveOnPullRequest) {
+        applyPullRequestSaveScopeEnv();
+    }
+    const saveAllowed = saveAllowedForEvent(inputs);
+    if (saveAllowed) {
+        return true;
+    }
+    if (applyRestoreOnlyTokenPolicy()) {
         core.notice('pull_request detected: treating save-capable BoringCache tokens as restore-only. Set save-on-pull-request: true to allow writes.');
     }
     return false;
@@ -232,6 +250,165 @@ function readSavedSaveConfiguration(inputs, savedValue) {
     }
     return saveConfigured(inputs);
 }
+function buildActionTrustState(inputs, options) {
+    var _a;
+    const saveCapable = (_a = options.saveCapable) !== null && _a !== void 0 ? _a : (0, core_1.hasSaveToken)();
+    let status = 'read_write';
+    if (!options.saveConfigured) {
+        status = 'restore_only_by_configuration';
+    }
+    else if (!options.saveAllowed) {
+        status = 'restore_only_by_event_policy';
+    }
+    else if (!saveCapable) {
+        status = 'restore_only_missing_save_token';
+    }
+    return {
+        status,
+        event_name: (process.env.GITHUB_EVENT_NAME || '').trim(),
+        save_policy: inputs.savePolicy,
+        save_on_pull_request: inputs.saveOnPullRequest,
+        save_configured: options.saveConfigured,
+        save_allowed: options.saveAllowed,
+        save_capable: saveCapable,
+        token_capabilities: {
+            restore: (0, core_1.hasRestoreToken)(),
+            save: (0, core_1.hasSaveToken)(),
+            legacy_api_only: (0, core_1.isUsingLegacyApiTokenOnly)(),
+        },
+    };
+}
+function restorePhaseSummary(options) {
+    if (options.cacheHit) {
+        const hitDetail = options.runtimeCacheHit
+            ? 'BoringCache restored at least one requested cache for this step, including the runtime cache.'
+            : 'BoringCache restored at least one requested cache for this step.';
+        if (options.saveCapable) {
+            return {
+                status: 'cache_hit',
+                headline: 'Cache restored',
+                detail: hitDetail,
+                next_step: 'Continue the workflow; the post step can refresh save-expected tags.',
+            };
+        }
+        return {
+            status: 'cache_hit_restore_only',
+            headline: 'Cache restored',
+            detail: `${hitDetail} This run is restore-only: ${trustStateDetail(options.trustState)}`,
+            next_step: restoreOnlyNextStep(options.trustState),
+        };
+    }
+    if (options.saveCapable) {
+        return {
+            status: 'cache_miss_will_save',
+            headline: 'No cache restored',
+            detail: 'BoringCache did not restore a matching cache; this workflow can save one in the post step.',
+            next_step: 'Let the post step finish, then inspect the post phase if the next run stays cold.',
+        };
+    }
+    return {
+        status: 'cache_miss_restore_only',
+        headline: 'No cache restored',
+        detail: `BoringCache did not restore a matching cache, and this run is restore-only: ${trustStateDetail(options.trustState)}`,
+        next_step: restoreOnlyNextStep(options.trustState),
+    };
+}
+function postPhaseSummary(saveStatus, trustState) {
+    switch (saveStatus) {
+        case 'saved':
+            return {
+                status: 'saved',
+                headline: 'Cache saved',
+                detail: 'BoringCache saved archive entries for future runs.',
+                next_step: 'The next matching run can restore these entries.',
+            };
+        case 'mode_post_and_generic_save':
+            return {
+                status: 'saved',
+                headline: 'Cache saved',
+                detail: 'BoringCache completed mode-specific post work and saved archive entries for future runs.',
+                next_step: 'The next matching run can restore these caches.',
+            };
+        case 'no_generic_save':
+            return {
+                status: 'no_generic_save',
+                headline: 'No archive save needed',
+                detail: 'The post step had no archive entries to save.',
+                next_step: 'No action is needed unless archive entries were expected.',
+            };
+        case 'mode_post_no_generic_save':
+            return {
+                status: 'mode_post_no_generic_save',
+                headline: 'Mode post step completed',
+                detail: 'BoringCache completed mode-specific post work; there were no archive entries to save.',
+                next_step: 'No action is needed unless archive entries were expected.',
+            };
+        case 'skipped_configuration':
+        case 'mode_post_skipped_configuration':
+            return {
+                status: 'skipped_configuration',
+                headline: 'Save skipped by configuration',
+                detail: saveSkippedByConfigurationMessage(),
+                next_step: 'Use save-policy: auto when trusted jobs should populate cache entries.',
+            };
+        case 'skipped_policy':
+        case 'mode_post_skipped_policy':
+            return {
+                status: 'skipped_policy',
+                headline: 'Save skipped by event policy',
+                detail: saveSkippedByPolicyMessage(),
+                next_step: 'Seed caches from a trusted branch, or set save-on-pull-request: true only for trusted pull request workflows.',
+            };
+        case 'skipped_missing_save_token':
+        case 'mode_post_missing_save_token':
+            return {
+                status: 'skipped_missing_save_token',
+                headline: 'Save skipped: missing save token',
+                detail: `Save skipped: ${(0, core_1.missingSaveTokenMessage)()}`,
+                next_step: 'Set BORINGCACHE_SAVE_TOKEN for trusted jobs that should write cache entries.',
+            };
+        default:
+            return {
+                status: saveStatus || 'completed',
+                headline: 'Post step completed',
+                detail: `BoringCache post step completed with status ${saveStatus || 'completed'} and trust state ${trustState.status}.`,
+                next_step: 'Inspect mode-specific evidence if cache behavior is still unclear.',
+            };
+    }
+}
+function failurePhaseSummary(phase, error) {
+    const phaseName = phase === 'post' ? 'Post step' : 'Restore';
+    return {
+        status: 'failed',
+        headline: `${phaseName} failed`,
+        detail: actionErrorMessage(error),
+        next_step: 'Open the action logs and fix the reported error; the evidence file keeps the redacted failure context.',
+    };
+}
+function trustStateDetail(trustState) {
+    switch (trustState.status) {
+        case 'restore_only_by_configuration':
+            return 'save-policy is off.';
+        case 'restore_only_by_event_policy':
+            return 'pull request jobs stay restore-only by default.';
+        case 'restore_only_missing_save_token':
+            return (0, core_1.missingSaveTokenMessage)();
+        default:
+            return 'save is not currently available.';
+    }
+}
+function restoreOnlyNextStep(trustState) {
+    switch (trustState.status) {
+        case 'restore_only_by_configuration':
+            return 'Use save-policy: auto when trusted jobs should populate cache entries.';
+        case 'restore_only_by_event_policy':
+            return 'Seed caches from a trusted branch, or set save-on-pull-request: true only for trusted pull request workflows.';
+        case 'restore_only_missing_save_token':
+            return 'Set BORINGCACHE_SAVE_TOKEN for trusted jobs that should write cache entries.';
+        default:
+            return 'No action is needed unless this workflow should refresh cache entries.';
+    }
+}
 function normalizeSavePolicy(value) {
     switch ((value || 'auto').trim().toLowerCase()) {
         case 'auto':
@@ -256,9 +433,10 @@ function normalizeDiagnosticsLogLines(value) {
     if (!value || !value.trim()) {
         return 40;
     }
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error(`Unsupported diagnostics-log-lines "${value}". Expected a positive integer.`);
+    const parsed = parsePositiveIntegerInput(value, 'diagnostics-log-lines');
+    if (parsed > exports.MAX_DIAGNOSTICS_LOG_LINES) {
+        core.warning(`diagnostics-log-lines "${value}" is too high; tailing ${exports.MAX_DIAGNOSTICS_LOG_LINES} lines to keep diagnostics bounded.`);
+        return exports.MAX_DIAGNOSTICS_LOG_LINES;
     }
     return parsed;
 }
@@ -266,10 +444,9 @@ function normalizeOciHydrationPolicy(value) {
     switch ((value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
         case 'metadata-only':
         case 'bodies-before-ready':
-        case 'bodies-background':
             return (value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase();
         default:
-            throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only, bodies-before-ready, or bodies-background.`);
+            throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only or bodies-before-ready.`);
     }
 }
 function resolveDiagnosticsConfig(mode, logLines) {
@@ -310,18 +487,180 @@ async function runDiagnosticsGroup(diagnostics, title, fn) {
     }
     await core.group(title, fn);
 }
+function writeActionEvidence(phase, payload) {
+    const evidencePath = actionEvidencePath();
+    const current = readActionEvidence(evidencePath);
+    const now = new Date().toISOString();
+    const evidence = {
+        schema_version: 'boringcache_one_evidence.v1',
+        generated_at: current.generated_at || now,
+        updated_at: now,
+        phases: sanitizeEvidencePhases({
+            ...current.phases,
+            [phase]: payload,
+        }),
+    };
+    try {
+        fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+        fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
+        core.setOutput('evidence-path', evidencePath);
+        core.saveState('evidence-path', evidencePath);
+        return evidencePath;
+    }
+    catch (error) {
+        core.warning(`Could not write BoringCache evidence file at ${evidencePath}: ${errorMessage(error)}`);
+        return '';
+    }
+}
+function writeActionFailureEvidence(phase, error, context = {}) {
+    return writeActionEvidence(phase, {
+        ...context,
+        phase_status: 'failed',
+        phase_summary: failurePhaseSummary(phase, error),
+        error: evidenceError(error),
+    });
+}
+function actionErrorMessage(error) {
+    return redactEvidenceText(errorMessage(error)).slice(0, 2000);
+}
+function actionEvidencePath() {
+    const savedPath = (core.getState('evidence-path') || '').trim();
+    if (savedPath) {
+        return savedPath;
+    }
+    const configuredPath = (process.env.BORINGCACHE_ONE_EVIDENCE_PATH || '').trim();
+    if (configuredPath) {
+        return configuredPath;
+    }
+    return path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'boringcache-one-evidence.json');
+}
+function readActionEvidence(filePath) {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        if (isActionEvidence(parsed)) {
+            return parsed;
+        }
+    }
+    catch {
+        // A missing or malformed local evidence file should not fail cache setup.
+    }
+    return {
+        schema_version: 'boringcache_one_evidence.v1',
+        phases: {},
+    };
+}
+function isActionEvidence(value) {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+    const candidate = value;
+    return candidate.schema_version === 'boringcache_one_evidence.v1'
+        && !!candidate.phases
+        && typeof candidate.phases === 'object'
+        && !Array.isArray(candidate.phases);
+}
+function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
+function evidenceError(error) {
+    const errorType = error instanceof Error && error.name ? error.name : typeof error;
+    return {
+        type: errorType,
+        message: actionErrorMessage(error),
+    };
+}
+function sanitizeEvidencePhases(phases) {
+    return Object.fromEntries(Object.entries(phases).map(([phase, payload]) => [
+        phase,
+        sanitizeEvidenceRecord(payload),
+    ]));
+}
+function sanitizeEvidenceRecord(record) {
+    return sanitizeEvidenceValue(record);
+}
+function sanitizeEvidenceValue(value) {
+    if (typeof value === 'string') {
+        return redactEvidenceText(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => sanitizeEvidenceValue(item));
+    }
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+            key,
+            sanitizeEvidenceValue(item),
+        ]));
+    }
+    return value;
+}
+function redactEvidenceText(value) {
+    const secretQueryFieldPattern = 'token|secret|password|credential|authorization|signature|sig|api[-_]?key|x-amz-security-token|x-amz-signature|x-goog-signature';
+    const secretHeaderFieldPattern = 'token|secret|password|credential|signature|api[-_]?key|x-amz-security-token|x-amz-signature|x-goog-signature';
+    let redacted = value
+        .replace(/(authorization):\s*Bearer\s+[^\s,;]+/gi, '$1: Bearer ***')
+        .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer ***')
+        .replace(new RegExp(`(${secretQueryFieldPattern})=([^&\\s]+)`, 'gi'), '$1=***')
+        .replace(new RegExp(`(${secretHeaderFieldPattern}):\\s*([^\\s]+)`, 'gi'), '$1: ***')
+        .replace(/(authorization):\s+(?!Bearer\s+\*\*\*)[^\r\n,;]+/gi, '$1: ***');
+    for (const secret of evidenceSecretValues()) {
+        redacted = redacted.split(secret).join('***');
+    }
+    return redacted;
+}
+function evidenceSecretValues() {
+    const secretNamePattern = /(TOKEN|SECRET|PASSWORD|PASS|PRIVATE|CREDENTIAL|AUTH|KEY)/i;
+    const values = new Set();
+    for (const [name, value] of Object.entries(process.env)) {
+        if (!value || value.length < 4 || !secretNamePattern.test(name)) {
+            continue;
+        }
+        values.add(value);
+    }
+    return Array.from(values).sort((a, b) => b.length - a.length);
+}
 function readLogTail(filePath, maxLines) {
-    if (!filePath || maxLines < 1) {
+    const lineLimit = Math.min(Math.floor(maxLines), exports.MAX_DIAGNOSTICS_LOG_LINES);
+    if (!filePath || lineLimit < 1) {
         return [];
     }
+    let fileDescriptor = null;
     try {
-        return fs.readFileSync(filePath, 'utf8')
-            .split(/\r?\n/)
-            .filter((line) => line.trim().length > 0)
-            .slice(-maxLines);
+        fileDescriptor = fs.openSync(filePath, 'r');
+        const fileSize = fs.fstatSync(fileDescriptor).size;
+        const chunkSize = 64 * 1024;
+        const byteLimit = Math.min(fileSize, exports.MAX_DIAGNOSTICS_LOG_BYTES);
+        const chunks = [];
+        let position = fileSize;
+        let bytesCollected = 0;
+        let lines = [];
+        while (position > 0 && bytesCollected < byteLimit && lines.length <= lineLimit) {
+            const bytesToRead = Math.min(chunkSize, position, byteLimit - bytesCollected);
+            position -= bytesToRead;
+            const buffer = Buffer.allocUnsafe(bytesToRead);
+            const bytesRead = fs.readSync(fileDescriptor, buffer, 0, bytesToRead, position);
+            if (bytesRead <= 0) {
+                break;
+            }
+            bytesCollected += bytesRead;
+            chunks.unshift(buffer.subarray(0, bytesRead));
+            lines = Buffer.concat(chunks)
+                .toString('utf8')
+                .split(/\r?\n/)
+                .filter((line) => line.trim().length > 0);
+        }
+        const tailLines = lines.slice(-lineLimit);
+        if (tailLines.length > 0 && position > 0 && bytesCollected >= byteLimit && lines.length <= lineLimit) {
+            tailLines[0] = `[truncated to last ${exports.MAX_DIAGNOSTICS_LOG_BYTES} bytes] ${tailLines[0]}`;
+        }
+        return tailLines.map((line) => redactEvidenceText(line));
     }
     catch {
         return [];
+    }
+    finally {
+        if (fileDescriptor !== null) {
+            fs.closeSync(fileDescriptor);
+        }
     }
 }
 function normalizeVerifyMode(value) {
@@ -338,11 +677,23 @@ function normalizeVerifyMode(value) {
 }
 function normalizeVerifyTimeoutSeconds(value) {
     if (!value || !value.trim()) {
-        return 180;
+        return exports.DEFAULT_VERIFY_TIMEOUT_SECONDS;
     }
-    const parsed = Number.parseInt(value, 10);
+    const parsed = parsePositiveIntegerInput(value, 'verify-timeout-seconds');
+    if (parsed > exports.MAX_VERIFY_TIMEOUT_SECONDS) {
+        core.warning(`verify-timeout-seconds "${value}" is too high; waiting at most ${exports.MAX_VERIFY_TIMEOUT_SECONDS}s to keep verification bounded.`);
+        return exports.MAX_VERIFY_TIMEOUT_SECONDS;
+    }
+    return parsed;
+}
+function parsePositiveIntegerInput(value, inputName) {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) {
+        throw new Error(`Unsupported ${inputName} "${value}". Expected a positive integer.`);
+    }
+    const parsed = Number.parseInt(trimmed, 10);
     if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error(`Unsupported verify-timeout-seconds "${value}". Expected a positive integer.`);
+        throw new Error(`Unsupported ${inputName} "${value}". Expected a positive integer.`);
     }
     return parsed;
 }
@@ -737,7 +1088,7 @@ function groupVerificationSpecs(specs) {
     }
     return Array.from(grouped.values());
 }
-async function runTagCheck(workspace, batch, options) {
+async function runTagCheck(workspace, batch, options, timeoutSeconds) {
     const acceptedPendingTags = options.acceptPendingSaveExpected ? batch.saveExpectedTags : new Set();
     const shouldParseCheckJson = acceptedPendingTags.size > 0;
     const args = [];
@@ -758,25 +1109,11 @@ async function runTagCheck(workspace, batch, options) {
     if (shouldParseCheckJson) {
         args.push('--json');
     }
-    let stdout = '';
-    let stderr = '';
-    const execOptions = {
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                stdout += data.toString();
-            },
-            stderr: (data) => {
-                stderr += data.toString();
-            },
-        },
-    };
+    let env;
     if (!options.requireServerSignature) {
-        execOptions.env = envWithOverrides({ BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0' });
+        env = envWithOverrides({ BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0' });
     }
-    const exitCode = await exec.exec('boringcache', args, execOptions);
-    const result = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+    const result = await runBoringcacheCheckWithTimeout(args, timeoutSeconds, env);
     if (result.exitCode !== 0 && shouldParseCheckJson) {
         const acceptedTags = pendingOnlyForAcceptedSaveTags(result.stdout, acceptedPendingTags);
         if (acceptedTags.length > 0) {
@@ -785,6 +1122,101 @@ async function runTagCheck(workspace, batch, options) {
         }
     }
     return result;
+}
+async function runBoringcacheCheckWithTimeout(args, timeoutSeconds, env) {
+    const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
+    const outputLimit = 1024 * 1024;
+    return new Promise((resolve) => {
+        var _a, _b;
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        let timedOut = false;
+        let killTimer;
+        let timeoutTimer;
+        const finish = (result) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            if (timeoutTimer) {
+                timers.clearTimeout(timeoutTimer);
+            }
+            if (killTimer) {
+                timers.clearTimeout(killTimer);
+            }
+            resolve({
+                ...result,
+                stdout: result.stdout.trim(),
+                stderr: result.stderr.trim(),
+            });
+        };
+        const appendOutput = (current, data) => {
+            const next = current + data.toString();
+            if (next.length <= outputLimit) {
+                return next;
+            }
+            return next.slice(next.length - outputLimit);
+        };
+        let child;
+        try {
+            child = childProcess.spawn('boringcache', args, {
+                env: env || process.env,
+                windowsHide: true,
+            });
+        }
+        catch (error) {
+            finish({
+                exitCode: 1,
+                stdout,
+                stderr: appendOutput(stderr, Buffer.from(`${errorMessage(error)}\n`)),
+            });
+            return;
+        }
+        timeoutTimer = timers.setTimeout(() => {
+            timedOut = true;
+            stderr = appendOutput(stderr, Buffer.from(`boringcache check timed out after ${timeoutSeconds}s\n`));
+            killTimer = timers.setTimeout(() => {
+                child.kill('SIGKILL');
+            }, 2000);
+            child.kill('SIGTERM');
+        }, timeoutMs);
+        (_a = child.stdout) === null || _a === void 0 ? void 0 : _a.on('data', (data) => {
+            stdout = appendOutput(stdout, data);
+        });
+        (_b = child.stderr) === null || _b === void 0 ? void 0 : _b.on('data', (data) => {
+            stderr = appendOutput(stderr, data);
+        });
+        child.on('error', (error) => {
+            finish({
+                exitCode: 1,
+                stdout,
+                stderr: appendOutput(stderr, Buffer.from(`${error.message}\n`)),
+            });
+        });
+        child.on('close', (code, signal) => {
+            if (timedOut) {
+                finish({
+                    exitCode: 124,
+                    stdout,
+                    stderr,
+                    timedOut: true,
+                });
+                return;
+            }
+            finish({
+                exitCode: code !== null && code !== void 0 ? code : (signal ? 1 : 0),
+                stdout,
+                stderr,
+            });
+        });
+    });
+}
+function boundedCheckAttemptTimeoutSeconds(timeoutSeconds, deadline) {
+    const remainingSeconds = deadline
+        ? Math.max(1, Math.ceil((deadline - Date.now()) / 1000))
+        : Math.max(1, timeoutSeconds);
+    return Math.min(remainingSeconds, timeoutSeconds, exports.MAX_VERIFY_CHECK_ATTEMPT_SECONDS);
 }
 function formatCheckFailure(result) {
     const details = [result.stderr, result.stdout].filter(Boolean).join('\n');
@@ -835,7 +1267,7 @@ async function verifyVerificationSpecs(workspace, specs, options) {
     }
     if (options.mode === 'check') {
         for (const batch of batches) {
-            const result = await runTagCheck(workspace, batch, options);
+            const result = await runTagCheck(workspace, batch, options, boundedCheckAttemptTimeoutSeconds(options.timeoutSeconds));
             if (result.exitCode !== 0) {
                 throw new Error(`Verification failed for tags ${batch.tags.join(', ')}: ${formatCheckFailure(result)}`);
             }
@@ -853,7 +1285,7 @@ async function verifyVerificationSpecs(workspace, specs, options) {
         attempt += 1;
         let pendingBatch = null;
         for (const batch of batches) {
-            const result = await runTagCheck(workspace, batch, options);
+            const result = await runTagCheck(workspace, batch, options, boundedCheckAttemptTimeoutSeconds(options.timeoutSeconds, deadline));
             if (result.exitCode !== 0) {
                 pendingBatch = batch;
                 lastFailure = formatCheckFailure(result);

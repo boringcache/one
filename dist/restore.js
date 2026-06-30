@@ -57,7 +57,7 @@ function buildCliSetupOptions(inputs, cliPlatform) {
             : {}),
     };
 }
-async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit) {
+async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit, trustState) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
     await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Diagnostics', async () => {
         core.info(`workspace: ${plan.workspace}`);
@@ -72,7 +72,8 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         core.info(`cache-hit: ${String(overallHit)}`);
         core.info(`runtime-cache-hit: ${String(runtimeHit)}`);
         core.info(`verify-mode: ${inputs.verify}`);
-        core.info(`token-capabilities: restore=${String((0, core_1.hasRestoreToken)())} save=${String((0, core_1.hasSaveToken)())} legacy-api-only=${String((0, core_1.isUsingLegacyApiTokenOnly)())}`);
+        core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} save-policy=${trustState.save_policy} save-on-pull-request=${String(trustState.save_on_pull_request)}`);
+        core.info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} save=${String(trustState.token_capabilities.save)} legacy-api-only=${String(trustState.token_capabilities.legacy_api_only)}`);
         if (diagnostics.includeLogs) {
             const proxyLogPath = core.getState('proxy-log-path');
             if (proxyLogPath) {
@@ -178,16 +179,42 @@ function checkFlagArgs(restoreFlagArgs) {
 async function run() {
     var _a;
     const originalCwd = process.cwd();
+    let restoreFailureContext = {};
     try {
         const inputs = (0, utils_1.getInputs)();
+        restoreFailureContext = {
+            diagnostics_level: (0, utils_1.loadDiagnosticsConfig)(inputs).level,
+            verify_mode: inputs.verify,
+        };
         const saveEnabled = (0, utils_1.saveConfigured)(inputs);
         delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
         const saveAllowed = saveEnabled ? (0, utils_1.applySaveTokenPolicy)(inputs) : false;
+        if (!saveEnabled) {
+            (0, utils_1.applyRestoreOnlyTokenPolicy)();
+        }
+        const trustState = (0, utils_1.buildActionTrustState)(inputs, {
+            saveConfigured: saveEnabled,
+            saveAllowed,
+        });
+        const effectiveInputs = saveEnabled && saveAllowed
+            ? inputs
+            : { ...inputs, readOnly: true };
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
             await (0, utils_1.ensureBoringCache)(buildCliSetupOptions(inputs, cliPlatform));
         }
         const plan = await (0, utils_1.buildPlan)(inputs);
+        restoreFailureContext = {
+            ...restoreFailureContext,
+            workspace: plan.workspace,
+            setup: plan.setup,
+            mode: plan.mode,
+            preset: plan.preset,
+            working_directory: plan.workingDirectory,
+            cache_tag: plan.cacheTagPrefix || '',
+            runtime_cache_tag: plan.runtimeTag || '',
+            trust_state: trustState,
+        };
         process.chdir(plan.workingDirectory);
         await (0, utils_1.applyPresetCacheEnv)(plan);
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs));
@@ -196,7 +223,7 @@ async function run() {
         if (plan.setup === 'mise') {
             usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
         }
-        const modeRestore = await (0, mode_handlers_1.runModeRestore)(plan, inputs);
+        const modeRestore = await (0, mode_handlers_1.runModeRestore)(plan, effectiveInputs);
         const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)
             .join(',');
@@ -222,6 +249,51 @@ async function run() {
         core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
         core.setOutput('resolved-entries', plan.archiveEntries);
         core.setOutput('resolved-tags', resolvedTags.join(','));
+        (0, utils_1.writeActionEvidence)('restore', {
+            phase_status: 'completed',
+            phase_summary: (0, utils_1.restorePhaseSummary)({
+                cacheHit: overallHit,
+                runtimeCacheHit: runtimeRestore.hit,
+                trustState,
+                saveCapable,
+            }),
+            workspace: plan.workspace,
+            setup: plan.setup,
+            mode: plan.mode,
+            preset: plan.preset,
+            working_directory: plan.workingDirectory,
+            cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
+            runtime_cache_tag: plan.runtimeTag || '',
+            resolved_entries: plan.archiveEntries,
+            resolved_tags: resolvedTags,
+            cache_hit: overallHit,
+            runtime_cache_hit: runtimeRestore.hit,
+            mode_evidence: modeRestore.evidence || {},
+            diagnostics_level: diagnostics.level,
+            trust_state: trustState,
+            save_configured: saveEnabled,
+            save_allowed: saveAllowed,
+            save_capable: saveCapable,
+            verify_mode: inputs.verify,
+            verify_save_tags: deferredVerifyTags,
+            token_capabilities: {
+                ...trustState.token_capabilities,
+            },
+        });
+        restoreFailureContext = {
+            ...restoreFailureContext,
+            cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
+            resolved_entries: plan.archiveEntries,
+            resolved_tags: resolvedTags,
+            cache_hit: overallHit,
+            runtime_cache_hit: runtimeRestore.hit,
+            mode_evidence: modeRestore.evidence || {},
+            trust_state: trustState,
+            save_configured: saveEnabled,
+            save_allowed: saveAllowed,
+            save_capable: saveCapable,
+            verify_save_tags: deferredVerifyTags,
+        };
         core.saveState('resolved-mode', plan.mode);
         core.saveState('cli-version', inputs.cliVersion);
         core.saveState('cli-platform', cliPlatform || '');
@@ -255,7 +327,7 @@ async function run() {
                 verbose: inputs.verbose,
             });
         }
-        await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeRestore.hit);
+        await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeRestore.hit, trustState);
         if (!saveEnabled) {
             core.info('Post step save is disabled by save-policy: off.');
         }
@@ -264,7 +336,8 @@ async function run() {
         }
     }
     catch (error) {
-        core.setFailed(`boringcache/one restore failed: ${error instanceof Error ? error.message : String(error)}`);
+        (0, utils_1.writeActionFailureEvidence)('restore', error, restoreFailureContext);
+        core.setFailed(`boringcache/one restore failed: ${(0, utils_1.actionErrorMessage)(error)}`);
     }
     finally {
         process.chdir(originalCwd);

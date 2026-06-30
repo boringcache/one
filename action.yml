@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.73'
+    default: 'v1.13.74'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -62,7 +62,7 @@ inputs:
     default: 'none'
     required: false
   verify-timeout-seconds:
-    description: 'Timeout in seconds for verify=wait or verify=warn.'
+    description: 'Timeout in seconds for verify=wait/warn tag checks and Docker/BuildKit OCI promotion checks. Values above 900 are clamped to keep verification bounded.'
     default: '180'
     required: false
   verify-require-server-signature:
@@ -77,14 +77,14 @@ inputs:
     default: 'auto'
     required: false
   diagnostics-log-lines:
-    description: 'When diagnostics includes logs, tail up to this many proxy log lines.'
+    description: 'When diagnostics includes logs, tail up to this many proxy log lines. Values above 500 are clamped to keep diagnostics bounded.'
     default: '40'
     required: false
   metadata-hints:
     description: 'Low-cardinality proxy session labels as KEY=VALUE pairs, comma-separated or newline-separated. Use this for grouping hints such as phase=seed, project=web, tool=bazel, or benchmark=grpc-bazel.'
     required: false
   proxy-port:
-    description: 'Proxy-backed modes: explicit proxy port.'
+    description: 'Proxy-backed modes: explicit TCP port from 1 to 65535. Leave blank to use the mode default or an automatically selected port.'
     required: false
   proxy-no-git:
     description: 'Proxy-backed modes: disable git scoping.'
@@ -119,15 +119,15 @@ inputs:
     description: 'Target platforms for multi-arch builds.'
     required: false
   push:
-    description: 'Push image output to the registry.'
+    description: 'Whether to push image output to the registry. Must be true or false.'
     default: 'false'
     required: false
   load:
-    description: 'Load Docker image output into the local daemon when supported.'
+    description: 'Whether to load Docker image output into the local daemon when supported. Must be true or false.'
     default: 'true'
     required: false
   no-cache:
-    description: 'Disable cache usage for Docker or BuildKit builds.'
+    description: 'Whether to disable cache usage for Docker or BuildKit builds. Must be true or false.'
     default: 'false'
     required: false
   secrets:
@@ -141,7 +141,7 @@ inputs:
     default: 'docker-container'
     required: false
   docker-command:
-    description: 'Docker mode behavior: build (default) runs docker buildx build, setup only prepares Buildx and registry/local cache wiring.'
+    description: 'Docker mode behavior: build (default) runs docker buildx build; setup only prepares Buildx and registry/local cache wiring. Must be build or setup.'
     default: 'build'
     required: false
   driver-opts:
@@ -159,7 +159,7 @@ inputs:
     default: 'registry'
     required: false
   cache-mode:
-    description: 'Build cache mode for Docker or BuildKit: min or max.'
+    description: 'Build cache mode for Docker or BuildKit. Must be min or max.'
     default: 'max'
     required: false
   registry-tag:
@@ -170,7 +170,7 @@ inputs:
     default: 'buildcache'
     required: false
   oci-hydration:
-    description: 'Expert Docker or BuildKit registry proxy hydration policy: metadata-only, bodies-background, or bodies-before-ready.'
+    description: 'Expert Docker or BuildKit registry proxy hydration policy: metadata-only or bodies-before-ready.'
     default: 'metadata-only'
     required: false
   buildkit-host:
@@ -186,7 +186,7 @@ inputs:
     description: 'TLS client key path or PEM contents for BuildKit.'
     required: false
   buildkit-tls-skip-verify:
-    description: 'Skip TLS verification for BuildKit.'
+    description: 'Whether to skip TLS verification for BuildKit. Must be true or false.'
     default: 'false'
     required: false
   output:
@@ -206,7 +206,7 @@ inputs:
     default: '~/.gradle'
     required: false
   enable-build-cache:
-    description: 'Set org.gradle.caching=true in gradle.properties.'
+    description: 'Whether to set org.gradle.caching=true in gradle.properties. Must be true or false.'
     default: 'true'
     required: false
   maven-version:
@@ -254,23 +254,23 @@ inputs:
     description: 'Rust components to install, comma-separated.'
     required: false
   profile:
-    description: 'Rustup profile: minimal, default, or complete.'
+    description: 'Rustup profile. Must be minimal, default, or complete.'
     default: 'minimal'
     required: false
   cache-cargo:
-    description: 'Cache cargo registry and git directories.'
+    description: 'Whether to cache cargo registry and git directories. Must be true or false.'
     default: 'true'
     required: false
   cache-cargo-bin:
-    description: 'Cache cargo bin directory.'
+    description: 'Whether to cache cargo bin directory. Must be true or false.'
     default: 'false'
     required: false
   cache-target:
-    description: 'Cache the Rust target directory.'
+    description: 'Whether to cache the Rust target directory. Must be true or false.'
     default: 'true'
     required: false
   sccache:
-    description: 'Enable sccache for Rust builds.'
+    description: 'Whether to enable sccache for Rust builds. Must be true or false.'
     default: 'false'
     required: false
   sccache-version:
@@ -282,7 +282,7 @@ inputs:
     default: '5G'
     required: false
   sccache-mode:
-    description: 'sccache storage mode: local or proxy.'
+    description: 'sccache storage mode. Must be local or proxy.'
     default: 'local'
     required: false
   turbo-api-url:
@@ -295,15 +295,13 @@ inputs:
     description: 'Turbo remote cache team slug.'
     required: false
   turbo-port:
-    description: 'Preferred port for a local Turbo proxy.'
-    default: '4227'
+    description: 'Preferred TCP port for a local Turbo proxy, from 1 to 65535.'
     required: false
   nx-access-token:
     description: 'Nx self-hosted remote cache access token. Defaults to the proxy-internal token.'
     required: false
   nx-port:
-    description: 'Preferred port for a local Nx self-hosted remote cache proxy.'
-    default: '4228'
+    description: 'Preferred TCP port for a local Nx self-hosted remote cache proxy, from 1 to 65535.'
     required: false
   cache-profiles:
     description: 'Optional repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). These resolve through the CLI source of truth before any extra raw entries are appended.'
@@ -326,7 +324,7 @@ inputs:
     default: 'false'
     required: false
   save-always:
-    description: 'Run the post step to save the cache even if another step fails (GitHub Actions feature)'
+    description: 'Run the post step to save the cache even if another step fails. Supports the same true spellings as GitHub boolean inputs.'
     default: 'false'
     required: false
   # CLI flags (passed directly to boringcache CLI)
@@ -368,6 +366,8 @@ outputs:
     description: 'A boolean value indicating the mise runtime cache was restored'
   diagnostics-level:
     description: 'Effective diagnostics level used by the action: off, summary, or verbose'
+  evidence-path:
+    description: 'Path to the local boringcache/one JSON evidence file with restore and post-step state'
   resolved-mode:
     description: 'The effective cache mode used by the action'
   resolved-tools:
@@ -458,7 +458,7 @@ runs:
   using: 'node24'
   main: 'dist/restore/index.js'
   post: 'dist/save/index.js'
-  post-if: "success() || inputs.save-always == 'true'"
+  post-if: "success() || inputs.save-always == 'true' || inputs.save-always == 'True' || inputs.save-always == 'TRUE'"
 branding:
   icon: 'archive'
   color: 'blue'

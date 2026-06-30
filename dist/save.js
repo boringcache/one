@@ -123,8 +123,23 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
         saveExpected: true,
     }));
 }
-async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags) {
+async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, saveStatus) {
     const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
+    const proxyLogPath = core.getState('proxy-log-path') || core.getState('mode-proxy-log-path');
+    (0, utils_1.writeActionEvidence)('post', {
+        phase_status: 'completed',
+        phase_summary: (0, utils_1.postPhaseSummary)(saveStatus, trustState),
+        resolved_mode: resolvedMode || '',
+        working_directory: workingDirectory || process.cwd(),
+        workspace: genericWorkspace || '',
+        generic_entries: genericEntries || '',
+        verify_mode: verifyMode,
+        verify_save_tags: verifySaveTags,
+        trust_state: trustState,
+        diagnostics_level: diagnostics.level,
+        save_status: saveStatus,
+        proxy_log_path: proxyLogPath || '',
+    });
     await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
         core.info(`resolved-mode: ${resolvedMode || '(none)'}`);
         core.info(`working-directory: ${workingDirectory || process.cwd()}`);
@@ -132,8 +147,8 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         core.info(`generic-entries: ${genericEntries || '(none)'}`);
         core.info(`verify-mode: ${verifyMode}`);
         core.info(`verify-save-tags: ${verifySaveTags.join(',') || '(none)'}`);
+        core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} save-policy=${trustState.save_policy} save-on-pull-request=${String(trustState.save_on_pull_request)}`);
         if (diagnostics.includeLogs) {
-            const proxyLogPath = core.getState('proxy-log-path') || core.getState('mode-proxy-log-path');
             if (proxyLogPath) {
                 const logTail = (0, utils_1.readLogTail)(proxyLogPath, diagnostics.logLines);
                 core.info(`proxy-log-path: ${proxyLogPath}`);
@@ -149,6 +164,7 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
 }
 async function run() {
     const originalCwd = process.cwd();
+    let postFailureContext = {};
     try {
         const inputs = (0, utils_1.getInputs)();
         const cliVersion = core.getState('cli-version') || inputs.cliVersion;
@@ -163,18 +179,32 @@ async function run() {
         let force = core.getState('force') === 'true';
         let verbose = core.getState('verbose') === 'true';
         const verifyMode = (core.getState('verify-mode') || inputs.verify);
-        const verifyTimeoutSeconds = Number.parseInt(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds), 10);
+        const verifyTimeoutSeconds = (0, utils_1.normalizeVerifyTimeoutSeconds)(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = (0, utils_1.readSavedSaveConfiguration)(inputs, core.getState('save-configured'));
         const saveAllowed = (0, utils_1.readSavedSaveAllowance)(inputs, core.getState('save-allowed'));
-        if (saveAllowed && (0, utils_1.isPullRequestEvent)() && inputs.saveOnPullRequest) {
-            (0, utils_1.applyPullRequestSaveScopeEnv)();
-        }
+        const trustState = (0, utils_1.buildActionTrustState)(inputs, {
+            saveConfigured,
+            saveAllowed,
+        });
         let verifySaveTags = core.getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())
             .filter(Boolean);
         let verifySaveSpecs = parseSavedVerificationSpecs(core.getState('verify-save-specs'));
+        postFailureContext = {
+            resolved_mode: resolvedMode || '',
+            working_directory: workingDirectory || '',
+            workspace: genericWorkspace || '',
+            generic_entries: genericEntries || '',
+            verify_mode: verifyMode,
+            verify_save_tags: verifySaveTags,
+            diagnostics_level: (0, utils_1.loadDiagnosticsConfig)(inputs).level,
+            trust_state: trustState,
+        };
+        if (saveAllowed && (0, utils_1.isPullRequestEvent)() && inputs.saveOnPullRequest) {
+            (0, utils_1.applyPullRequestSaveScopeEnv)();
+        }
         if (cliVersion.toLowerCase() !== 'skip') {
             await (0, utils_1.ensureBoringCache)(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
         }
@@ -198,6 +228,13 @@ async function run() {
             force = inputs.force;
             verbose = inputs.verbose;
         }
+        postFailureContext = {
+            ...postFailureContext,
+            resolved_mode: resolvedMode || '',
+            working_directory: workingDirectory || process.cwd(),
+            workspace: genericWorkspace || '',
+            generic_entries: genericEntries || '',
+        };
         if (verifySaveSpecs.length === 0 && verifySaveTags.length > 0) {
             verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags, genericEntries || '', workingDirectory || process.cwd(), enableCrossOsArchive || noPlatform);
         }
@@ -206,32 +243,32 @@ async function run() {
         }
         if (!saveConfigured) {
             if (resolvedMode && resolvedMode !== 'archive') {
-                await (0, mode_handlers_1.runModeSave)(resolvedMode);
+                await (0, mode_handlers_1.runModeSave)(resolvedMode, { allowSaves: false });
             }
-            else if (genericEntries) {
+            if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
                 core.info((0, utils_1.saveSkippedByConfigurationMessage)());
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_skipped_configuration' : 'skipped_configuration');
             return;
         }
         if (!saveAllowed) {
             if (resolvedMode && resolvedMode !== 'archive') {
-                await (0, mode_handlers_1.runModeSave)(resolvedMode);
+                await (0, mode_handlers_1.runModeSave)(resolvedMode, { allowSaves: false });
             }
-            else if (genericEntries) {
+            if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
                 core.notice((0, utils_1.saveSkippedByPolicyMessage)());
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_skipped_policy' : 'skipped_policy');
             return;
         }
         if (!(0, core_1.hasSaveToken)()) {
             if (resolvedMode && resolvedMode !== 'archive') {
-                await (0, mode_handlers_1.runModeSave)(resolvedMode);
+                await (0, mode_handlers_1.runModeSave)(resolvedMode, { allowSaves: false });
             }
-            else if (genericEntries) {
+            if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
                 core.notice(`Save skipped: ${(0, core_1.missingSaveTokenMessage)()}`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_save_token' : 'skipped_missing_save_token');
             return;
         }
         if (resolvedMode && resolvedMode !== 'archive') {
@@ -252,7 +289,7 @@ async function run() {
                     acceptPendingSaveExpected: true,
                 });
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_no_generic_save' : 'no_generic_save');
             return;
         }
         const args = ['save', genericWorkspace, genericEntries];
@@ -280,10 +317,11 @@ async function run() {
                 acceptPendingSaveExpected: true,
             });
         }
-        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags);
+        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_and_generic_save' : 'saved');
     }
     catch (error) {
-        core.setFailed(`boringcache/one save failed: ${error instanceof Error ? error.message : String(error)}`);
+        (0, utils_1.writeActionFailureEvidence)('post', error, postFailureContext);
+        core.setFailed(`boringcache/one save failed: ${(0, utils_1.actionErrorMessage)(error)}`);
     }
     finally {
         process.chdir(originalCwd);

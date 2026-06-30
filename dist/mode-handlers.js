@@ -119,13 +119,13 @@ async function runModeRestore(plan, inputs) {
             return {};
     }
 }
-async function runModeSave(mode) {
+async function runModeSave(mode, options = {}) {
     switch (mode) {
         case 'docker':
-            await runDockerSave();
+            await runDockerSave(options);
             return;
         case 'buildkit':
-            await runBuildkitSave();
+            await runBuildkitSave(options);
             return;
         case 'bazel':
             await shutdownBazelServer();
@@ -141,17 +141,41 @@ async function runModeSave(mode) {
             await stopProxyFromState();
             return;
         case 'rust-sccache':
-            await runRustSave();
+            await runRustSave(options);
             return;
         case 'archive':
             return;
     }
 }
-function parseBoolean(value, defaultValue = false) {
+function parseBooleanInput(value, inputName, defaultValue = false) {
     if (value === undefined || value === null || value === '') {
         return defaultValue;
     }
-    return String(value).trim().toLowerCase() === 'true';
+    const normalized = String(value).trim();
+    if (['true', 'True', 'TRUE'].includes(normalized)) {
+        return true;
+    }
+    if (['false', 'False', 'FALSE'].includes(normalized)) {
+        return false;
+    }
+    throw new Error(`Unsupported ${inputName} "${value}". Expected true, True, TRUE, false, False, or FALSE.`);
+}
+function parsePortInput(value, inputName) {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) {
+        throw new Error(`Unsupported ${inputName} "${value}". Expected a TCP port from 1 to 65535.`);
+    }
+    const port = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+        throw new Error(`Unsupported ${inputName} "${value}". Expected a TCP port from 1 to 65535.`);
+    }
+    return port;
+}
+async function resolvePreferredPort(value, inputName, defaultPort) {
+    if (value.trim()) {
+        return parsePortInput(value, inputName);
+    }
+    return defaultPort !== null && defaultPort !== void 0 ? defaultPort : await (0, core_1.findAvailablePort)();
 }
 function parseList(input, separator = /[\n,]/) {
     return input
@@ -349,11 +373,7 @@ async function verifyOciPromotionRefsAfterStop() {
 }
 function ociPromotionVerificationTimeoutMs() {
     const raw = core.getState('verify-timeout-seconds') || core.getInput('verify-timeout-seconds') || '180';
-    const seconds = Number.parseInt(raw, 10);
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-        return 180000;
-    }
-    return seconds * 1000;
+    return (0, utils_1.normalizeVerifyTimeoutSeconds)(raw) * 1000;
 }
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -397,6 +417,34 @@ function normalizeBuildKitCacheBackend(value) {
         return backend;
     }
     throw new Error(`Unsupported BuildKit cache backend: ${value}. Expected registry or boringcache.`);
+}
+function normalizeDockerCommand(value) {
+    const command = (value.trim() || 'build');
+    if (command === 'build' || command === 'setup') {
+        return command;
+    }
+    throw new Error(`Unsupported docker-command "${value}". Expected build or setup.`);
+}
+function normalizeDockerCacheMode(value) {
+    const mode = (value.trim() || 'max');
+    if (mode === 'min' || mode === 'max') {
+        return mode;
+    }
+    throw new Error(`Unsupported cache-mode "${value}". Expected min or max.`);
+}
+function normalizeSccacheMode(value) {
+    const mode = (value.trim() || 'local');
+    if (mode === 'local' || mode === 'proxy') {
+        return mode;
+    }
+    throw new Error(`Unsupported sccache-mode "${value}". Expected local or proxy.`);
+}
+function normalizeRustupProfile(value) {
+    const profile = (value.trim() || 'minimal');
+    if (profile === 'minimal' || profile === 'default' || profile === 'complete') {
+        return profile;
+    }
+    throw new Error(`Unsupported profile "${value}". Expected minimal, default, or complete.`);
 }
 function usesRegistryCachePlan(backend) {
     return backend !== 'local';
@@ -662,6 +710,31 @@ function effectiveRegistryCacheImports(ociCache, proxy) {
         requestedRefTags,
         unreadableRefTags,
         importReady: (_c = (_b = proxy === null || proxy === void 0 ? void 0 : proxy.ociImportReadiness) === null || _b === void 0 ? void 0 : _b.ready) !== null && _c !== void 0 ? _c : true,
+    };
+}
+function registryCacheEvidence(adapter, cacheBackend, ociCache, imports, cacheTo) {
+    const runMetadata = ociCache.run_metadata;
+    return {
+        adapter,
+        cache_backend: cacheBackend,
+        buildkit_cache_backend: ociCache.buildkit_cache_backend || 'registry',
+        registry_ref: ociCache.registry_ref,
+        cache_from: imports.importSpecs,
+        cache_to: cacheTo || '',
+        requested_ref_tags: imports.requestedRefTags,
+        readable_ref_tags: imports.readableRefTags,
+        unreadable_ref_tags: imports.unreadableRefTags,
+        import_ready: imports.importReady,
+        immutable_run_ref_tag: ociCache.immutable_run_ref_tag || '',
+        promotion_ref_tags: ociCache.promotion_ref_tags || [],
+        ci: {
+            provider: (runMetadata === null || runMetadata === void 0 ? void 0 : runMetadata.provider) || '',
+            run_uid: (runMetadata === null || runMetadata === void 0 ? void 0 : runMetadata.run_uid) || '',
+            run_attempt: (runMetadata === null || runMetadata === void 0 ? void 0 : runMetadata.run_attempt) || '',
+            source_ref_type: (runMetadata === null || runMetadata === void 0 ? void 0 : runMetadata.source_ref_type) || '',
+            source_ref_name: (runMetadata === null || runMetadata === void 0 ? void 0 : runMetadata.source_ref_name) || '',
+            run_started_at: (runMetadata === null || runMetadata === void 0 ? void 0 : runMetadata.run_started_at) || '',
+        },
     };
 }
 function recordOciRegistryPlanState(ociPlan, cacheTag) {
@@ -1602,7 +1675,7 @@ async function runDockerRestore(plan, inputs) {
     var _a, _b, _c;
     const context = path.resolve(plan.workingDirectory, core.getInput('context') || '.');
     const dockerfile = core.getInput('dockerfile') || 'Dockerfile';
-    const dockerCommand = core.getInput('docker-command') || 'build';
+    const dockerCommand = normalizeDockerCommand(core.getInput('docker-command'));
     const shouldBuild = dockerCommand !== 'setup';
     const imageInput = core.getInput('image') || '';
     const image = shouldBuild
@@ -1615,10 +1688,10 @@ async function runDockerRestore(plan, inputs) {
     const dockerToolCaches = parseList(dockerToolCache);
     const target = core.getInput('target') || '';
     const platforms = core.getInput('platforms') || '';
-    const push = parseBoolean(core.getInput('push'), false);
-    const load = parseBoolean(core.getInput('load'), true) && !platforms;
-    const noCache = parseBoolean(core.getInput('no-cache'), false);
-    const cacheMode = core.getInput('cache-mode') || 'max';
+    const push = parseBooleanInput(core.getInput('push'), 'push', false);
+    const load = parseBooleanInput(core.getInput('load'), 'load', true) && !platforms;
+    const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
+    const cacheMode = normalizeDockerCacheMode(core.getInput('cache-mode'));
     const driver = core.getInput('driver') || 'docker-container';
     const driverOpts = parseMultiline(core.getInput('driver-opts') || '');
     const buildkitdConfigInline = core.getInput('buildkitd-config-inline') || '';
@@ -1640,6 +1713,7 @@ async function runDockerRestore(plan, inputs) {
     const registryCachePlan = usesRegistryCachePlan(cacheBackend);
     let registryVerification = null;
     let registryOciCache;
+    let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = localCacheTag;
     saveModeState('workspace', plan.workspace);
@@ -1662,7 +1736,7 @@ async function runDockerRestore(plan, inputs) {
                 refHost = await getContainerGateway(containerName);
             }
         }
-        const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
+        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, cacheBackend, buildkitCacheBackend, dockerToolCache);
         const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
@@ -1700,6 +1774,7 @@ async function runDockerRestore(plan, inputs) {
                     cacheMode,
                 });
             }
+            modeEvidence = registryCacheEvidence('docker', cacheBackend, dockerPlan.oci_cache, effectiveImports, usesCliCacheAccelerator(cacheBackend) ? undefined : dockerPlan.oci_cache.cache_to);
         }
         else {
             const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
@@ -1757,6 +1832,7 @@ async function runDockerRestore(plan, inputs) {
                     cacheTo: dockerPlan.oci_cache.cache_to,
                 });
             }
+            modeEvidence = registryCacheEvidence('docker', cacheBackend, dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
         }
     }
     else {
@@ -1765,6 +1841,13 @@ async function runDockerRestore(plan, inputs) {
         saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
         await restoreSimpleCache(plan.workspace, localCacheTag, DOCKER_CACHE_DIR_FROM, cacheFlags);
         setLocalCacheOutputs(DOCKER_CACHE_DIR_FROM, DOCKER_CACHE_DIR_TO, cacheMode);
+        modeEvidence = {
+            adapter: 'docker',
+            cache_backend: 'local',
+            cache_dir_from: DOCKER_CACHE_DIR_FROM,
+            cache_dir_to: DOCKER_CACHE_DIR_TO,
+            import_ready: true,
+        };
         if (shouldBuild) {
             await buildDockerImage({
                 dockerfile,
@@ -1795,17 +1878,27 @@ async function runDockerRestore(plan, inputs) {
     const saveExpected = (_c = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _c !== void 0 ? _c : !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
+        evidence: modeEvidence,
         // docker-command=setup defers the build to later workflow steps, so treat
         // write-capable registry refs as save-expected and verify after post-save.
         verificationSpecs: registryCacheVerificationSpecs(resolvedCacheTag, registryOciCache, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noPlatform) || false, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noGit) || false, saveExpected, plan.workingDirectory),
     };
 }
-async function runDockerSave() {
+async function runDockerSave(options = {}) {
+    const allowSaves = options.allowSaves !== false;
     const builderName = getModeState('builder-name');
     try {
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
-            await verifyOciPromotionRefsThenStopProxy(proxyPid);
+            if (allowSaves) {
+                await verifyOciPromotionRefsThenStopProxy(proxyPid);
+            }
+            else {
+                await stopProxyFromState();
+            }
+            return;
+        }
+        if (!allowSaves) {
             return;
         }
         const workspace = getModeState('workspace');
@@ -1842,20 +1935,20 @@ async function runBuildkitRestore(plan, inputs) {
     const image = core.getInput('image', { required: true });
     const tags = parseList(core.getInput('tags') || 'latest');
     const imageTags = tags.length > 0 ? tags.map((tag) => `${image}:${tag}`) : [`${image}:latest`];
-    const push = parseBoolean(core.getInput('push'), false);
+    const push = parseBooleanInput(core.getInput('push'), 'push', false);
     const output = core.getInput('output') || '';
     const buildArgs = parseMultiline(core.getInput('build-args') || '');
     const secrets = parseMultiline(core.getInput('secrets') || '');
     const sshSpecs = parseMultiline(core.getInput('ssh') || '');
     const target = core.getInput('target') || '';
     const platforms = core.getInput('platforms') || '';
-    const noCache = parseBoolean(core.getInput('no-cache'), false);
-    const cacheMode = core.getInput('cache-mode') || 'max';
+    const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
+    const cacheMode = normalizeDockerCacheMode(core.getInput('cache-mode'));
     const buildkitHost = core.getInput('buildkit-host', { required: true });
     const tlsCaInput = core.getInput('buildkit-tls-ca') || '';
     const tlsCertInput = core.getInput('buildkit-tls-cert') || '';
     const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
-    const tlsSkipVerify = parseBoolean(core.getInput('buildkit-tls-skip-verify'), false);
+    const tlsSkipVerify = parseBooleanInput(core.getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
     const cacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'registry');
     const buildkitCacheBackend = normalizeBuildKitCacheBackend(inputs.buildkitCacheBackend);
     const registryTagInput = core.getInput('registry-tag') || '';
@@ -1865,6 +1958,7 @@ async function runBuildkitRestore(plan, inputs) {
     const registryCachePlan = usesRegistryCachePlan(cacheBackend);
     let registryVerification = null;
     let registryOciCache;
+    let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = localCacheTag;
     saveModeState('workspace', plan.workspace);
@@ -1889,7 +1983,7 @@ async function runBuildkitRestore(plan, inputs) {
                 refHost = await getContainerGateway(containerName);
             }
         }
-        const requestedPort = parseInt(inputs.proxyPort || '5000', 10);
+        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
         const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, cacheBackend, buildkitCacheBackend);
         const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
@@ -1930,6 +2024,7 @@ async function runBuildkitRestore(plan, inputs) {
                 noCache,
                 metadataFile: BUILDKIT_METADATA_FILE,
             });
+            modeEvidence = registryCacheEvidence('buildkit', cacheBackend, dockerPlan.oci_cache, effectiveImports, undefined);
         }
         else {
             const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
@@ -1991,6 +2086,7 @@ async function runBuildkitRestore(plan, inputs) {
                 noCache,
                 metadataFile: BUILDKIT_METADATA_FILE,
             });
+            modeEvidence = registryCacheEvidence('buildkit', cacheBackend, dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
         }
     }
     else {
@@ -1999,6 +2095,13 @@ async function runBuildkitRestore(plan, inputs) {
         saveModeState('cache-dir', BUILDKIT_CACHE_DIR_TO);
         await restoreSimpleCache(plan.workspace, localCacheTag, BUILDKIT_CACHE_DIR_FROM, cacheFlags);
         setLocalCacheOutputs(BUILDKIT_CACHE_DIR_FROM, BUILDKIT_CACHE_DIR_TO, cacheMode);
+        modeEvidence = {
+            adapter: 'buildkit',
+            cache_backend: 'local',
+            cache_dir_from: BUILDKIT_CACHE_DIR_FROM,
+            cache_dir_to: BUILDKIT_CACHE_DIR_TO,
+            import_ready: true,
+        };
         await buildWithBuildctl({
             addr: buildkitHost,
             tlsCa,
@@ -2029,13 +2132,23 @@ async function runBuildkitRestore(plan, inputs) {
     const saveExpected = (_c = registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.saveExpected) !== null && _c !== void 0 ? _c : !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
+        evidence: modeEvidence,
         verificationSpecs: registryCacheVerificationSpecs(resolvedCacheTag, registryOciCache, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noPlatform) || false, (registryVerification === null || registryVerification === void 0 ? void 0 : registryVerification.noGit) || false, saveExpected, plan.workingDirectory),
     };
 }
-async function runBuildkitSave() {
+async function runBuildkitSave(options = {}) {
+    const allowSaves = options.allowSaves !== false;
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
-        await verifyOciPromotionRefsThenStopProxy(proxyPid);
+        if (allowSaves) {
+            await verifyOciPromotionRefsThenStopProxy(proxyPid);
+        }
+        else {
+            await stopProxyFromState();
+        }
+        return;
+    }
+    if (!allowSaves) {
         return;
     }
     const workspace = getModeState('workspace');
@@ -2056,7 +2169,7 @@ async function runBazelRestore(plan, inputs) {
     const bazelrcLines = core.getInput('bazelrc-lines') || '';
     const runtimeVersion = ((_a = plan.runtimeTools.find((tool) => tool.name === 'bazel')) === null || _a === void 0 ? void 0 : _a.version) || '';
     const bazelVersion = inputVersion || runtimeVersion;
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
         bazelrcLines,
@@ -2109,7 +2222,7 @@ function goCacheProgForProxy(proxyPlan, port) {
     return `${planned} --endpoint ${endpoint}`;
 }
 async function runGoRestore(plan, inputs) {
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
@@ -2139,9 +2252,9 @@ async function runGoRestore(plan, inputs) {
     };
 }
 async function runGradleRestore(plan, inputs) {
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
     const gradleHome = core.getInput('gradle-home') || '';
-    const enableBuildCache = parseBoolean(core.getInput('enable-build-cache'), true);
+    const enableBuildCache = parseBooleanInput(core.getInput('enable-build-cache'), 'enable-build-cache', true);
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
         gradleHome,
@@ -2173,7 +2286,7 @@ async function runGradleRestore(plan, inputs) {
     };
 }
 async function runMavenRestore(plan, inputs) {
-    const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const mavenExtensionsPath = core.getInput('maven-extensions-path') || '';
     const mavenBuildCacheConfigPath = core.getInput('maven-build-cache-config-path') || '';
     const mavenLocalRepo = core.getInput('maven-local-repo') || '';
@@ -2222,7 +2335,8 @@ async function runTurboProxyRestore(plan, inputs) {
     const turboApiUrl = core.getInput('turbo-api-url') || '';
     const turboToken = core.getInput('turbo-token') || 'boringcache';
     const turboTeam = core.getInput('turbo-team') || '';
-    const preferredPort = parseInt(core.getInput('turbo-port') || inputs.proxyPort || '4227', 10);
+    const turboPortInput = core.getInput('turbo-port');
+    const preferredPort = await resolvePreferredPort(turboPortInput || inputs.proxyPort, turboPortInput ? 'turbo-port' : 'proxy-port', 4227);
     const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
@@ -2261,7 +2375,8 @@ async function runTurboProxyRestore(plan, inputs) {
 }
 async function runNxProxyRestore(plan, inputs) {
     const nxAccessToken = core.getInput('nx-access-token');
-    const preferredPort = parseInt(core.getInput('nx-port') || inputs.proxyPort || '4228', 10);
+    const nxPortInput = core.getInput('nx-port');
+    const preferredPort = await resolvePreferredPort(nxPortInput || inputs.proxyPort, nxPortInput ? 'nx-port' : 'proxy-port', 4228);
     const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
@@ -2290,16 +2405,16 @@ async function runRustRestore(plan, inputs) {
     const cacheTagPrefix = (inputs.cacheTag || plan.cacheTagPrefix || '').trim();
     const inputVersion = core.getInput('rust-version') || core.getInput('toolchain');
     const workingDir = plan.workingDirectory;
-    const cacheCargo = core.getInput('cache-cargo') !== 'false';
-    const cacheCargoBin = core.getInput('cache-cargo-bin') === 'true';
-    const cacheTarget = core.getInput('cache-target') !== 'false';
-    const useSccache = core.getInput('sccache') === 'true';
+    const cacheCargo = parseBooleanInput(core.getInput('cache-cargo'), 'cache-cargo', true);
+    const cacheCargoBin = parseBooleanInput(core.getInput('cache-cargo-bin'), 'cache-cargo-bin', false);
+    const cacheTarget = parseBooleanInput(core.getInput('cache-target'), 'cache-target', true);
+    const useSccache = parseBooleanInput(core.getInput('sccache'), 'sccache', false);
     const sccacheVersion = core.getInput('sccache-version') || '0.14.0';
-    const sccacheMode = core.getInput('sccache-mode') || 'local';
+    const sccacheMode = normalizeSccacheMode(core.getInput('sccache-mode'));
     const sccacheCacheSize = core.getInput('sccache-cache-size') || '5G';
     const targets = core.getInput('targets');
     const components = core.getInput('components');
-    const profile = core.getInput('profile') || 'minimal';
+    const profile = normalizeRustupProfile(core.getInput('profile'));
     const rustVersion = await detectRustVersion(workingDir, inputVersion);
     configureCargoEnv();
     const rustMajorMinor = ((_a = rustVersion.match(/^(\d+\.\d+)/)) === null || _a === void 0 ? void 0 : _a[1]) || rustVersion;
@@ -2395,7 +2510,7 @@ async function runRustRestore(plan, inputs) {
     if (useSccache && sccacheEntry) {
         await installSccache(sccacheVersion);
         if (sccacheMode === 'proxy') {
-            const requestedPort = parseInt(inputs.proxyPort || '0', 10) || await (0, core_1.findAvailablePort)();
+            const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
             const proxyPlan = await resolveAdapterCliPlan('sccache', workspace, workingDir, sccacheEntry.tag, requestedPort, true, true, proxyPlanningReadOnly(inputs.readOnly), {
                 metadataHintsInput: inputs.metadataHints,
             });
@@ -2494,7 +2609,7 @@ async function runRustRestore(plan, inputs) {
     }
     return { cacheHit, cacheTag: cacheTagPrefix, verificationSpecs };
 }
-async function runRustSave() {
+async function runRustSave(options = {}) {
     const workspace = getModeState('workspace');
     const cacheCargo = getModeState('cache-cargo') === 'true';
     const cacheCargoBin = getModeState('cache-cargo-bin') === 'true';
@@ -2503,7 +2618,17 @@ async function runRustSave() {
     const sccacheMode = getModeState('sccache-mode') || 'local';
     const verbose = getModeState('verbose') === 'true';
     const exclude = core.getInput('exclude');
+    const allowSaves = options.allowSaves !== false;
     if (!workspace) {
+        return;
+    }
+    if (!allowSaves) {
+        if (useSccache) {
+            await stopSccacheServer();
+            if (sccacheMode === 'proxy') {
+                await stopProxyFromState();
+            }
+        }
         return;
     }
     if (!(0, core_1.hasSaveToken)()) {
