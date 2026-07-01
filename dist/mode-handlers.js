@@ -49,6 +49,7 @@ const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit:v0.30.0-bc.1';
 function actionProxyOptions(options, proxyPlan) {
     return {
         ...options,
@@ -405,18 +406,14 @@ function emitCliPlannerWarnings(stderr) {
     }
 }
 function normalizeDockerCacheBackend(value) {
-    const backend = (value.trim() || 'registry');
-    if (backend === 'registry' || backend === 'local' || backend === 'native') {
+    const backend = (value.trim() || 'boringcache');
+    if (backend === 'boringcache' || backend === 'registry' || backend === 'local') {
         return backend;
     }
-    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected registry, local, or native.`);
+    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected boringcache, registry, or local.`);
 }
-function normalizeBuildKitCacheBackend(value) {
-    const backend = (value.trim() || 'registry');
-    if (backend === 'registry' || backend === 'boringcache') {
-        return backend;
-    }
-    throw new Error(`Unsupported BuildKit cache backend: ${value}. Expected registry or boringcache.`);
+function buildKitCacheBackendFor(cacheBackend) {
+    return cacheBackend === 'registry' ? 'registry' : 'boringcache';
 }
 function normalizeDockerCommand(value) {
     const command = (value.trim() || 'build');
@@ -448,9 +445,6 @@ function normalizeRustupProfile(value) {
 }
 function usesRegistryCachePlan(backend) {
     return backend !== 'local';
-}
-function usesCliCacheAccelerator(backend) {
-    return backend === 'native';
 }
 async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, noPlatform, noGit, readOnly, options = {}) {
     var _a, _b, _c, _d, _e, _f;
@@ -526,7 +520,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     assertSupportedCliDryRunSchema(adapter, plan);
     return plan;
 }
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', cacheBackend = 'registry', buildkitCacheBackend = 'registry', dockerToolCacheInput = '') {
+async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', buildkitCacheBackend = 'boringcache', dockerToolCacheInput = '') {
     var _a;
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
@@ -555,7 +549,7 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     if (cacheMode.trim()) {
         args.push('--cache-mode', cacheMode.trim());
     }
-    args.push('--backend', cacheBackend);
+    args.push('--backend', buildkitCacheBackend);
     if (trimmedCacheRefTag) {
         args.push('--cache-ref-tag', trimmedCacheRefTag);
     }
@@ -582,7 +576,6 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
         env.BORINGCACHE_CI_RUN_STARTED_AT = new Date().toISOString();
         process.env.BORINGCACHE_CI_RUN_STARTED_AT = env.BORINGCACHE_CI_RUN_STARTED_AT;
     }
-    env.BORINGCACHE_BUILDKIT_CACHE_BACKEND = buildkitCacheBackend;
     const exitCode = await exec.exec('boringcache', args, {
         cwd: workingDirectory,
         env,
@@ -614,11 +607,11 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     }
     return plan;
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', cacheBackend = 'registry', buildkitCacheBackend = 'registry', dockerToolCacheInput = '') {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput, cacheBackend, buildkitCacheBackend, dockerToolCacheInput);
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', buildkitCacheBackend = 'boringcache', dockerToolCacheInput = '') {
+    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput, buildkitCacheBackend, dockerToolCacheInput);
 }
-async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', cacheBackend = 'registry', buildkitCacheBackend = 'registry') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput, cacheBackend, buildkitCacheBackend);
+async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', buildkitCacheBackend = 'boringcache') {
+    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, cacheMode, cacheRefTag, ociHydration, metadataHintsInput, buildkitCacheBackend);
 }
 async function restoreSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!(0, core_1.hasRestoreToken)()) {
@@ -712,12 +705,13 @@ function effectiveRegistryCacheImports(ociCache, proxy) {
         importReady: (_c = (_b = proxy === null || proxy === void 0 ? void 0 : proxy.ociImportReadiness) === null || _b === void 0 ? void 0 : _b.ready) !== null && _c !== void 0 ? _c : true,
     };
 }
-function registryCacheEvidence(adapter, cacheBackend, ociCache, imports, cacheTo) {
+function registryCacheEvidence(adapter, ociCache, imports, cacheTo) {
     const runMetadata = ociCache.run_metadata;
+    const effectiveBuildKitCacheBackend = ociCache.buildkit_cache_backend === 'registry' ? 'registry' : 'boringcache';
     return {
         adapter,
-        cache_backend: cacheBackend,
-        buildkit_cache_backend: ociCache.buildkit_cache_backend || 'registry',
+        cache_backend: effectiveBuildKitCacheBackend,
+        buildkit_cache_backend: effectiveBuildKitCacheBackend,
         registry_ref: ociCache.registry_ref,
         cache_from: imports.importSpecs,
         cache_to: cacheTo || '',
@@ -756,7 +750,7 @@ function setRegistryCacheOutputs(spec) {
     core.setOutput('registry-ref', spec.ref);
     core.setOutput('cache-from', spec.from.join('\n'));
     core.setOutput('cache-to', spec.to || '');
-    core.setOutput('buildkit-cache-backend', ((_a = spec.ociCache) === null || _a === void 0 ? void 0 : _a.buildkit_cache_backend) || 'registry');
+    core.setOutput('buildkit-cache-backend', ((_a = spec.ociCache) === null || _a === void 0 ? void 0 : _a.buildkit_cache_backend) || 'boringcache');
     core.setOutput('docker-cache-run-ref', ((_b = spec.ociCache) === null || _b === void 0 ? void 0 : _b.immutable_run_ref_tag) || '');
     core.setOutput('docker-cache-from-refs', (spec.usedRefTags || registryCacheFromRefTags(spec.ociCache)).join('\n'));
     core.setOutput('docker-cache-requested-from-refs', registryCacheFromRefTags(spec.ociCache).join('\n'));
@@ -850,7 +844,10 @@ function buildxBuilderName() {
     const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     return `boringcache-${runId}-${actionId}-${uniqueSuffix}`;
 }
-async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryMode) {
+function hasDriverImageOpt(driverOpts) {
+    return driverOpts.some((opt) => opt.trim().startsWith('image='));
+}
+async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryMode, useManagedBuildKitImage) {
     const builderName = buildxBuilderName();
     let driverToUse = driver || 'docker-container';
     if (driverToUse === 'docker') {
@@ -858,6 +855,9 @@ async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, reg
         driverToUse = 'docker-container';
     }
     const effectiveDriverOpts = [...driverOpts];
+    if (useManagedBuildKitImage && driverToUse === 'docker-container' && !hasDriverImageOpt(effectiveDriverOpts)) {
+        effectiveDriverOpts.push(`image=${DEFAULT_MANAGED_BUILDKIT_IMAGE}`);
+    }
     if (registryMode && driverToUse === 'docker-container' && !effectiveDriverOpts.some((opt) => opt.startsWith('network='))) {
         effectiveDriverOpts.push('network=host');
     }
@@ -938,6 +938,12 @@ function dockerBuildxArgs(opts) {
     if (opts.noCache) {
         args.push('--no-cache');
     }
+    if (opts.provenance) {
+        args.push('--provenance=true');
+    }
+    if (opts.sbom) {
+        args.push('--sbom=true');
+    }
     if ((_a = opts.cacheFrom) === null || _a === void 0 ? void 0 : _a.length) {
         for (const cacheFrom of opts.cacheFrom) {
             args.push('--cache-from', cacheFrom);
@@ -967,7 +973,7 @@ async function buildDockerImage(opts) {
         throw new Error(`docker buildx build failed with exit code ${result}`);
     }
 }
-function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, cacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, command, commandArgs) {
+function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, command, commandArgs) {
     const args = [
         adapter,
         '--workspace',
@@ -975,7 +981,7 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, cach
         '--tag',
         cacheTag,
         '--backend',
-        cacheBackend,
+        buildkitCacheBackend,
         '--port',
         String(port),
         '--host',
@@ -1009,7 +1015,7 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, cach
     args.push('--', command, ...commandArgs);
     return args;
 }
-async function buildDockerImageWithCliAdapter(workspace, cacheTag, cacheBackend, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, opts) {
+async function buildDockerImageWithCliAdapter(workspace, cacheTag, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, opts) {
     const dockerBuildArgs = dockerBuildxArgs({
         ...opts,
         cacheFrom: undefined,
@@ -1017,17 +1023,16 @@ async function buildDockerImageWithCliAdapter(workspace, cacheTag, cacheBackend,
         cacheDirFrom: undefined,
         cacheDirTo: undefined,
     });
-    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, cacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, 'docker', dockerBuildArgs);
+    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, 'docker', dockerBuildArgs);
     const result = await execBoringCache(args, {
         cwd: opts.context,
         env: {
             ...process.env,
-            BORINGCACHE_BUILDKIT_CACHE_BACKEND: buildkitCacheBackend,
             DOCKER_BUILDKIT: '1',
         },
     });
     if (result !== 0) {
-        throw new Error(`boringcache docker --backend ${cacheBackend} failed with exit code ${result}`);
+        throw new Error(`boringcache docker --backend ${buildkitCacheBackend} failed with exit code ${result}`);
     }
 }
 function readDockerMetadata() {
@@ -1169,25 +1174,6 @@ async function buildWithBuildctl(opts) {
     const result = await exec.exec('buildctl', args);
     if (result !== 0) {
         throw new Error(`buildctl failed with exit code ${result}`);
-    }
-}
-async function buildWithBuildctlCliAccelerator(workspace, cacheTag, cacheBackend, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, opts) {
-    const buildctlCommandArgs = buildctlArgs({
-        ...opts,
-        importCache: undefined,
-        exportCache: undefined,
-        cacheDirFrom: undefined,
-        cacheDirTo: undefined,
-    });
-    const args = ociAdapterCliArgsForAcceleratedBuild('buildkit', workspace, cacheTag, cacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, 'buildctl', buildctlCommandArgs);
-    const result = await execBoringCache(args, {
-        env: {
-            ...process.env,
-            BORINGCACHE_BUILDKIT_CACHE_BACKEND: buildkitCacheBackend,
-        },
-    });
-    if (result !== 0) {
-        throw new Error(`boringcache buildkit --backend ${cacheBackend} failed with exit code ${result}`);
     }
 }
 function readBuildkitDigest(metadataFile) {
@@ -1691,18 +1677,14 @@ async function runDockerRestore(plan, inputs) {
     const push = parseBooleanInput(core.getInput('push'), 'push', false);
     const load = parseBooleanInput(core.getInput('load'), 'load', true) && !platforms;
     const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
+    const provenance = parseBooleanInput(core.getInput('provenance'), 'provenance', false);
+    const sbom = parseBooleanInput(core.getInput('sbom'), 'sbom', false);
     const cacheMode = normalizeDockerCacheMode(core.getInput('cache-mode'));
     const driver = core.getInput('driver') || 'docker-container';
     const driverOpts = parseMultiline(core.getInput('driver-opts') || '');
     const buildkitdConfigInline = core.getInput('buildkitd-config-inline') || '';
-    const requestedCacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'registry');
-    const buildkitCacheBackend = normalizeBuildKitCacheBackend(inputs.buildkitCacheBackend);
-    const cacheBackend = usesCliCacheAccelerator(requestedCacheBackend) && !shouldBuild
-        ? 'registry'
-        : requestedCacheBackend;
-    if (cacheBackend !== requestedCacheBackend) {
-        core.warning('cache-backend=native needs docker-command=build; using registry cache setup for docker-command=setup.');
-    }
+    const cacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'boringcache');
+    const buildkitCacheBackend = buildKitCacheBackendFor(cacheBackend);
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
     }
@@ -1720,7 +1702,7 @@ async function runDockerRestore(plan, inputs) {
     saveModeState('cache-tag', localCacheTag);
     saveModeState('verbose', String(inputs.verbose));
     saveModeState('exclude', inputs.exclude);
-    const builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryCachePlan);
+    const builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryCachePlan, cacheBackend === 'boringcache');
     saveModeState('builder-name', builderName);
     core.setOutput('buildx-name', builderName);
     core.setOutput('buildx-platforms', await getBuilderPlatforms(builderName));
@@ -1737,10 +1719,10 @@ async function runDockerRestore(plan, inputs) {
             }
         }
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, cacheBackend, buildkitCacheBackend, dockerToolCache);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, buildkitCacheBackend, dockerToolCache);
         const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
-        const usesCliWrappedBuild = usesCliCacheAccelerator(cacheBackend) || dockerToolCaches.length > 0;
+        const usesCliWrappedBuild = dockerToolCaches.length > 0;
         if (usesCliWrappedBuild) {
             const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
             resolvedWorkspace = planState.resolvedWorkspace;
@@ -1751,14 +1733,14 @@ async function runDockerRestore(plan, inputs) {
             setRegistryCacheOutputs({
                 ref: dockerPlan.oci_cache.registry_ref,
                 from: effectiveImports.importSpecs,
-                to: usesCliCacheAccelerator(cacheBackend) ? undefined : dockerPlan.oci_cache.cache_to,
+                to: dockerPlan.oci_cache.cache_to,
                 ociCache: dockerPlan.oci_cache,
                 usedRefTags: effectiveImports.readableRefTags,
                 unreadableRefTags: effectiveImports.unreadableRefTags,
                 importReady: effectiveImports.importReady,
             });
             if (shouldBuild) {
-                await buildDockerImageWithCliAdapter(dockerPlan.workspace, getEffectiveRegistryTag(localCacheTag, registryTagInput), cacheBackend, buildkitCacheBackend, requestedPort, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, {
+                await buildDockerImageWithCliAdapter(dockerPlan.workspace, getEffectiveRegistryTag(localCacheTag, registryTagInput), buildkitCacheBackend, requestedPort, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, {
                     dockerfile,
                     context,
                     image,
@@ -1770,11 +1752,13 @@ async function runDockerRestore(plan, inputs) {
                     push,
                     load,
                     noCache,
+                    provenance,
+                    sbom,
                     builder: builderName,
                     cacheMode,
                 });
             }
-            modeEvidence = registryCacheEvidence('docker', cacheBackend, dockerPlan.oci_cache, effectiveImports, usesCliCacheAccelerator(cacheBackend) ? undefined : dockerPlan.oci_cache.cache_to);
+            modeEvidence = registryCacheEvidence('docker', dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
         }
         else {
             const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
@@ -1826,13 +1810,15 @@ async function runDockerRestore(plan, inputs) {
                     push,
                     load,
                     noCache,
+                    provenance,
+                    sbom,
                     builder: builderName,
                     cacheMode,
                     cacheFrom: effectiveImports.importSpecs,
                     cacheTo: dockerPlan.oci_cache.cache_to,
                 });
             }
-            modeEvidence = registryCacheEvidence('docker', cacheBackend, dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
+            modeEvidence = registryCacheEvidence('docker', dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
         }
     }
     else {
@@ -1861,6 +1847,8 @@ async function runDockerRestore(plan, inputs) {
                 push,
                 load,
                 noCache,
+                provenance,
+                sbom,
                 builder: builderName,
                 cacheMode,
                 cacheDirFrom: DOCKER_CACHE_DIR_FROM,
@@ -1949,8 +1937,8 @@ async function runBuildkitRestore(plan, inputs) {
     const tlsCertInput = core.getInput('buildkit-tls-cert') || '';
     const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBooleanInput(core.getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
-    const cacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'registry');
-    const buildkitCacheBackend = normalizeBuildKitCacheBackend(inputs.buildkitCacheBackend);
+    const cacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'boringcache');
+    const buildkitCacheBackend = buildKitCacheBackendFor(cacheBackend);
     const registryTagInput = core.getInput('registry-tag') || '';
     const registryRefTagInput = core.getInput('registry-ref-tag') || '';
     const localCacheTag = inputs.cacheTag || slugify(image);
@@ -1984,110 +1972,69 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
-        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, cacheBackend, buildkitCacheBackend);
+        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, buildkitCacheBackend);
         const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
         const cacheTag = dockerPlan.tag;
-        if (usesCliCacheAccelerator(cacheBackend)) {
-            const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
-            resolvedWorkspace = planState.resolvedWorkspace;
-            resolvedCacheTag = planState.resolvedCacheTag;
-            registryVerification = planState.registryVerification;
-            registryOciCache = planState.registryOciCache;
-            const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache);
-            setRegistryCacheOutputs({
-                ref: dockerPlan.oci_cache.registry_ref,
-                from: effectiveImports.importSpecs,
-                to: undefined,
-                ociCache: dockerPlan.oci_cache,
-                usedRefTags: effectiveImports.readableRefTags,
-                unreadableRefTags: effectiveImports.unreadableRefTags,
-                importReady: effectiveImports.importReady,
-            });
-            await buildWithBuildctlCliAccelerator(dockerPlan.workspace, getEffectiveRegistryTag(localCacheTag, registryTagInput), cacheBackend, buildkitCacheBackend, requestedPort, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, {
-                addr: buildkitHost,
-                tlsCa,
-                tlsCert,
-                tlsKey,
-                tlsSkipVerify,
-                contextPath,
-                dockerfileDir,
-                dockerfileName,
-                buildArgs,
-                secrets,
-                sshSpecs,
-                target,
-                platforms,
-                cacheMode,
-                output,
-                imageTags,
-                push,
-                noCache,
-                metadataFile: BUILDKIT_METADATA_FILE,
-            });
-            modeEvidence = registryCacheEvidence('buildkit', cacheBackend, dockerPlan.oci_cache, effectiveImports, undefined);
-        }
-        else {
-            const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
-                command: 'cache-registry',
-                workspace: dockerPlan.workspace,
-                tag: cacheTag,
-                host: dockerPlan.proxy.host || proxyBindHost,
-                port: dockerPlan.proxy.port,
-                noGit: dockerPlan.proxy.no_git,
-                noPlatform: dockerPlan.proxy.no_platform,
-                verbose: inputs.verbose,
-                readOnly: dockerPlan.proxy.read_only,
-                ociRequiredReadableRefs: requestedImportRefTags,
-                requireOciImportReady: inputs.requireOciImportReady,
-                ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
-            }, dockerPlan.proxy));
-            saveModeState('proxy-pid', String(proxy.pid));
-            saveProxyModeState(proxy.port);
-            saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
-            saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
-            saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
-            saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
-            setProxyOutputs(proxy.port);
-            const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
-            resolvedWorkspace = planState.resolvedWorkspace;
-            resolvedCacheTag = planState.resolvedCacheTag;
-            registryVerification = planState.registryVerification;
-            registryOciCache = planState.registryOciCache;
-            const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache, proxy);
-            setRegistryCacheOutputs({
-                ref: dockerPlan.oci_cache.registry_ref,
-                from: effectiveImports.importSpecs,
-                to: dockerPlan.oci_cache.cache_to,
-                ociCache: dockerPlan.oci_cache,
-                usedRefTags: effectiveImports.readableRefTags,
-                unreadableRefTags: effectiveImports.unreadableRefTags,
-                importReady: effectiveImports.importReady,
-            });
-            await buildWithBuildctl({
-                addr: buildkitHost,
-                tlsCa,
-                tlsCert,
-                tlsKey,
-                tlsSkipVerify,
-                contextPath,
-                dockerfileDir,
-                dockerfileName,
-                buildArgs,
-                secrets,
-                sshSpecs,
-                target,
-                platforms,
-                cacheMode,
-                importCache: effectiveImports.importSpecs,
-                exportCache: dockerPlan.oci_cache.cache_to,
-                output,
-                imageTags,
-                push,
-                noCache,
-                metadataFile: BUILDKIT_METADATA_FILE,
-            });
-            modeEvidence = registryCacheEvidence('buildkit', cacheBackend, dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
-        }
+        const proxy = await (0, core_1.startRegistryProxy)(actionProxyOptions({
+            command: 'cache-registry',
+            workspace: dockerPlan.workspace,
+            tag: cacheTag,
+            host: dockerPlan.proxy.host || proxyBindHost,
+            port: dockerPlan.proxy.port,
+            noGit: dockerPlan.proxy.no_git,
+            noPlatform: dockerPlan.proxy.no_platform,
+            verbose: inputs.verbose,
+            readOnly: dockerPlan.proxy.read_only,
+            ociRequiredReadableRefs: requestedImportRefTags,
+            requireOciImportReady: inputs.requireOciImportReady,
+            ociAliasPromotionRefs: ((_a = dockerPlan.oci_cache) === null || _a === void 0 ? void 0 : _a.promotion_ref_tags) || [],
+        }, dockerPlan.proxy));
+        saveModeState('proxy-pid', String(proxy.pid));
+        saveProxyModeState(proxy.port);
+        saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
+        saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
+        saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
+        saveModeState('oci-promotion-ref-tags', (((_b = dockerPlan.oci_cache) === null || _b === void 0 ? void 0 : _b.promotion_ref_tags) || []).join(','));
+        setProxyOutputs(proxy.port);
+        const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
+        resolvedWorkspace = planState.resolvedWorkspace;
+        resolvedCacheTag = planState.resolvedCacheTag;
+        registryVerification = planState.registryVerification;
+        registryOciCache = planState.registryOciCache;
+        const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache, proxy);
+        setRegistryCacheOutputs({
+            ref: dockerPlan.oci_cache.registry_ref,
+            from: effectiveImports.importSpecs,
+            to: dockerPlan.oci_cache.cache_to,
+            ociCache: dockerPlan.oci_cache,
+            usedRefTags: effectiveImports.readableRefTags,
+            unreadableRefTags: effectiveImports.unreadableRefTags,
+            importReady: effectiveImports.importReady,
+        });
+        await buildWithBuildctl({
+            addr: buildkitHost,
+            tlsCa,
+            tlsCert,
+            tlsKey,
+            tlsSkipVerify,
+            contextPath,
+            dockerfileDir,
+            dockerfileName,
+            buildArgs,
+            secrets,
+            sshSpecs,
+            target,
+            platforms,
+            cacheMode,
+            importCache: effectiveImports.importSpecs,
+            exportCache: dockerPlan.oci_cache.cache_to,
+            output,
+            imageTags,
+            push,
+            noCache,
+            metadataFile: BUILDKIT_METADATA_FILE,
+        });
+        modeEvidence = registryCacheEvidence('buildkit', dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
     }
     else {
         ensureDir(BUILDKIT_CACHE_DIR_FROM);

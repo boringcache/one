@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.76'
+    default: 'v1.13.77'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -130,11 +130,19 @@ inputs:
     description: 'Whether to disable cache usage for Docker or BuildKit builds. Must be true or false.'
     default: 'false'
     required: false
+  provenance:
+    description: 'Docker mode only: pass --provenance=true to docker buildx build. Must be true or false.'
+    default: 'false'
+    required: false
+  sbom:
+    description: 'Docker mode only: pass --sbom=true to docker buildx build. Must be true or false.'
+    default: 'false'
+    required: false
   secrets:
     description: 'Docker or BuildKit secrets, newline-separated.'
     required: false
   docker-tool-cache:
-    description: 'Docker mode only: expose BoringCache proxy env for native remote-cache tools inside Dockerfile RUN steps. Comma- or newline-separated TOOL:TAG values such as turbo:turbo-cache, or plain tool names backed by [adapters.<tool>].tag.'
+    description: 'Docker mode only: expose BoringCache proxy env for tool remote-cache protocols inside Dockerfile RUN steps. Comma- or newline-separated TOOL:TAG values such as turbo:turbo-cache, or plain tool names backed by [adapters.<tool>].tag.'
     required: false
   driver:
     description: 'Buildx driver for Docker mode.'
@@ -151,12 +159,8 @@ inputs:
     description: 'Inline BuildKit daemon TOML config for Docker mode.'
     required: false
   cache-backend:
-    description: 'Backend for Docker or BuildKit cache: registry, local, or native. Native keeps OCI import planning and lets the CLI publish the native BuildKit cache from inside the builder.'
-    default: 'registry'
-    required: false
-  buildkit-cache-backend:
-    description: 'BuildKit cache exporter/importer backend for Docker or BuildKit modes: registry or boringcache. This is separate from cache-backend; boringcache requires a managed BuildKit image that supports type=boringcache.'
-    default: 'registry'
+    description: 'Docker or BuildKit cache backend: boringcache for the managed BoringCache BuildKit backend, registry for the OCI registry-cache control path, or local for local directory cache.'
+    default: 'boringcache'
     required: false
   cache-mode:
     description: 'Build cache mode for Docker or BuildKit. Must be min or max.'
