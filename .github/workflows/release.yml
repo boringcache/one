@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -115,6 +117,11 @@ jobs:
           tar -czf ../release-package.tar.gz .
           cd ..
 
+      - name: Generate package provenance attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: release-package.tar.gz
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
         with:
@@ -130,4 +137,12 @@ jobs:
             See [README](https://github.com/boringcache/one) for usage.
           draft: false
           prerelease: false
+          overwrite_files: true
           files: ./release-package.tar.gz
+
+      - name: Verify package provenance attestation
+        run: |
+          gh attestation verify release-package.tar.gz \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --deny-self-hosted-runners
