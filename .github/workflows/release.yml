@@ -78,6 +78,11 @@ jobs:
       - name: Validate distribution bundle
         run: |
           tag="${RELEASE_TAG}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must look like vX.Y.Z, got $tag" >&2
+            exit 1
+          fi
+
           default_version="$(awk '
             $1 == "cli-version:" { in_cli = 1 }
             in_cli == 1 && $1 == "default:" {
@@ -88,8 +93,8 @@ jobs:
             }
           ' action.yml)"
 
-          if [ "$default_version" != "$tag" ]; then
-            echo "action.yml cli-version default is ${default_version:-<missing>}, expected $tag" >&2
+          if [[ ! "$default_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "action.yml cli-version default must look like vX.Y.Z, got ${default_version:-<missing>}" >&2
             exit 1
           fi
 
@@ -98,9 +103,9 @@ jobs:
           test -s dist/utils.js
           find dist -name '*.js' -print0 | xargs -0 -n1 node --check
 
-          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/utils.js
-          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/restore/index.js
-          grep -F "cliVersion: core.getInput('cli-version') || '$tag'" dist/save/index.js
+          grep -F "cliVersion: core.getInput('cli-version') || '$default_version'" dist/utils.js
+          grep -F "cliVersion: core.getInput('cli-version') || '$default_version'" dist/restore/index.js
+          grep -F "cliVersion: core.getInput('cli-version') || '$default_version'" dist/save/index.js
 
       - name: Create package archive
         run: |
