@@ -102,8 +102,7 @@ function resolvePaths(pathInput, baseDir) {
         .join('\n');
 }
 function parseEntries(entriesInput, _action, options = {}) {
-    var _a;
-    const shouldResolve = (_a = options.resolvePaths) !== null && _a !== void 0 ? _a : true;
+    const shouldResolve = options.resolvePaths ?? true;
     const baseDir = options.baseDir;
     return entriesInput
         .split(/\r?\n|,/)
@@ -166,7 +165,7 @@ function convertCacheFormatToEntries(inputs, _action) {
     const noPlatformInput = inputs.noPlatform;
     const enableCrossOsArchiveInput = inputs.enableCrossOsArchive;
     const workingDirectoryInput = inputs.workingDirectory;
-    const baseDir = (workingDirectoryInput === null || workingDirectoryInput === void 0 ? void 0 : workingDirectoryInput.trim()) || undefined;
+    const baseDir = workingDirectoryInput?.trim() || undefined;
     const paths = pathInput
         .split('\n')
         .map(p => p.trim())

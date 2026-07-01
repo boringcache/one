@@ -312,7 +312,6 @@ async function isCliAvailable() {
     }
 }
 async function ensureBoringCache(options) {
-    var _a;
     (0, auth_1.warnIfUsingLegacyApiToken)();
     const secrets = new Set([
         options.token,
@@ -328,7 +327,7 @@ async function ensureBoringCache(options) {
         core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
         core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
     }
-    const trustedFingerprint = (_a = options.trustedWorkspaceSigningKeyFingerprint) === null || _a === void 0 ? void 0 : _a.trim();
+    const trustedFingerprint = options.trustedWorkspaceSigningKeyFingerprint?.trim();
     if (trustedFingerprint) {
         core.exportVariable('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT', trustedFingerprint);
         core.info('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT configured');

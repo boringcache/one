@@ -145,7 +145,7 @@ async function hasMiseToolVersion(toolName, version) {
         if (Array.isArray(parsed)) {
             entries = parsed;
         }
-        else if (Array.isArray(parsed === null || parsed === void 0 ? void 0 : parsed.versions)) {
+        else if (Array.isArray(parsed?.versions)) {
             entries = parsed.versions;
         }
         else {
@@ -375,10 +375,9 @@ async function findMiseBinary(extractedPath, binaryName) {
     throw new Error(`Unable to locate ${binaryName} in extracted mise archive`);
 }
 async function installMiseTool(toolName, version, options = {}) {
-    var _a;
     const spec = `${toolName}@${version}`;
     const label = options.label || toolName;
-    const global = (_a = options.global) !== null && _a !== void 0 ? _a : true;
+    const global = options.global ?? true;
     core.info(`Installing ${label} ${version} via mise...`);
     await exec.exec(getMiseBinPath(), ['install', spec], { env: options.env });
     await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
@@ -403,9 +402,8 @@ function isMatchingToolVersion(requested, candidate) {
     return slugMiseTagPart(normalizedRequested) === slugMiseTagPart(normalizedCandidate);
 }
 function extractNumericVersionParts(value) {
-    var _a;
     const baseVersion = normalizeToolVersion(value).split('+')[0].trim();
-    const numericPrefix = (_a = baseVersion.match(/^\d+(?:\.\d+)*/)) === null || _a === void 0 ? void 0 : _a[0];
+    const numericPrefix = baseVersion.match(/^\d+(?:\.\d+)*/)?.[0];
     if (!numericPrefix) {
         return [];
     }
@@ -518,10 +516,9 @@ function getToolVersionProbes(toolName) {
     }
 }
 async function activateMiseTool(toolName, version, options = {}) {
-    var _a;
     const spec = `${toolName}@${version}`;
     const label = options.label || toolName;
-    const global = (_a = options.global) !== null && _a !== void 0 ? _a : true;
+    const global = options.global ?? true;
     core.info(`Activating ${label} ${version}...`);
     await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
 }
@@ -632,10 +629,9 @@ async function readToolVersions(workingDir) {
     }
 }
 async function readToolVersionsValue(workingDir, toolName) {
-    var _a;
     const normalizedToolName = normalizeToolName(toolName);
     const tools = await readToolVersions(workingDir);
-    return ((_a = tools.find((tool) => tool.name === normalizedToolName)) === null || _a === void 0 ? void 0 : _a.version) || null;
+    return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
 }
 async function readMiseTomlTools(workingDir) {
     const miseToml = path.join(workingDir, 'mise.toml');
@@ -660,7 +656,7 @@ async function readMiseTomlTools(workingDir) {
             const toolName = normalizeToolName(rawToolName);
             const value = rawValue.trim();
             const stringVersion = value.match(/^["']([^"']+)["']$/);
-            if (stringVersion === null || stringVersion === void 0 ? void 0 : stringVersion[1]) {
+            if (stringVersion?.[1]) {
                 tools.set(toolName, stringVersion[1]);
                 continue;
             }
@@ -691,10 +687,9 @@ async function readMiseTomlTools(workingDir) {
     }
 }
 async function readMiseTomlVersion(workingDir, toolName) {
-    var _a;
     const normalizedToolName = normalizeToolName(toolName);
     const tools = await readMiseTomlTools(workingDir);
-    return ((_a = tools.find((tool) => tool.name === normalizedToolName)) === null || _a === void 0 ? void 0 : _a.version) || null;
+    return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
 }
 async function readProjectMiseTools(workingDir) {
     const toolVersions = await readToolVersions(workingDir);
@@ -729,7 +724,7 @@ function extractToolsBlock(content) {
 }
 function extractInlineTableVersion(value) {
     const versionMatch = value.match(/\bversion\s*=\s*["']([^"']+)["']/);
-    return (versionMatch === null || versionMatch === void 0 ? void 0 : versionMatch[1]) || null;
+    return versionMatch?.[1] || null;
 }
 function countBraceDelta(value) {
     let delta = 0;

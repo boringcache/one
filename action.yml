@@ -160,7 +160,7 @@ inputs:
     required: false
   cache-backend:
     description: 'Docker or BuildKit cache backend: boringcache for the managed BoringCache BuildKit backend, registry for the OCI registry-cache control path, or local for local directory cache.'
-    default: 'boringcache'
+    default: 'registry'
     required: false
   cache-mode:
     description: 'Build cache mode for Docker or BuildKit. Must be min or max.'

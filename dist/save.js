@@ -109,8 +109,7 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
     const resolvedEntryTags = (0, utils_1.resolveVerificationTags)(entrySpecs, workingDirectory);
     const pathHintsByResolvedTag = new Map();
     resolvedEntryTags.forEach((resolvedTag, index) => {
-        var _a;
-        const pathHint = (_a = entrySpecs[index]) === null || _a === void 0 ? void 0 : _a.pathHint;
+        const pathHint = entrySpecs[index]?.pathHint;
         if (pathHint) {
             pathHintsByResolvedTag.set(resolvedTag, pathHint);
         }

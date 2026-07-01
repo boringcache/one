@@ -177,7 +177,6 @@ function checkFlagArgs(restoreFlagArgs) {
     return args;
 }
 async function run() {
-    var _a;
     const originalCwd = process.cwd();
     let restoreFailureContext = {};
     try {
@@ -237,7 +236,7 @@ async function run() {
         const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = (0, utils_1.resolveVerificationTags)(deferredVerifySpecs, plan.workingDirectory);
-        const overallHit = (_a = modeRestore.cacheHit) !== null && _a !== void 0 ? _a : (runtimeRestore.hit || archiveRestore.hit);
+        const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
         const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
         core.setOutput('cache-hit', String(overallHit));
         core.setOutput('runtime-cache-hit', String(runtimeRestore.hit));

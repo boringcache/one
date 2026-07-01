@@ -237,10 +237,10 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
                 readableRefs,
                 unreadableRefs,
                 ready: unreadableRefs.length === 0,
-                phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
-                publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
-                publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
-                tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+                phase: lastStatus?.phase,
+                publishState: lastStatus?.publish_state,
+                publishSettled: lastStatus?.publish_settled,
+                tagsVisible: lastStatus?.tags_visible,
             };
         }
         await new Promise((resolve) => setTimeout(resolve, OCI_IMPORT_READY_POLL_INTERVAL_MS));
@@ -251,13 +251,13 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         readableRefs,
         unreadableRefs,
         ready: unreadableRefs.length === 0,
-        phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
-        publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
-        publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
-        tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+        phase: lastStatus?.phase,
+        publishState: lastStatus?.publish_state,
+        publishSettled: lastStatus?.publish_settled,
+        tagsVisible: lastStatus?.tags_visible,
     };
 }
-async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60000) {
+async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60_000) {
     const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
     if (refs.length === 0) {
         return {
@@ -278,10 +278,10 @@ async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 600
                 readableRefs,
                 unreadableRefs,
                 ready: true,
-                phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
-                publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
-                publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
-                tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+                phase: lastStatus?.phase,
+                publishState: lastStatus?.publish_state,
+                publishSettled: lastStatus?.publish_settled,
+                tagsVisible: lastStatus?.tags_visible,
             };
         }
         await new Promise((resolve) => setTimeout(resolve, OCI_REF_READY_POLL_INTERVAL_MS));
@@ -292,10 +292,10 @@ async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 600
         readableRefs,
         unreadableRefs,
         ready: unreadableRefs.length === 0,
-        phase: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.phase,
-        publishState: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_state,
-        publishSettled: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.publish_settled,
-        tagsVisible: lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.tags_visible,
+        phase: lastStatus?.phase,
+        publishState: lastStatus?.publish_state,
+        publishSettled: lastStatus?.publish_settled,
+        tagsVisible: lastStatus?.tags_visible,
     };
 }
 function logOciImportReadiness(readiness) {
@@ -336,7 +336,6 @@ function assertOciImportReady(readiness) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function startRegistryProxy(options) {
-    var _a, _b;
     (0, auth_1.warnIfUsingLegacyApiToken)();
     const { restoreToken, saveToken } = (0, auth_1.getAuthTokens)();
     let effectiveReadOnly = options.readOnly === true;
@@ -401,7 +400,7 @@ async function startRegistryProxy(options) {
     if (effectiveReadOnly) {
         args.push('--read-only');
     }
-    const strictCacheErrors = (_a = options.failOnCacheError) !== null && _a !== void 0 ? _a : !effectiveReadOnly;
+    const strictCacheErrors = options.failOnCacheError ?? !effectiveReadOnly;
     if (strictCacheErrors) {
         args.push('--fail-on-cache-error');
     }
@@ -429,7 +428,7 @@ async function startRegistryProxy(options) {
     const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
     try {
         await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
-        if ((_b = options.ociRequiredReadableRefs) === null || _b === void 0 ? void 0 : _b.length) {
+        if (options.ociRequiredReadableRefs?.length) {
             const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs, options.ociImportReadyTimeoutMs);
             logOciImportReadiness(ociImportReadiness);
             if (options.requireOciImportReady) {
@@ -481,7 +480,7 @@ async function stopRegistryProxy(pid, port) {
     }
     const start = Date.now();
     const pollInterval = 1000;
-    const logInterval = 30000;
+    const logInterval = 30_000;
     let lastLog = start;
     while (true) {
         if (!isProcessAlive(pid)) {

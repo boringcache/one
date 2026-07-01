@@ -250,8 +250,7 @@ function readSavedSaveConfiguration(inputs, savedValue) {
     return saveConfigured(inputs);
 }
 function buildActionTrustState(inputs, options) {
-    var _a;
-    const saveCapable = (_a = options.saveCapable) !== null && _a !== void 0 ? _a : (0, core_1.hasSaveToken)();
+    const saveCapable = options.saveCapable ?? (0, core_1.hasSaveToken)();
     let status = 'read_write';
     if (!options.saveConfigured) {
         status = 'restore_only_by_configuration';
@@ -777,8 +776,7 @@ function normalizeRef(value) {
     return trimmed || 'unknown';
 }
 function isGitDisabledByEnv() {
-    var _a;
-    const value = (_a = process.env.BORINGCACHE_NO_GIT) === null || _a === void 0 ? void 0 : _a.trim().toLowerCase();
+    const value = process.env.BORINGCACHE_NO_GIT?.trim().toLowerCase();
     return value === '1' || value === 'true' || value === 'yes' || value === 'on';
 }
 function shortenSha(sha) {
@@ -792,7 +790,6 @@ function isCiEnv() {
         || process.env.BITBUCKET_BUILD_NUMBER);
 }
 function detectCiBranch() {
-    var _a;
     for (const key of [
         'BORINGCACHE_GIT_BRANCH',
         'GITHUB_HEAD_REF',
@@ -802,7 +799,7 @@ function detectCiBranch() {
         'CIRCLE_BRANCH',
         'BITBUCKET_BRANCH',
     ]) {
-        const value = (_a = process.env[key]) === null || _a === void 0 ? void 0 : _a.trim();
+        const value = process.env[key]?.trim();
         if (value) {
             return normalizeRef(value);
         }
@@ -810,7 +807,6 @@ function detectCiBranch() {
     return undefined;
 }
 function detectCiSha() {
-    var _a;
     for (const key of [
         'BORINGCACHE_GIT_SHA',
         'GITHUB_SHA',
@@ -818,7 +814,7 @@ function detectCiSha() {
         'CIRCLE_SHA1',
         'BITBUCKET_COMMIT',
     ]) {
-        const value = (_a = process.env[key]) === null || _a === void 0 ? void 0 : _a.trim();
+        const value = process.env[key]?.trim();
         if (value) {
             return value;
         }
@@ -826,8 +822,7 @@ function detectCiSha() {
     return undefined;
 }
 function envDefaultBranch() {
-    var _a;
-    const value = (_a = process.env.BORINGCACHE_DEFAULT_BRANCH) === null || _a === void 0 ? void 0 : _a.trim();
+    const value = process.env.BORINGCACHE_DEFAULT_BRANCH?.trim();
     return value ? normalizeRef(value) : undefined;
 }
 function resolveGitStartPath(pathHint, workingDirectory) {
@@ -1126,7 +1121,6 @@ async function runBoringcacheCheckWithTimeout(args, timeoutSeconds, env) {
     const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
     const outputLimit = 1024 * 1024;
     return new Promise((resolve) => {
-        var _a, _b;
         let stdout = '';
         let stderr = '';
         let settled = false;
@@ -1180,10 +1174,10 @@ async function runBoringcacheCheckWithTimeout(args, timeoutSeconds, env) {
             }, 2000);
             child.kill('SIGTERM');
         }, timeoutMs);
-        (_a = child.stdout) === null || _a === void 0 ? void 0 : _a.on('data', (data) => {
+        child.stdout?.on('data', (data) => {
             stdout = appendOutput(stdout, data);
         });
-        (_b = child.stderr) === null || _b === void 0 ? void 0 : _b.on('data', (data) => {
+        child.stderr?.on('data', (data) => {
             stderr = appendOutput(stderr, data);
         });
         child.on('error', (error) => {
@@ -1204,7 +1198,7 @@ async function runBoringcacheCheckWithTimeout(args, timeoutSeconds, env) {
                 return;
             }
             finish({
-                exitCode: code !== null && code !== void 0 ? code : (signal ? 1 : 0),
+                exitCode: code ?? (signal ? 1 : 0),
                 stdout,
                 stderr,
             });
@@ -1615,7 +1609,7 @@ async function detectJavaVersion(workingDirectory) {
     if (pomXml) {
         const pomMatch = pomXml.match(/<maven\.compiler\.(?:release|source|target)>\s*([^<\s]+)\s*<\/maven\.compiler\.(?:release|source|target)>/)
             || pomXml.match(/<java\.version>\s*([^<\s]+)\s*<\/java\.version>/);
-        if (pomMatch === null || pomMatch === void 0 ? void 0 : pomMatch[1]) {
+        if (pomMatch?.[1]) {
             return pomMatch[1].trim();
         }
     }
@@ -1625,7 +1619,7 @@ async function detectMavenVersion(workingDirectory) {
     const wrapperProps = await readFile(path.join(workingDirectory, '.mvn', 'wrapper', 'maven-wrapper.properties'));
     if (wrapperProps) {
         const match = wrapperProps.match(/apache-maven-([0-9]+(?:\.[0-9]+)*)-bin/i);
-        if (match === null || match === void 0 ? void 0 : match[1]) {
+        if (match?.[1]) {
             return match[1];
         }
     }
@@ -1639,7 +1633,7 @@ async function detectRustVersion(workingDirectory) {
     const rustToolchainToml = await readFile(path.join(workingDirectory, 'rust-toolchain.toml'));
     if (rustToolchainToml) {
         const match = rustToolchainToml.match(/channel\s*=\s*["']([^"']+)["']/);
-        if (match === null || match === void 0 ? void 0 : match[1]) {
+        if (match?.[1]) {
             return match[1];
         }
     }
@@ -1723,7 +1717,7 @@ function packageManagerCacheDir(workingDirectory, name) {
 }
 async function detectNodePackageManager(workingDirectory) {
     const packageJson = await readPackageJson(workingDirectory);
-    const packageManagerField = typeof (packageJson === null || packageJson === void 0 ? void 0 : packageJson.packageManager) === 'string'
+    const packageManagerField = typeof packageJson?.packageManager === 'string'
         ? packageJson.packageManager.trim()
         : '';
     let name = null;
@@ -1763,7 +1757,7 @@ async function detectNodePackageManager(workingDirectory) {
 }
 async function detectNodePackageManagerTool(workingDirectory, source = 'project') {
     const packageManager = await detectNodePackageManager(workingDirectory);
-    if (!(packageManager === null || packageManager === void 0 ? void 0 : packageManager.version)) {
+    if (!packageManager?.version) {
         return null;
     }
     return {
@@ -1878,7 +1872,7 @@ async function runDryRunPlan(workingDirectory, options) {
         if (cacheTag.trim()) {
             args.push('--cache-tag', cacheTag.trim());
         }
-        if (toolTagSuffix === null || toolTagSuffix === void 0 ? void 0 : toolTagSuffix.trim()) {
+        if (toolTagSuffix?.trim()) {
             args.push('--tool-tag-suffix', toolTagSuffix.trim());
         }
         if (noPlatform) {
@@ -1924,7 +1918,6 @@ async function runDryRunPlan(workingDirectory, options) {
     }
 }
 async function resolveCliArchiveEntries(workingDirectory, options) {
-    var _a, _b;
     const plan = await runDryRunPlan(workingDirectory, {
         workspaceInput: options.workspaceInput,
         entryIds: options.entryIds,
@@ -1932,8 +1925,8 @@ async function resolveCliArchiveEntries(workingDirectory, options) {
         toolTagSuffix: options.toolTagSuffix,
         fallbackWorkspace: options.fallbackWorkspace,
     });
-    const workspace = ((_a = plan.workspace) === null || _a === void 0 ? void 0 : _a.trim())
-        || ((_b = options.fallbackWorkspace) === null || _b === void 0 ? void 0 : _b.trim())
+    const workspace = plan.workspace?.trim()
+        || options.fallbackWorkspace?.trim()
         || resolveWorkspace(options.workspaceInput);
     return {
         workspace,
@@ -1969,19 +1962,17 @@ async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawT
     }
 }
 async function maybeResolveWorkspaceViaCli(workingDirectory, workspaceInput, fallbackWorkspace) {
-    var _a;
     const plan = await runDryRunPlan(workingDirectory, {
         workspaceInput,
         fallbackWorkspace,
     });
-    return ((_a = plan.workspace) === null || _a === void 0 ? void 0 : _a.trim()) || null;
+    return plan.workspace?.trim() || null;
 }
 function cliPlanHasProvenance(plan) {
     return Boolean(plan.workspace_source || plan.repo_config_path || plan.archive_entries);
 }
 function cliPlanUsesRepoConfigResolution(plan) {
-    var _a;
-    const firstEntry = (_a = plan.archive_entries) === null || _a === void 0 ? void 0 : _a[0];
+    const firstEntry = plan.archive_entries?.[0];
     if (firstEntry) {
         return firstEntry.resolution_source === 'repo-config';
     }
@@ -2045,13 +2036,12 @@ async function buildArchiveEntries(inputs, runtimeTools) {
         ? (0, core_1.buildMiseToolTag)(runtimeTools, inputs.toolVersionScope)
         : null;
     const mergeCliPlan = (plan) => {
-        var _a, _b;
         archiveEntries.push(...plan.tag_path_pairs);
         if (!cacheTagPrefix) {
-            const firstEntry = (_a = plan.archive_entries) === null || _a === void 0 ? void 0 : _a[0];
+            const firstEntry = plan.archive_entries?.[0];
             const firstPair = plan.tag_path_pairs[0];
-            cacheTagPrefix = (firstEntry === null || firstEntry === void 0 ? void 0 : firstEntry.resolved_tag) || (firstEntry === null || firstEntry === void 0 ? void 0 : firstEntry.tag)
-                || (firstPair ? (_b = (0, core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0]) === null || _b === void 0 ? void 0 : _b.tag : undefined);
+            cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
+                || (firstPair ? (0, core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0]?.tag : undefined);
         }
         Object.assign(envVars, plan.env_vars);
         if (!resolvedWorkspace && plan.workspace) {
@@ -2095,7 +2085,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
                     continue;
                 }
             }
-            if (!inputs.cacheTag.trim() && !(cliToolTagSuffix === null || cliToolTagSuffix === void 0 ? void 0 : cliToolTagSuffix.trim())) {
+            if (!inputs.cacheTag.trim() && !cliToolTagSuffix?.trim()) {
                 if (!cacheTagPrefix) {
                     cacheTagPrefix = parsedEntry.tag;
                 }
@@ -2236,7 +2226,7 @@ function getCacheTagPrefix(inputs, runtimeTools, resolvedArchivePrefix) {
     if (inputs.cacheTag) {
         return inputs.cacheTag;
     }
-    if (resolvedArchivePrefix === null || resolvedArchivePrefix === void 0 ? void 0 : resolvedArchivePrefix.trim()) {
+    if (resolvedArchivePrefix?.trim()) {
         return resolvedArchivePrefix.trim();
     }
     if (inputs.key) {
