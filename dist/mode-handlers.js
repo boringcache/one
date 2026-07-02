@@ -49,7 +49,7 @@ const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit:v0.30.0-bc.2';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit:v0.30.0-bc.3';
 function actionProxyOptions(options, proxyPlan) {
     return {
         ...options,
