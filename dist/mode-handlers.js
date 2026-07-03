@@ -49,7 +49,7 @@ const BUILDKIT_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit
 const BUILDKIT_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit:v0.30.0-bc.3';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit:v0.30.0-bc';
 function actionProxyOptions(options, proxyPlan) {
     return {
         ...options,
@@ -838,7 +838,29 @@ function buildxBuilderName() {
 function hasDriverImageOpt(driverOpts) {
     return driverOpts.some((opt) => opt.trim().startsWith('image='));
 }
-async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryMode, useManagedBuildKitImage) {
+function managedBuildKitImage(input) {
+    const image = input.trim() || DEFAULT_MANAGED_BUILDKIT_IMAGE;
+    if (!/^[A-Za-z0-9./:@_-]+$/.test(image)) {
+        throw new Error(`Unsupported managed-buildkit-image "${input}". Expected a Docker image reference.`);
+    }
+    return image;
+}
+async function pullManagedBuildKitImage(image) {
+    const pullResult = await exec.exec('docker', ['pull', image], { ignoreReturnCode: true });
+    if (pullResult === 0) {
+        return;
+    }
+    const inspectResult = await exec.exec('docker', ['image', 'inspect', image], {
+        ignoreReturnCode: true,
+        silent: true,
+    });
+    if (inspectResult === 0) {
+        core.warning(`Could not refresh managed BuildKit image ${image}; using the local cached copy.`);
+        return;
+    }
+    throw new Error(`Could not pull managed BuildKit image ${image}, and no local copy is available.`);
+}
+async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryMode, useManagedBuildKitImage, managedImageInput) {
     const builderName = buildxBuilderName();
     let driverToUse = driver || 'docker-container';
     if (driverToUse === 'docker') {
@@ -847,7 +869,9 @@ async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, reg
     }
     const effectiveDriverOpts = [...driverOpts];
     if (useManagedBuildKitImage && driverToUse === 'docker-container' && !hasDriverImageOpt(effectiveDriverOpts)) {
-        effectiveDriverOpts.push(`image=${DEFAULT_MANAGED_BUILDKIT_IMAGE}`);
+        const image = managedBuildKitImage(managedImageInput);
+        await pullManagedBuildKitImage(image);
+        effectiveDriverOpts.push(`image=${image}`);
     }
     if (registryMode && driverToUse === 'docker-container' && !effectiveDriverOpts.some((opt) => opt.startsWith('network='))) {
         effectiveDriverOpts.push('network=host');
@@ -1019,6 +1043,7 @@ async function buildDockerImageWithCliAdapter(workspace, cacheTag, buildkitCache
         env: {
             ...process.env,
             DOCKER_BUILDKIT: '1',
+            BORINGCACHE_MANAGED_BUILDKIT_IMAGE: managedBuildKitImage(inputs.managedBuildkitImage),
         },
     });
     if (result !== 0) {
@@ -1688,7 +1713,7 @@ async function runDockerRestore(plan, inputs) {
     saveModeState('cache-tag', localCacheTag);
     saveModeState('verbose', String(inputs.verbose));
     saveModeState('exclude', inputs.exclude);
-    const builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryCachePlan, cacheBackend === 'boringcache');
+    const builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryCachePlan, cacheBackend === 'boringcache', inputs.managedBuildkitImage);
     saveModeState('builder-name', builderName);
     core.setOutput('buildx-name', builderName);
     core.setOutput('buildx-platforms', await getBuilderPlatforms(builderName));

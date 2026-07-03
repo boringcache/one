@@ -133,7 +133,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.78',
+        cliVersion: core.getInput('cli-version') || 'v1.13.84',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: (0, modes_1.normalizeMode)(core.getInput('mode')),
@@ -164,6 +164,7 @@ function getInputs() {
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
         ociHydration: normalizeOciHydrationPolicy(core.getInput('oci-hydration')),
+        managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit:v0.30.0-bc',
         dockerToolCache: core.getInput('docker-tool-cache'),
         cacheProfiles: core.getInput('cache-profiles'),
         entries: core.getInput('entries'),
