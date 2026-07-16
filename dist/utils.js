@@ -1,114 +1,21 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MAX_VERIFY_CHECK_ATTEMPT_SECONDS = exports.MAX_VERIFY_TIMEOUT_SECONDS = exports.DEFAULT_VERIFY_TIMEOUT_SECONDS = exports.MAX_DIAGNOSTICS_LOG_BYTES = exports.MAX_DIAGNOSTICS_LOG_LINES = exports.DEFAULT_OCI_HYDRATION_POLICY = exports.parseEntries = exports.installMiseTool = exports.installMise = exports.hasToolVersionOnPath = exports.hasMiseToolVersion = exports.getMiseInstallsDir = exports.execBoringCache = exports.exportMiseEnv = exports.ensureBoringCache = exports.activateMiseTool = void 0;
-exports.getInputs = getInputs;
-exports.isPullRequestEvent = isPullRequestEvent;
-exports.saveConfigured = saveConfigured;
-exports.saveAllowedForEvent = saveAllowedForEvent;
-exports.saveSkippedByConfigurationMessage = saveSkippedByConfigurationMessage;
-exports.saveSkippedByPolicyMessage = saveSkippedByPolicyMessage;
-exports.applyPullRequestSaveScopeEnv = applyPullRequestSaveScopeEnv;
-exports.applyRestoreOnlyTokenPolicy = applyRestoreOnlyTokenPolicy;
-exports.applySaveTokenPolicy = applySaveTokenPolicy;
-exports.readSavedSaveAllowance = readSavedSaveAllowance;
-exports.readSavedSaveConfiguration = readSavedSaveConfiguration;
-exports.buildActionTrustState = buildActionTrustState;
-exports.restorePhaseSummary = restorePhaseSummary;
-exports.postPhaseSummary = postPhaseSummary;
-exports.normalizeSavePolicy = normalizeSavePolicy;
-exports.normalizeDiagnosticsMode = normalizeDiagnosticsMode;
-exports.normalizeDiagnosticsLogLines = normalizeDiagnosticsLogLines;
-exports.normalizeOciHydrationPolicy = normalizeOciHydrationPolicy;
-exports.resolveDiagnosticsConfig = resolveDiagnosticsConfig;
-exports.loadDiagnosticsConfig = loadDiagnosticsConfig;
-exports.runDiagnosticsGroup = runDiagnosticsGroup;
-exports.writeActionEvidence = writeActionEvidence;
-exports.writeActionFailureEvidence = writeActionFailureEvidence;
-exports.actionErrorMessage = actionErrorMessage;
-exports.readLogTail = readLogTail;
-exports.normalizeVerifyMode = normalizeVerifyMode;
-exports.normalizeVerifyTimeoutSeconds = normalizeVerifyTimeoutSeconds;
-exports.normalizeSetup = normalizeSetup;
-exports.normalizePreset = normalizePreset;
-exports.normalizeToolVersionScope = normalizeToolVersionScope;
-exports.resolveWorkspace = resolveWorkspace;
-exports.resolveVerificationTags = resolveVerificationTags;
-exports.buildGenericVerificationSpecs = buildGenericVerificationSpecs;
-exports.verifyResolvedTags = verifyResolvedTags;
-exports.verifyVerificationSpecs = verifyVerificationSpecs;
-exports.parseToolSpecs = parseToolSpecs;
-exports.resolveRuntimeTools = resolveRuntimeTools;
-exports.detectNodePackageManager = detectNodePackageManager;
-exports.buildRuntimeCacheTag = buildRuntimeCacheTag;
-exports.buildRuntimeCacheEntry = buildRuntimeCacheEntry;
-exports.resolveCliArchiveEntries = resolveCliArchiveEntries;
-exports.buildArchiveEntries = buildArchiveEntries;
-exports.validateOneInputs = validateOneInputs;
-exports.buildPlan = buildPlan;
-exports.getCacheTagPrefix = getCacheTagPrefix;
-exports.buildFlagArgs = buildFlagArgs;
-exports.applyMiseSetup = applyMiseSetup;
-exports.applyPresetCacheEnv = applyPresetCacheEnv;
-exports.serializeTools = serializeTools;
-exports.getRestoreKeyCandidates = getRestoreKeyCandidates;
-const core = __importStar(require("@actions/core"));
-const exec = __importStar(require("@actions/exec"));
-const childProcess = __importStar(require("child_process"));
-const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
-const path = __importStar(require("path"));
-const timers = __importStar(require("timers"));
-const core_1 = require("./core");
-Object.defineProperty(exports, "activateMiseTool", { enumerable: true, get: function () { return core_1.activateMiseTool; } });
-Object.defineProperty(exports, "ensureBoringCache", { enumerable: true, get: function () { return core_1.ensureBoringCache; } });
-Object.defineProperty(exports, "exportMiseEnv", { enumerable: true, get: function () { return core_1.exportMiseEnv; } });
-Object.defineProperty(exports, "execBoringCache", { enumerable: true, get: function () { return core_1.execBoringCache; } });
-Object.defineProperty(exports, "getMiseInstallsDir", { enumerable: true, get: function () { return core_1.getMiseInstallsDir; } });
-Object.defineProperty(exports, "hasMiseToolVersion", { enumerable: true, get: function () { return core_1.hasMiseToolVersion; } });
-Object.defineProperty(exports, "hasToolVersionOnPath", { enumerable: true, get: function () { return core_1.hasToolVersionOnPath; } });
-Object.defineProperty(exports, "installMise", { enumerable: true, get: function () { return core_1.installMise; } });
-Object.defineProperty(exports, "installMiseTool", { enumerable: true, get: function () { return core_1.installMiseTool; } });
-Object.defineProperty(exports, "parseEntries", { enumerable: true, get: function () { return core_1.parseEntries; } });
-const modes_1 = require("./modes");
-exports.DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
-exports.MAX_DIAGNOSTICS_LOG_LINES = 500;
-exports.MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
-exports.DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
-exports.MAX_VERIFY_TIMEOUT_SECONDS = 900;
-exports.MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
+import * as core from '@actions/core';
+import * as exec from '@actions/exec';
+import * as childProcess from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as timers from 'timers';
+import { activateMiseTool, buildMiseRuntimeTag, buildMiseToolTag, ensureBoringCache, exportMiseEnv, execBoringCache, getInputsWorkspace, getMiseInstallsDir, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, isUsingLegacyApiTokenOnly, parseEntries, readProjectMiseTools, readMiseTomlVersion, readToolVersionsValue, reshimMise, } from './core';
+import { assertImplementedMode, normalizeMode, resolveModeSpec, } from './modes';
+export { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, getMiseInstallsDir, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, };
+export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+export const MAX_DIAGNOSTICS_LOG_LINES = 500;
+export const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
+export const DEFAULT_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS = 14;
+export const MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS = 90;
+export const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
+export const MAX_VERIFY_TIMEOUT_SECONDS = 900;
+export const MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
@@ -131,12 +38,12 @@ const TOOL_LABELS = {
     uv: 'uv',
     yarn: 'Yarn',
 };
-function getInputs() {
+export function getInputs() {
     return {
         cliVersion: core.getInput('cli-version') || 'v1.13.92',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
-        mode: (0, modes_1.normalizeMode)(core.getInput('mode')),
+        mode: normalizeMode(core.getInput('mode')),
         preset: normalizePreset(core.getInput('preset')),
         workspace: core.getInput('workspace'),
         cacheTag: core.getInput('cache-tag'),
@@ -159,6 +66,8 @@ function getInputs() {
         trustedWorkspaceSigningKeyFingerprint: core.getInput('trusted-workspace-signing-key-fingerprint'),
         diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
         diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
+        diagnosticsArtifactName: core.getInput('diagnostics-artifact-name').trim(),
+        diagnosticsArtifactRetentionDays: normalizeDiagnosticsArtifactRetentionDays(core.getInput('diagnostics-artifact-retention-days')),
         metadataHints: core.getInput('metadata-hints'),
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
@@ -182,28 +91,28 @@ function getInputs() {
         allowExternalSymlinks: core.getBooleanInput('allow-external-symlinks'),
     };
 }
-function isPullRequestEvent() {
+export function isPullRequestEvent() {
     return (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'pull_request';
 }
-function saveConfigured(inputs) {
+export function saveConfigured(inputs) {
     return inputs.savePolicy !== 'off';
 }
-function saveAllowedForEvent(inputs) {
+export function saveAllowedForEvent(inputs) {
     return !isPullRequestEvent() || inputs.saveOnPullRequest;
 }
-function saveSkippedByConfigurationMessage() {
+export function saveSkippedByConfigurationMessage() {
     return 'Save skipped: save-policy is off; this step is restore-only by configuration.';
 }
-function saveSkippedByPolicyMessage() {
+export function saveSkippedByPolicyMessage() {
     return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
 }
-function applyPullRequestSaveScopeEnv() {
+export function applyPullRequestSaveScopeEnv() {
     process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
     process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
     core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
     core.exportVariable('BORINGCACHE_RESTORE_PR_CACHE', '1');
 }
-function applyRestoreOnlyTokenPolicy() {
+export function applyRestoreOnlyTokenPolicy() {
     const restoreFallback = process.env.BORINGCACHE_RESTORE_TOKEN ||
         process.env.BORINGCACHE_SAVE_TOKEN ||
         process.env.BORINGCACHE_API_TOKEN;
@@ -215,7 +124,7 @@ function applyRestoreOnlyTokenPolicy() {
     delete process.env.BORINGCACHE_API_TOKEN;
     return hadSaveCapableToken;
 }
-function applySaveTokenPolicy(inputs) {
+export function applySaveTokenPolicy(inputs) {
     delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
     if (isPullRequestEvent() && inputs.saveOnPullRequest) {
         applyPullRequestSaveScopeEnv();
@@ -229,7 +138,7 @@ function applySaveTokenPolicy(inputs) {
     }
     return false;
 }
-function readSavedSaveAllowance(inputs, savedValue) {
+export function readSavedSaveAllowance(inputs, savedValue) {
     if (!saveConfigured(inputs)) {
         return false;
     }
@@ -241,7 +150,7 @@ function readSavedSaveAllowance(inputs, savedValue) {
     }
     return saveAllowedForEvent(inputs);
 }
-function readSavedSaveConfiguration(inputs, savedValue) {
+export function readSavedSaveConfiguration(inputs, savedValue) {
     if (savedValue === 'true') {
         return true;
     }
@@ -250,8 +159,8 @@ function readSavedSaveConfiguration(inputs, savedValue) {
     }
     return saveConfigured(inputs);
 }
-function buildActionTrustState(inputs, options) {
-    const saveCapable = options.saveCapable ?? (0, core_1.hasSaveToken)();
+export function buildActionTrustState(inputs, options) {
+    const saveCapable = options.saveCapable ?? hasSaveToken();
     let status = 'read_write';
     if (!options.saveConfigured) {
         status = 'restore_only_by_configuration';
@@ -271,13 +180,13 @@ function buildActionTrustState(inputs, options) {
         save_allowed: options.saveAllowed,
         save_capable: saveCapable,
         token_capabilities: {
-            restore: (0, core_1.hasRestoreToken)(),
-            save: (0, core_1.hasSaveToken)(),
-            legacy_api_only: (0, core_1.isUsingLegacyApiTokenOnly)(),
+            restore: hasRestoreToken(),
+            save: hasSaveToken(),
+            legacy_api_only: isUsingLegacyApiTokenOnly(),
         },
     };
 }
-function restorePhaseSummary(options) {
+export function restorePhaseSummary(options) {
     if (options.cacheHit) {
         const hitDetail = options.runtimeCacheHit
             ? 'BoringCache restored at least one requested cache for this step, including the runtime cache.'
@@ -312,7 +221,7 @@ function restorePhaseSummary(options) {
         next_step: restoreOnlyNextStep(options.trustState),
     };
 }
-function postPhaseSummary(saveStatus, trustState) {
+export function postPhaseSummary(saveStatus, trustState) {
     switch (saveStatus) {
         case 'saved':
             return {
@@ -363,7 +272,7 @@ function postPhaseSummary(saveStatus, trustState) {
             return {
                 status: 'skipped_missing_save_token',
                 headline: 'Save skipped: missing save token',
-                detail: `Save skipped: ${(0, core_1.missingSaveTokenMessage)()}`,
+                detail: `Save skipped: ${missingSaveTokenMessage()}`,
                 next_step: 'Set BORINGCACHE_SAVE_TOKEN for trusted jobs that should write cache entries.',
             };
         default:
@@ -391,7 +300,7 @@ function trustStateDetail(trustState) {
         case 'restore_only_by_event_policy':
             return 'pull request jobs stay restore-only by default.';
         case 'restore_only_missing_save_token':
-            return (0, core_1.missingSaveTokenMessage)();
+            return missingSaveTokenMessage();
         default:
             return 'save is not currently available.';
     }
@@ -408,7 +317,7 @@ function restoreOnlyNextStep(trustState) {
             return 'No action is needed unless this workflow should refresh cache entries.';
     }
 }
-function normalizeSavePolicy(value) {
+export function normalizeSavePolicy(value) {
     switch ((value || 'auto').trim().toLowerCase()) {
         case 'auto':
         case 'off':
@@ -417,7 +326,7 @@ function normalizeSavePolicy(value) {
             throw new Error(`Unsupported save-policy "${value}". Expected auto or off.`);
     }
 }
-function normalizeDiagnosticsMode(value) {
+export function normalizeDiagnosticsMode(value) {
     switch ((value || 'auto').trim().toLowerCase()) {
         case 'auto':
         case 'off':
@@ -428,27 +337,38 @@ function normalizeDiagnosticsMode(value) {
             throw new Error(`Unsupported diagnostics mode "${value}". Expected auto, off, summary, or verbose.`);
     }
 }
-function normalizeDiagnosticsLogLines(value) {
+export function normalizeDiagnosticsLogLines(value) {
     if (!value || !value.trim()) {
         return 40;
     }
     const parsed = parsePositiveIntegerInput(value, 'diagnostics-log-lines');
-    if (parsed > exports.MAX_DIAGNOSTICS_LOG_LINES) {
-        core.warning(`diagnostics-log-lines "${value}" is too high; tailing ${exports.MAX_DIAGNOSTICS_LOG_LINES} lines to keep diagnostics bounded.`);
-        return exports.MAX_DIAGNOSTICS_LOG_LINES;
+    if (parsed > MAX_DIAGNOSTICS_LOG_LINES) {
+        core.warning(`diagnostics-log-lines "${value}" is too high; tailing ${MAX_DIAGNOSTICS_LOG_LINES} lines to keep diagnostics bounded.`);
+        return MAX_DIAGNOSTICS_LOG_LINES;
     }
     return parsed;
 }
-function normalizeOciHydrationPolicy(value) {
-    switch ((value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
+export function normalizeDiagnosticsArtifactRetentionDays(value) {
+    if (!value || !value.trim()) {
+        return DEFAULT_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS;
+    }
+    const parsed = parsePositiveIntegerInput(value, 'diagnostics-artifact-retention-days');
+    if (parsed > MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS) {
+        core.warning(`diagnostics-artifact-retention-days "${value}" is too high; retaining for at most ${MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS} days.`);
+        return MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS;
+    }
+    return parsed;
+}
+export function normalizeOciHydrationPolicy(value) {
+    switch ((value || DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
         case 'metadata-only':
         case 'bodies-before-ready':
-            return (value || exports.DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase();
+            return (value || DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase();
         default:
             throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only or bodies-before-ready.`);
     }
 }
-function resolveDiagnosticsConfig(mode, logLines) {
+export function resolveDiagnosticsConfig(mode, logLines) {
     let level;
     switch (mode) {
         case 'auto':
@@ -467,7 +387,7 @@ function resolveDiagnosticsConfig(mode, logLines) {
         logLines,
     };
 }
-function loadDiagnosticsConfig(inputs) {
+export function loadDiagnosticsConfig(inputs) {
     const savedLevel = (core.getState('diagnostics-level') || '').trim().toLowerCase();
     if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
         const savedLogLines = normalizeDiagnosticsLogLines((core.getState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
@@ -480,13 +400,13 @@ function loadDiagnosticsConfig(inputs) {
     }
     return resolveDiagnosticsConfig(inputs.diagnostics, inputs.diagnosticsLogLines);
 }
-async function runDiagnosticsGroup(diagnostics, title, fn) {
+export async function runDiagnosticsGroup(diagnostics, title, fn) {
     if (!diagnostics.enabled) {
         return;
     }
     await core.group(title, fn);
 }
-function writeActionEvidence(phase, payload) {
+export function writeActionEvidence(phase, payload) {
     const evidencePath = actionEvidencePath();
     const current = readActionEvidence(evidencePath);
     const now = new Date().toISOString();
@@ -511,7 +431,7 @@ function writeActionEvidence(phase, payload) {
         return '';
     }
 }
-function writeActionFailureEvidence(phase, error, context = {}) {
+export function writeActionFailureEvidence(phase, error, context = {}) {
     return writeActionEvidence(phase, {
         ...context,
         phase_status: 'failed',
@@ -519,7 +439,7 @@ function writeActionFailureEvidence(phase, error, context = {}) {
         error: evidenceError(error),
     });
 }
-function actionErrorMessage(error) {
+export function actionErrorMessage(error) {
     return redactEvidenceText(errorMessage(error)).slice(0, 2000);
 }
 function actionEvidencePath() {
@@ -617,8 +537,8 @@ function evidenceSecretValues() {
     }
     return Array.from(values).sort((a, b) => b.length - a.length);
 }
-function readLogTail(filePath, maxLines) {
-    const lineLimit = Math.min(Math.floor(maxLines), exports.MAX_DIAGNOSTICS_LOG_LINES);
+export function readLogTail(filePath, maxLines) {
+    const lineLimit = Math.min(Math.floor(maxLines), MAX_DIAGNOSTICS_LOG_LINES);
     if (!filePath || lineLimit < 1) {
         return [];
     }
@@ -627,7 +547,7 @@ function readLogTail(filePath, maxLines) {
         fileDescriptor = fs.openSync(filePath, 'r');
         const fileSize = fs.fstatSync(fileDescriptor).size;
         const chunkSize = 64 * 1024;
-        const byteLimit = Math.min(fileSize, exports.MAX_DIAGNOSTICS_LOG_BYTES);
+        const byteLimit = Math.min(fileSize, MAX_DIAGNOSTICS_LOG_BYTES);
         const chunks = [];
         let position = fileSize;
         let bytesCollected = 0;
@@ -649,7 +569,7 @@ function readLogTail(filePath, maxLines) {
         }
         const tailLines = lines.slice(-lineLimit);
         if (tailLines.length > 0 && position > 0 && bytesCollected >= byteLimit && lines.length <= lineLimit) {
-            tailLines[0] = `[truncated to last ${exports.MAX_DIAGNOSTICS_LOG_BYTES} bytes] ${tailLines[0]}`;
+            tailLines[0] = `[truncated to last ${MAX_DIAGNOSTICS_LOG_BYTES} bytes] ${tailLines[0]}`;
         }
         return tailLines.map((line) => redactEvidenceText(line));
     }
@@ -662,7 +582,7 @@ function readLogTail(filePath, maxLines) {
         }
     }
 }
-function normalizeVerifyMode(value) {
+export function normalizeVerifyMode(value) {
     const normalized = (value || 'none').trim().toLowerCase();
     switch (normalized) {
         case 'none':
@@ -674,14 +594,14 @@ function normalizeVerifyMode(value) {
             throw new Error(`Unsupported verify mode "${value}". Expected none, check, wait, or warn.`);
     }
 }
-function normalizeVerifyTimeoutSeconds(value) {
+export function normalizeVerifyTimeoutSeconds(value) {
     if (!value || !value.trim()) {
-        return exports.DEFAULT_VERIFY_TIMEOUT_SECONDS;
+        return DEFAULT_VERIFY_TIMEOUT_SECONDS;
     }
     const parsed = parsePositiveIntegerInput(value, 'verify-timeout-seconds');
-    if (parsed > exports.MAX_VERIFY_TIMEOUT_SECONDS) {
-        core.warning(`verify-timeout-seconds "${value}" is too high; waiting at most ${exports.MAX_VERIFY_TIMEOUT_SECONDS}s to keep verification bounded.`);
-        return exports.MAX_VERIFY_TIMEOUT_SECONDS;
+    if (parsed > MAX_VERIFY_TIMEOUT_SECONDS) {
+        core.warning(`verify-timeout-seconds "${value}" is too high; waiting at most ${MAX_VERIFY_TIMEOUT_SECONDS}s to keep verification bounded.`);
+        return MAX_VERIFY_TIMEOUT_SECONDS;
     }
     return parsed;
 }
@@ -696,7 +616,7 @@ function parsePositiveIntegerInput(value, inputName) {
     }
     return parsed;
 }
-function normalizeSetup(value) {
+export function normalizeSetup(value) {
     switch ((value || 'mise').trim().toLowerCase()) {
         case 'mise':
         case 'external':
@@ -706,7 +626,7 @@ function normalizeSetup(value) {
             throw new Error(`Unsupported setup "${value}". Expected mise, external, or none.`);
     }
 }
-function normalizePreset(value) {
+export function normalizePreset(value) {
     switch ((value || 'none').trim().toLowerCase()) {
         case 'none':
         case 'rails':
@@ -721,7 +641,7 @@ function normalizePreset(value) {
             throw new Error(`Unsupported preset "${value}". Expected none, rails, ruby, node, node-turbo, python-uv, go, or php-composer.`);
     }
 }
-function normalizeToolVersionScope(value) {
+export function normalizeToolVersionScope(value) {
     switch ((value || 'patch').trim().toLowerCase()) {
         case 'major':
         case 'minor':
@@ -731,10 +651,10 @@ function normalizeToolVersionScope(value) {
             throw new Error(`Unsupported tool-version-scope "${value}". Expected major, minor, or patch.`);
     }
 }
-function resolveWorkspace(workspace) {
+export function resolveWorkspace(workspace) {
     const resolved = workspace
         ? workspace.includes('/') ? workspace : `default/${workspace}`
-        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || (0, core_1.getInputsWorkspace)({}));
+        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || getInputsWorkspace({}));
     if (!resolved.includes('/')) {
         return `default/${resolved}`;
     }
@@ -1019,7 +939,7 @@ function resolveExactTag(spec, workingDirectory) {
     }
     return resolved;
 }
-function resolveVerificationTags(specs, workingDirectory) {
+export function resolveVerificationTags(specs, workingDirectory) {
     const resolved = [];
     const seen = new Set();
     for (const spec of specs) {
@@ -1035,7 +955,7 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
     if (!entries.trim()) {
         return;
     }
-    for (const entry of (0, core_1.parseEntries)(entries, 'restore')) {
+    for (const entry of parseEntries(entries, 'restore')) {
         specs.push({
             tag: entry.tag,
             noPlatform,
@@ -1045,7 +965,7 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
         });
     }
 }
-function buildGenericVerificationSpecs(plan, inputs, includeRuntime) {
+export function buildGenericVerificationSpecs(plan, inputs, includeRuntime) {
     const specs = [];
     const noPlatform = inputs.noPlatform || inputs.enableCrossOsArchive;
     if (includeRuntime && plan.runtimeEntry) {
@@ -1210,7 +1130,7 @@ function boundedCheckAttemptTimeoutSeconds(timeoutSeconds, deadline) {
     const remainingSeconds = deadline
         ? Math.max(1, Math.ceil((deadline - Date.now()) / 1000))
         : Math.max(1, timeoutSeconds);
-    return Math.min(remainingSeconds, timeoutSeconds, exports.MAX_VERIFY_CHECK_ATTEMPT_SECONDS);
+    return Math.min(remainingSeconds, timeoutSeconds, MAX_VERIFY_CHECK_ATTEMPT_SECONDS);
 }
 function formatCheckFailure(result) {
     const details = [result.stderr, result.stdout].filter(Boolean).join('\n');
@@ -1246,7 +1166,7 @@ function pendingOnlyForAcceptedSaveTags(stdout, acceptedPendingTags) {
     }
     return accepted;
 }
-async function verifyResolvedTags(workspace, exactTags, options) {
+export async function verifyResolvedTags(workspace, exactTags, options) {
     const specs = exactTags.map((tag) => ({
         tag,
         noPlatform: true,
@@ -1254,7 +1174,7 @@ async function verifyResolvedTags(workspace, exactTags, options) {
     }));
     return verifyVerificationSpecs(workspace, specs, options);
 }
-async function verifyVerificationSpecs(workspace, specs, options) {
+export async function verifyVerificationSpecs(workspace, specs, options) {
     const batches = groupVerificationSpecs(specs);
     if (options.mode === 'none' || batches.length === 0) {
         return;
@@ -1300,7 +1220,7 @@ async function verifyVerificationSpecs(workspace, specs, options) {
     }
     throw new Error(failureMessage);
 }
-function parseToolSpecs(input) {
+export function parseToolSpecs(input) {
     return input
         .split(/\r?\n|,/)
         .map((entry) => entry.trim())
@@ -1320,7 +1240,7 @@ function parseToolSpecs(input) {
         };
     });
 }
-async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory, uvVersion, composerVersion) {
+export async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory, uvVersion, composerVersion) {
     if (setup !== 'mise') {
         return [];
     }
@@ -1332,7 +1252,7 @@ async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirec
 }
 async function detectProjectTools(workingDirectory) {
     const tools = new Map();
-    for (const tool of await (0, core_1.readProjectMiseTools)(workingDirectory)) {
+    for (const tool of await readProjectMiseTools(workingDirectory)) {
         const normalizedName = normalizeToolName(tool.name);
         tools.set(normalizedName, {
             name: normalizedName,
@@ -1510,11 +1430,11 @@ async function detectRubyVersion(workingDirectory) {
     if (rubyVersion) {
         return rubyVersion;
     }
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'ruby');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'ruby');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'ruby');
+    return readMiseTomlVersion(workingDirectory, 'ruby');
 }
 async function detectNodeVersion(workingDirectory) {
     const nodeVersion = await readFirstLine(path.join(workingDirectory, '.node-version'));
@@ -1525,84 +1445,84 @@ async function detectNodeVersion(workingDirectory) {
     if (nvmVersion) {
         return nvmVersion.replace(/^v/, '');
     }
-    const toolVersion = (await (0, core_1.readToolVersionsValue)(workingDirectory, 'nodejs'))
-        || (await (0, core_1.readToolVersionsValue)(workingDirectory, 'node'));
+    const toolVersion = (await readToolVersionsValue(workingDirectory, 'nodejs'))
+        || (await readToolVersionsValue(workingDirectory, 'node'));
     if (toolVersion) {
         return toolVersion;
     }
-    return (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'node'))
-        || (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'nodejs'));
+    return (await readMiseTomlVersion(workingDirectory, 'node'))
+        || (await readMiseTomlVersion(workingDirectory, 'nodejs'));
 }
 async function detectBazelVersion(workingDirectory) {
     const bazelVersion = await readFirstLine(path.join(workingDirectory, '.bazelversion'));
     if (bazelVersion) {
         return bazelVersion;
     }
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'bazel');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'bazel');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'bazel');
+    return readMiseTomlVersion(workingDirectory, 'bazel');
 }
 async function detectPythonVersion(workingDirectory) {
     const pythonVersion = await readFirstLine(path.join(workingDirectory, '.python-version'));
     if (pythonVersion) {
         return pythonVersion;
     }
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'python');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'python');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'python');
+    return readMiseTomlVersion(workingDirectory, 'python');
 }
 async function detectGoVersion(workingDirectory) {
     const goVersion = await readFirstLine(path.join(workingDirectory, '.go-version'));
     if (goVersion) {
         return goVersion;
     }
-    const toolVersion = (await (0, core_1.readToolVersionsValue)(workingDirectory, 'go'))
-        || (await (0, core_1.readToolVersionsValue)(workingDirectory, 'golang'));
+    const toolVersion = (await readToolVersionsValue(workingDirectory, 'go'))
+        || (await readToolVersionsValue(workingDirectory, 'golang'));
     if (toolVersion) {
         return toolVersion;
     }
-    return (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'go'))
-        || (await (0, core_1.readMiseTomlVersion)(workingDirectory, 'golang'));
+    return (await readMiseTomlVersion(workingDirectory, 'go'))
+        || (await readMiseTomlVersion(workingDirectory, 'golang'));
 }
 async function detectUvVersion(workingDirectory) {
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'uv');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'uv');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'uv');
+    return readMiseTomlVersion(workingDirectory, 'uv');
 }
 async function detectPhpVersion(workingDirectory) {
     const phpVersion = await readFirstLine(path.join(workingDirectory, '.php-version'));
     if (phpVersion) {
         return phpVersion;
     }
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'php');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'php');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'php');
+    return readMiseTomlVersion(workingDirectory, 'php');
 }
 async function detectComposerVersion(workingDirectory) {
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'composer');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'composer');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'composer');
+    return readMiseTomlVersion(workingDirectory, 'composer');
 }
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
     if (javaVersion) {
         return javaVersion;
     }
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'java');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'java');
     if (toolVersion) {
         return toolVersion;
     }
-    const miseVersion = await (0, core_1.readMiseTomlVersion)(workingDirectory, 'java');
+    const miseVersion = await readMiseTomlVersion(workingDirectory, 'java');
     if (miseVersion) {
         return miseVersion;
     }
@@ -1624,11 +1544,11 @@ async function detectMavenVersion(workingDirectory) {
             return match[1];
         }
     }
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'maven');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'maven');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'maven');
+    return readMiseTomlVersion(workingDirectory, 'maven');
 }
 async function detectRustVersion(workingDirectory) {
     const rustToolchainToml = await readFile(path.join(workingDirectory, 'rust-toolchain.toml'));
@@ -1642,11 +1562,11 @@ async function detectRustVersion(workingDirectory) {
     if (rustToolchain) {
         return rustToolchain;
     }
-    const toolVersion = await (0, core_1.readToolVersionsValue)(workingDirectory, 'rust');
+    const toolVersion = await readToolVersionsValue(workingDirectory, 'rust');
     if (toolVersion) {
         return toolVersion;
     }
-    return (0, core_1.readMiseTomlVersion)(workingDirectory, 'rust');
+    return readMiseTomlVersion(workingDirectory, 'rust');
 }
 async function detectToolFromProjectFiles(workingDirectory, toolName, detector) {
     const version = await detector(workingDirectory);
@@ -1716,7 +1636,7 @@ function packageManagerCacheDir(workingDirectory, name) {
             return path.join(workingDirectory, '.npm-cache');
     }
 }
-async function detectNodePackageManager(workingDirectory) {
+export async function detectNodePackageManager(workingDirectory) {
     const packageJson = await readPackageJson(workingDirectory);
     const packageManagerField = typeof packageJson?.packageManager === 'string'
         ? packageJson.packageManager.trim()
@@ -1798,21 +1718,21 @@ function normalizeToolName(name) {
     }
     return normalized;
 }
-function buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
+export function buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
     if (tools.length === 0) {
         return null;
     }
     if (runtimeCacheTag.trim()) {
         return runtimeCacheTag.trim();
     }
-    return (0, core_1.buildMiseRuntimeTag)(cacheTagPrefix, tools, versionScope);
+    return buildMiseRuntimeTag(cacheTagPrefix, tools, versionScope);
 }
-function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
+export function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
     const runtimeTag = buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope);
     if (!runtimeTag) {
         return null;
     }
-    return `${runtimeTag}:${(0, core_1.getMiseInstallsDir)()}`;
+    return `${runtimeTag}:${getMiseInstallsDir()}`;
 }
 function normalizeEntriesInput(entries) {
     return entries
@@ -1918,7 +1838,7 @@ async function runDryRunPlan(workingDirectory, options) {
         throw error;
     }
 }
-async function resolveCliArchiveEntries(workingDirectory, options) {
+export async function resolveCliArchiveEntries(workingDirectory, options) {
     const plan = await runDryRunPlan(workingDirectory, {
         workspaceInput: options.workspaceInput,
         entryIds: options.entryIds,
@@ -2021,7 +1941,7 @@ async function detectNodeDefaultArchiveEntries(workingDirectory) {
             return 'npm-cache\nnode-modules';
     }
 }
-async function buildArchiveEntries(inputs, runtimeTools) {
+export async function buildArchiveEntries(inputs, runtimeTools) {
     let archiveEntries = [];
     let restoreCandidates = [];
     let usesCacheFormat = false;
@@ -2034,7 +1954,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
     const fallbackWorkspace = resolveWorkspace(inputs.workspace);
     const cliWorkspaceInput = inputs.workspace.trim();
     const cliToolTagSuffix = inputs.setup === 'mise'
-        ? (0, core_1.buildMiseToolTag)(runtimeTools, inputs.toolVersionScope)
+        ? buildMiseToolTag(runtimeTools, inputs.toolVersionScope)
         : null;
     const mergeCliPlan = (plan) => {
         archiveEntries.push(...plan.tag_path_pairs);
@@ -2042,7 +1962,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             const firstEntry = plan.archive_entries?.[0];
             const firstPair = plan.tag_path_pairs[0];
             cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
-                || (firstPair ? (0, core_1.parseEntries)(firstPair, 'restore', { resolvePaths: false })[0]?.tag : undefined);
+                || (firstPair ? parseEntries(firstPair, 'restore', { resolvePaths: false })[0]?.tag : undefined);
         }
         Object.assign(envVars, plan.env_vars);
         if (!resolvedWorkspace && plan.workspace) {
@@ -2071,7 +1991,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             }));
         }
         for (const entryToken of rawEntries) {
-            const parsedEntry = (0, core_1.parseEntries)(entryToken, 'restore', { resolvePaths: false })[0];
+            const parsedEntry = parseEntries(entryToken, 'restore', { resolvePaths: false })[0];
             if (!parsedEntry) {
                 continue;
             }
@@ -2147,7 +2067,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
         workspace: resolvedWorkspace,
     };
 }
-function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries) {
+export function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries) {
     if ((inputs.entries || inputs.cacheProfiles.trim()) && (inputs.path || inputs.key)) {
         core.warning('Both explicit entries/cache-profiles and actions/cache compatibility inputs were provided. Using entries/cache-profiles.');
     }
@@ -2172,9 +2092,9 @@ function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archive
         throw new Error('No cache entries resolved. Provide entries, path+key, or enable cache-runtime with setup=mise.');
     }
 }
-async function buildPlan(inputs) {
-    const modeSpec = (0, modes_1.resolveModeSpec)(inputs.mode);
-    (0, modes_1.assertImplementedMode)(modeSpec);
+export async function buildPlan(inputs) {
+    const modeSpec = resolveModeSpec(inputs.mode);
+    assertImplementedMode(modeSpec);
     const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
     const fallbackWorkspace = resolveWorkspace(inputs.workspace);
     const explicitWorkspace = inputs.workspace.trim();
@@ -2223,7 +2143,7 @@ async function buildPlan(inputs) {
         usesCacheFormat: archiveEntries.usesCacheFormat,
     };
 }
-function getCacheTagPrefix(inputs, runtimeTools, resolvedArchivePrefix) {
+export function getCacheTagPrefix(inputs, runtimeTools, resolvedArchivePrefix) {
     if (inputs.cacheTag) {
         return inputs.cacheTag;
     }
@@ -2238,7 +2158,7 @@ function getCacheTagPrefix(inputs, runtimeTools, resolvedArchivePrefix) {
     }
     return 'one';
 }
-function buildFlagArgs(inputs) {
+export function buildFlagArgs(inputs) {
     const flagArgs = [];
     if (inputs.enableCrossOsArchive || inputs.noPlatform) {
         flagArgs.push('--no-platform');
@@ -2260,14 +2180,14 @@ function buildFlagArgs(inputs) {
     }
     return flagArgs;
 }
-async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
+export async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     void _runtimeCacheHit;
     if (runtimeTools.length === 0) {
         return false;
     }
     const pathAvailable = new Map();
     for (const tool of runtimeTools) {
-        const available = await (0, core_1.hasToolVersionOnPath)(tool.name, tool.version);
+        const available = await hasToolVersionOnPath(tool.name, tool.version);
         pathAvailable.set(`${tool.name}@${tool.version}`, available);
         if (available) {
             core.info(`Using existing ${tool.label} ${tool.version} from PATH`);
@@ -2277,28 +2197,28 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     if (unresolvedTools.length === 0) {
         return false;
     }
-    await (0, core_1.installMise)();
+    await installMise();
     for (const tool of unresolvedTools) {
-        if (await (0, core_1.hasMiseToolVersion)(tool.name, tool.version)) {
-            await (0, core_1.activateMiseTool)(tool.name, tool.version, { label: tool.label });
+        if (await hasMiseToolVersion(tool.name, tool.version)) {
+            await activateMiseTool(tool.name, tool.version, { label: tool.label });
         }
         else {
-            await (0, core_1.installMiseTool)(tool.name, tool.version, { label: tool.label });
+            await installMiseTool(tool.name, tool.version, { label: tool.label });
         }
     }
-    await (0, core_1.reshimMise)();
-    await (0, core_1.exportMiseEnv)(cwd);
+    await reshimMise();
+    await exportMiseEnv(cwd);
     return true;
 }
-async function applyPresetCacheEnv(plan) {
+export async function applyPresetCacheEnv(plan) {
     for (const [key, value] of Object.entries(plan.envVars)) {
         core.exportVariable(key, value);
     }
 }
-function serializeTools(runtimeTools) {
+export function serializeTools(runtimeTools) {
     return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');
 }
-function getRestoreKeyCandidates(inputs) {
+export function getRestoreKeyCandidates(inputs) {
     return inputs.restoreKeys
         .split('\n')
         .map((value) => value.trim())

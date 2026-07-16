@@ -1,60 +1,19 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.getToolCacheInfo = getToolCacheInfo;
-exports.getStableCliBinDir = getStableCliBinDir;
-exports.exposeBoringCacheCli = exposeBoringCacheCli;
-exports.isCliAvailable = isCliAvailable;
-exports.ensureBoringCache = ensureBoringCache;
-exports.execBoringCache = execBoringCache;
-const core = __importStar(require("@actions/core"));
-const exec = __importStar(require("@actions/exec"));
-const tc = __importStar(require("@actions/tool-cache"));
-const cache = __importStar(require("@actions/cache"));
-const crypto = __importStar(require("crypto"));
-const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
-const path = __importStar(require("path"));
-const auth_1 = require("./auth");
+import * as core from '@actions/core';
+import * as exec from '@actions/exec';
+import * as tc from '@actions/tool-cache';
+import * as cache from '@actions/cache';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { warnIfUsingLegacyApiToken } from './auth';
 const TOOL_NAME = 'boringcache';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
 /**
  * Get tool cache information for a specific version.
  * Use this to persist the tool cache across workflow runs with actions/cache.
  */
-function getToolCacheInfo(version, platformOverride) {
+export function getToolCacheInfo(version, platformOverride) {
     const normalizedVersion = version.replace(/^v/, '');
     const platform = getPlatformInfo(platformOverride);
     const cachePath = tc.find(TOOL_NAME, normalizedVersion, platform.cacheKey);
@@ -68,10 +27,10 @@ function getToolCacheInfo(version, platformOverride) {
         platformKey: platform.cacheKey,
     };
 }
-function getStableCliBinDir() {
+export function getStableCliBinDir() {
     return path.join(os.homedir(), '.boringcache', 'bin');
 }
-async function exposeBoringCacheCli(toolPath, binaryName = process.platform === 'win32' ? 'boringcache.exe' : 'boringcache', stableBinDir = getStableCliBinDir()) {
+export async function exposeBoringCacheCli(toolPath, binaryName = process.platform === 'win32' ? 'boringcache.exe' : 'boringcache', stableBinDir = getStableCliBinDir()) {
     const sourcePath = path.join(toolPath, binaryName);
     const stablePath = path.join(stableBinDir, binaryName);
     // The source is the selected CLI binary in the hosted tool cache; the destination is runner-local action state.
@@ -294,7 +253,7 @@ async function downloadAndInstall(version, platform, verify) {
     const cachedPath = await tc.cacheDir(installDir, TOOL_NAME, version.replace(/^v/, ''), platform.cacheKey);
     return cachedPath;
 }
-async function isCliAvailable() {
+export async function isCliAvailable() {
     try {
         let output = '';
         const result = await exec.exec('boringcache', ['--version'], {
@@ -311,8 +270,8 @@ async function isCliAvailable() {
         return false;
     }
 }
-async function ensureBoringCache(options) {
-    (0, auth_1.warnIfUsingLegacyApiToken)();
+export async function ensureBoringCache(options) {
+    warnIfUsingLegacyApiToken();
     const secrets = new Set([
         options.token,
         process.env.BORINGCACHE_RESTORE_TOKEN,
@@ -407,7 +366,7 @@ async function ensureBoringCache(options) {
     core.addPath(stableToolPath);
     core.info(`BoringCache CLI ${normalizedVersion} ready`);
 }
-async function execBoringCache(args, options = {}) {
+export async function execBoringCache(args, options = {}) {
     const isWindows = os.platform() === 'win32';
     try {
         return await exec.exec('boringcache', args, options);
