@@ -1,54 +1,11 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizeProxyTags = normalizeProxyTags;
-exports.waitForOciImportReadiness = waitForOciImportReadiness;
-exports.waitForOciRefsReadable = waitForOciRefsReadable;
-exports.logOciImportReadiness = logOciImportReadiness;
-exports.assertOciImportReady = assertOciImportReady;
-exports.startRegistryProxy = startRegistryProxy;
-exports.stopRegistryProxy = stopRegistryProxy;
-exports.findAvailablePort = findAvailablePort;
-const core = __importStar(require("@actions/core"));
-const fs = __importStar(require("fs"));
-const http = __importStar(require("http"));
-const net = __importStar(require("net"));
-const os = __importStar(require("os"));
-const path = __importStar(require("path"));
-const child_process_1 = require("child_process");
-const auth_1 = require("./auth");
+import * as core from '@actions/core';
+import * as fs from 'fs';
+import * as http from 'http';
+import * as net from 'net';
+import * as os from 'os';
+import * as path from 'path';
+import { spawn } from 'child_process';
+import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, warnIfUsingLegacyApiToken, } from './auth';
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
@@ -57,7 +14,7 @@ const OCI_IMPORT_READY_TIMEOUT_MS = 15000;
 const OCI_IMPORT_READY_POLL_INTERVAL_MS = 1000;
 const OCI_REF_READY_POLL_INTERVAL_MS = 1000;
 const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
-function normalizeProxyTags(tagInput) {
+export function normalizeProxyTags(tagInput) {
     const tags = [];
     const seen = new Set();
     for (const rawTag of tagInput.split(',')) {
@@ -216,7 +173,7 @@ async function readOciRefReadiness(host, port, refs) {
         unreadableRefs: readability.filter((entry) => !entry.readable).map((entry) => entry.ref),
     };
 }
-async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = OCI_IMPORT_READY_TIMEOUT_MS) {
+export async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = OCI_IMPORT_READY_TIMEOUT_MS) {
     const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
     if (refs.length === 0) {
         return {
@@ -257,7 +214,7 @@ async function waitForOciImportReadiness(host, port, requestedRefs, timeoutMs = 
         tagsVisible: lastStatus?.tags_visible,
     };
 }
-async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60_000) {
+export async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60_000) {
     const refs = requestedRefs.map((ref) => ref.trim()).filter(Boolean);
     if (refs.length === 0) {
         return {
@@ -298,7 +255,7 @@ async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60_
         tagsVisible: lastStatus?.tags_visible,
     };
 }
-function logOciImportReadiness(readiness) {
+export function logOciImportReadiness(readiness) {
     if (readiness.ready) {
         core.info(`BoringCache proxy OCI import refs are readable: ${readiness.readableRefs.join(', ')}`);
         return;
@@ -322,7 +279,7 @@ function logOciImportReadiness(readiness) {
     }
     core.warning(message);
 }
-function assertOciImportReady(readiness) {
+export function assertOciImportReady(readiness) {
     if (readiness.ready) {
         return;
     }
@@ -335,9 +292,9 @@ function assertOciImportReady(readiness) {
  * Start the BoringCache proxy.
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
-async function startRegistryProxy(options) {
-    (0, auth_1.warnIfUsingLegacyApiToken)();
-    const { restoreToken, saveToken } = (0, auth_1.getAuthTokens)();
+export async function startRegistryProxy(options) {
+    warnIfUsingLegacyApiToken();
+    const { restoreToken, saveToken } = getAuthTokens();
     let effectiveReadOnly = options.readOnly === true;
     let authToken = effectiveReadOnly ? restoreToken : saveToken;
     if (!authToken && !effectiveReadOnly && restoreToken) {
@@ -347,9 +304,9 @@ async function startRegistryProxy(options) {
     }
     if (!authToken) {
         if (effectiveReadOnly) {
-            throw new Error(`${(0, auth_1.missingRestoreTokenMessage)()} This is required for proxy mode.`);
+            throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
         }
-        throw new Error(`${(0, auth_1.missingSaveTokenMessage)()} This is required for proxy mode.`);
+        throw new Error(`${missingSaveTokenMessage()} This is required for proxy mode.`);
     }
     const host = options.host || '127.0.0.1';
     const cliCommand = 'cache-registry';
@@ -410,7 +367,7 @@ async function startRegistryProxy(options) {
     core.info(`Starting BoringCache proxy on ${host}:${options.port}...`);
     const logFile = proxyLogPath(options.port);
     const logFd = fs.openSync(logFile, 'w');
-    const child = (0, child_process_1.spawn)('boringcache', args, {
+    const child = spawn('boringcache', args, {
         detached: true,
         stdio: ['ignore', logFd, logFd],
         env: {
@@ -460,7 +417,7 @@ async function startRegistryProxy(options) {
  * The proxy handles SIGTERM by flushing all pending blobs to the backend,
  * then exits. Never send SIGKILL — the proxy owns its own shutdown timing.
  */
-async function stopRegistryProxy(pid, port) {
+export async function stopRegistryProxy(pid, port) {
     if (pid <= 0) {
         core.info('No proxy PID to stop (was reused from another invocation)');
         return;
@@ -508,7 +465,7 @@ async function stopRegistryProxy(pid, port) {
 /**
  * Bind to port 0 and return the assigned port.
  */
-async function findAvailablePort() {
+export async function findAvailablePort() {
     return new Promise((resolve, reject) => {
         const server = net.createServer();
         server.listen(0, '127.0.0.1', () => {
