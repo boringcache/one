@@ -274,6 +274,27 @@ function modeStateKey(key) {
 function saveModeState(key, value) {
     core.saveState(modeStateKey(key), value);
 }
+function saveStateWorkerHandle(handle) {
+    saveModeState('state-worker-pid', String(handle.pid));
+    saveModeState('state-worker-directory', handle.directory);
+    saveModeState('state-worker-log-path', handle.logPath);
+    saveModeState('state-worker-log-offset', String(handle.logOffset));
+}
+function getStateWorkerHandle() {
+    const pid = Number.parseInt(getModeState('state-worker-pid'), 10);
+    const directory = getModeState('state-worker-directory');
+    const logPath = getModeState('state-worker-log-path');
+    const logOffset = Number.parseInt(getModeState('state-worker-log-offset'), 10);
+    if (!Number.isFinite(pid) || pid <= 0 || !directory || !logPath) {
+        return null;
+    }
+    return {
+        pid,
+        directory,
+        logPath,
+        logOffset: Number.isFinite(logOffset) && logOffset >= 0 ? logOffset : 0,
+    };
+}
 function getModeState(key) {
     return core.getState(modeStateKey(key));
 }
@@ -405,12 +426,15 @@ function emitCliPlannerWarnings(stderr) {
 }
 function normalizeDockerCacheBackend(value) {
     const backend = (value.trim() || 'boringcache');
-    if (backend === 'boringcache' || backend === 'registry' || backend === 'local') {
+    if (backend === 'state' || backend === 'boringcache' || backend === 'registry' || backend === 'local') {
         return backend;
     }
-    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected boringcache, registry, or local.`);
+    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected state, boringcache, registry, or local.`);
 }
 function buildKitCacheBackendFor(cacheBackend) {
+    if (cacheBackend === 'state') {
+        return 'state';
+    }
     return cacheBackend === 'registry' ? 'registry' : 'boringcache';
 }
 function normalizeDockerCommand(value) {
@@ -777,6 +801,47 @@ function setLocalCacheOutputs(cacheDirFrom, cacheDirTo, cacheMode) {
     core.setOutput('cache-dir', cacheDirFrom);
     core.setOutput('save-cache-dir', cacheDirTo);
 }
+function setStateCacheOutputs(port, logPath, summaryPath) {
+    core.setOutput('registry-ref', '');
+    core.setOutput('cache-from', '');
+    core.setOutput('cache-to', '');
+    core.setOutput('buildkit-cache-backend', 'state');
+    core.setOutput('docker-cache-run-ref', '');
+    core.setOutput('docker-cache-from-refs', '');
+    core.setOutput('docker-cache-requested-from-refs', '');
+    core.setOutput('docker-cache-unreadable-from-refs', '');
+    core.setOutput('docker-cache-import-ready', 'true');
+    core.setOutput('docker-cache-promotion-refs', '');
+    core.setOutput('docker-ci-provider', '');
+    core.setOutput('docker-ci-run-id', '');
+    core.setOutput('docker-ci-run-attempt', '');
+    core.setOutput('docker-ci-ref-type', '');
+    core.setOutput('docker-ci-ref-name', '');
+    core.setOutput('docker-ci-run-started-at', '');
+    core.setOutput('cache-dir', '');
+    core.setOutput('save-cache-dir', '');
+    core.setOutput('proxy-port', String(port));
+    core.setOutput('proxy-log-path', logPath);
+    core.setOutput('buildkit-state-summary-path', summaryPath);
+    core.setOutput('buildkit-state-worker-log-path', logPath);
+}
+function emitStateSummary(summaryPath) {
+    if (!summaryPath || !fs.existsSync(summaryPath)) {
+        throw new Error(`BoringCache state worker completed without its state summary: ${summaryPath || '(missing path)'}`);
+    }
+    let summary;
+    try {
+        summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+    }
+    catch (error) {
+        throw new Error(`Invalid BoringCache state summary ${summaryPath}: ${error.message}`);
+    }
+    const restore = summary.restore;
+    const save = summary.save;
+    core.info(`BoringCache state summary: restore=${String(restore?.status || 'unknown')} `
+        + `finalize=${String(summary.finalize?.seconds ?? 'unknown')}s `
+        + `save=${String(save?.status || 'unknown')} publish=${String(save?.publish_status || 'unknown')}`);
+}
 async function inspectDockerTemplate(containerName, template) {
     let output = '';
     const result = await exec.exec('docker', ['inspect', '-f', template, containerName], {
@@ -927,7 +992,11 @@ async function getBuilderPlatforms(builderName) {
     return line ? line.replace('Platforms:', '').trim() : '';
 }
 function dockerBuildxArgs(opts) {
-    const args = ['buildx', 'build', '--builder', opts.builder, '-f', opts.dockerfile];
+    const args = ['buildx', 'build'];
+    if (opts.builder) {
+        args.push('--builder', opts.builder);
+    }
+    args.push('-f', opts.dockerfile);
     for (const tag of opts.tags) {
         args.push('-t', `${opts.image}:${tag}`);
     }
@@ -1713,6 +1782,123 @@ async function runDockerRestore(plan, inputs) {
     saveModeState('cache-tag', localCacheTag);
     saveModeState('verbose', String(inputs.verbose));
     saveModeState('exclude', inputs.exclude);
+    if (cacheBackend === 'state') {
+        if (!shouldBuild) {
+            throw new Error('cache-backend=state requires docker-command=build so the Action can own the complete state lifecycle.');
+        }
+        if (platforms.split(',').map((value) => value.trim()).filter(Boolean).length > 1) {
+            throw new Error('cache-backend=state supports one target platform per Action invocation; use one state tag per architecture.');
+        }
+        if (driverOpts.length > 0 || buildkitdConfigInline.trim()) {
+            throw new Error('cache-backend=state owns its managed BuildKit daemon and does not accept driver-opts or buildkitd-config-inline.');
+        }
+        if (driver !== 'docker-container') {
+            throw new Error('cache-backend=state owns its managed BuildKit daemon; leave driver set to docker-container.');
+        }
+        if (cacheMode !== 'max') {
+            throw new Error('cache-backend=state does not use cache export modes; leave cache-mode set to max.');
+        }
+        if (inputs.ociHydration !== 'metadata-only' || inputs.requireOciImportReady) {
+            throw new Error('cache-backend=state restores persistent builder state directly and does not accept OCI hydration/readiness controls.');
+        }
+        if (fs.existsSync(DOCKER_METADATA_FILE)) {
+            fs.rmSync(DOCKER_METADATA_FILE);
+        }
+        // The Action owns this proxy, so select a free runner port when the user
+        // does not request one. Direct CLI users retain the CLI's stable default.
+        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+        const directory = (0, core_1.stateWorkerDirectory)();
+        const summaryPath = path.join(directory, 'state-summary.json');
+        const buildkitLogPath = path.join(directory, 'buildkitd.log');
+        const dockerArgs = dockerBuildxArgs({
+            dockerfile,
+            context,
+            image,
+            tags,
+            buildArgs,
+            secrets,
+            target,
+            platforms,
+            push,
+            load,
+            noCache,
+            provenance,
+            sbom,
+            builder: '',
+            cacheMode,
+        });
+        const args = [
+            'docker',
+            '--workspace',
+            plan.workspace,
+            '--tag',
+            localCacheTag,
+            '--backend',
+            'state',
+            '--port',
+            String(requestedPort),
+        ];
+        if (!inputs.readOnly) {
+            args.push('--fail-on-cache-error');
+        }
+        if (inputs.proxyNoPlatform) {
+            args.push('--no-platform');
+        }
+        if (inputs.proxyNoGit) {
+            args.push('--no-git');
+        }
+        if (inputs.readOnly) {
+            args.push('--read-only');
+        }
+        for (const tool of dockerToolCaches) {
+            args.push('--tool-cache', tool);
+        }
+        appendMetadataHintArgs(args, inputs.metadataHints);
+        args.push('--', 'docker', ...dockerArgs);
+        const handle = await (0, core_1.startStateWorker)(args, {
+            cwd: context,
+            directory,
+            env: {
+                ...process.env,
+                DOCKER_BUILDKIT: '1',
+                BORINGCACHE_MANAGED_BUILDKIT_IMAGE: managedBuildKitImage(inputs.managedBuildkitImage),
+                BORINGCACHE_STATE_SUMMARY_PATH: summaryPath,
+                BORINGCACHE_MANAGED_BUILDKIT_LOG_PATH: buildkitLogPath,
+            },
+        });
+        saveStateWorkerHandle(handle);
+        saveModeState('state-summary-path', summaryPath);
+        core.saveState('proxy-log-path', handle.logPath);
+        setStateCacheOutputs(requestedPort, handle.logPath, summaryPath);
+        core.setOutput('buildx-name', '');
+        core.setOutput('buildx-platforms', platforms);
+        await (0, core_1.waitForStateImageReady)(handle);
+        saveStateWorkerHandle(handle);
+        const { imageId, digest } = readDockerMetadata();
+        core.setOutput('image-id', imageId);
+        core.setOutput('digest', digest);
+        core.setOutput('workspace', plan.workspace);
+        core.setOutput('cache-tag', localCacheTag);
+        return {
+            cacheTag: localCacheTag,
+            cacheHit: handle.cacheHit === true,
+            evidence: {
+                adapter: 'docker',
+                cache_backend: 'state',
+                buildkit_cache_backend: 'state',
+                lifecycle: 'finalizing-in-post',
+                state_summary_path: summaryPath,
+                worker_log_path: handle.logPath,
+            },
+            verificationSpecs: [{
+                    tag: localCacheTag,
+                    noPlatform: inputs.proxyNoPlatform,
+                    noGit: inputs.proxyNoGit,
+                    saveExpected: !inputs.readOnly,
+                    pathHint: plan.workingDirectory,
+                }],
+        };
+    }
     const builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryCachePlan, cacheBackend === 'boringcache', inputs.managedBuildkitImage);
     saveModeState('builder-name', builderName);
     core.setOutput('buildx-name', builderName);
@@ -1887,6 +2073,13 @@ async function runDockerSave(options = {}) {
     const allowSaves = options.allowSaves !== false;
     const builderName = getModeState('builder-name');
     try {
+        const stateWorker = getStateWorkerHandle();
+        if (stateWorker) {
+            await (0, core_1.waitForStateWorker)(stateWorker);
+            saveStateWorkerHandle(stateWorker);
+            emitStateSummary(getModeState('state-summary-path'));
+            return;
+        }
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
             if (allowSaves) {
@@ -1948,6 +2141,9 @@ async function runBuildkitRestore(plan, inputs) {
     const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBooleanInput(core.getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
     const cacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'registry');
+    if (cacheBackend === 'state') {
+        throw new Error('cache-backend=state is currently supported by mode=docker; use the CLI directly for managed buildctl state lifecycles.');
+    }
     const buildkitCacheBackend = buildKitCacheBackendFor(cacheBackend);
     const registryTagInput = core.getInput('registry-tag') || '';
     const registryRefTagInput = core.getInput('registry-ref-tag') || '';

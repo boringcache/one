@@ -159,11 +159,11 @@ inputs:
     description: 'Inline BuildKit daemon TOML config for Docker mode.'
     required: false
   cache-backend:
-    description: 'Docker or BuildKit cache backend: boringcache for the managed BoringCache BuildKit backend, registry for the OCI registry-cache control path, or local for local directory cache.'
+    description: 'Docker cache backend: state for an Action-owned persistent managed builder lifecycle, boringcache for the managed BoringCache BuildKit backend, registry for the OCI registry-cache control path, or local for local directory cache. BuildKit mode supports boringcache, registry, or local.'
     default: 'registry'
     required: false
   managed-buildkit-image:
-    description: 'Managed BuildKit image for cache-backend=boringcache. Defaults to the BoringCache BuildKit series channel; pin an exact vX.Y.Z-bc.N tag for canaries.'
+    description: 'Managed BuildKit image for cache-backend=boringcache or state. Defaults to the BoringCache BuildKit series channel; pin the immutable digest emitted by a BuildKit canary for state canaries.'
     default: 'ghcr.io/boringcache/buildkit:v0.30.0-bc'
     required: false
   cache-mode:
@@ -402,6 +402,10 @@ outputs:
     description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
   buildkit-cache-backend:
     description: 'Resolved BuildKit cache exporter/importer backend for Docker or BuildKit modes.'
+  buildkit-state-summary-path:
+    description: 'Docker state backend summary path. The file becomes complete when the Action post phase finishes.'
+  buildkit-state-worker-log-path:
+    description: 'Docker state backend worker log containing build and post-build lifecycle output.'
   docker-cache-run-ref:
     description: 'Provider-neutral immutable Docker or BuildKit OCI cache run ref tag when CI run-ref derivation is active'
   docker-cache-from-refs:
@@ -466,7 +470,7 @@ runs:
   using: 'node24'
   main: 'dist/restore/index.js'
   post: 'dist/save/index.js'
-  post-if: "success() || inputs.save-always == 'true' || inputs.save-always == 'True' || inputs.save-always == 'TRUE'"
+  post-if: "always() && (inputs.cache-backend == 'state' || success() || inputs.save-always == 'true' || inputs.save-always == 'True' || inputs.save-always == 'TRUE')"
 branding:
   icon: 'archive'
   color: 'blue'
