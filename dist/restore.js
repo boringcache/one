@@ -46,6 +46,9 @@ function buildRuntimeRestoreFlagArgs(inputs) {
     if (inputs.verbose) {
         flagArgs.push('--verbose');
     }
+    if (inputs.failOnCacheError) {
+        flagArgs.push('--fail-on-cache-error');
+    }
     return flagArgs;
 }
 function buildCliSetupOptions(inputs, cliPlatform) {

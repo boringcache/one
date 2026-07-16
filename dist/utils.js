@@ -174,6 +174,7 @@ function getInputs() {
         enableCrossOsArchive: core.getBooleanInput('enableCrossOsArchive'),
         noPlatform: core.getBooleanInput('no-platform'),
         failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
+        failOnCacheError: core.getBooleanInput('fail-on-cache-error'),
         requireOciImportReady: core.getBooleanInput('require-oci-import-ready'),
         lookupOnly: core.getBooleanInput('lookup-only'),
         force: core.getBooleanInput('force'),
@@ -2245,6 +2246,9 @@ function buildFlagArgs(inputs) {
     }
     if (inputs.failOnCacheMiss) {
         flagArgs.push('--fail-on-cache-miss');
+    }
+    if (inputs.failOnCacheError) {
+        flagArgs.push('--fail-on-cache-error');
     }
     if (inputs.lookupOnly) {
         flagArgs.push('--lookup-only');

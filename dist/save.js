@@ -304,7 +304,9 @@ async function run() {
         if (exclude) {
             args.push('--exclude', exclude);
         }
-        args.push('--fail-on-cache-error');
+        if (inputs.failOnCacheError) {
+            args.push('--fail-on-cache-error');
+        }
         await (0, utils_1.execBoringCache)(args);
         const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
         if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
