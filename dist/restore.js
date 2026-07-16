@@ -1,43 +1,7 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.run = run;
-const core = __importStar(require("@actions/core"));
-const core_1 = require("./core");
-const utils_1 = require("./utils");
-const mode_handlers_1 = require("./mode-handlers");
+import * as core from '@actions/core';
+import { hasSaveToken } from './core';
+import { applySaveTokenPolicy, applyRestoreOnlyTokenPolicy, applyPresetCacheEnv, applyMiseSetup, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getInputs, isPullRequestEvent, saveConfigured, loadDiagnosticsConfig, parseEntries, readLogTail, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { runModeRestore } from './mode-handlers';
 function buildRuntimeRestoreFlagArgs(inputs) {
     const flagArgs = [];
     if (inputs.enableCrossOsArchive || inputs.noPlatform) {
@@ -58,8 +22,8 @@ function buildCliSetupOptions(inputs, cliPlatform) {
     };
 }
 async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit, trustState) {
-    const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
-    await (0, utils_1.runDiagnosticsGroup)(diagnostics, 'BoringCache Diagnostics', async () => {
+    const diagnostics = loadDiagnosticsConfig(inputs);
+    await runDiagnosticsGroup(diagnostics, 'BoringCache Diagnostics', async () => {
         core.info(`workspace: ${plan.workspace}`);
         core.info(`setup: ${plan.setup}`);
         core.info(`mode: ${plan.mode}`);
@@ -77,7 +41,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         if (diagnostics.includeLogs) {
             const proxyLogPath = core.getState('proxy-log-path');
             if (proxyLogPath) {
-                const logTail = (0, utils_1.readLogTail)(proxyLogPath, diagnostics.logLines);
+                const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
                 core.info(`proxy-log-path: ${proxyLogPath}`);
                 if (logTail.length > 0) {
                     core.info(`proxy-log-tail (${logTail.length} lines):`);
@@ -93,7 +57,7 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
     if (!entriesString.trim()) {
         return { hit: false, saveEntries: '' };
     }
-    const parsedEntries = (0, utils_1.parseEntries)(entriesString, 'restore', { resolvePaths: false });
+    const parsedEntries = parseEntries(entriesString, 'restore', { resolvePaths: false });
     if (parsedEntries.length === 0) {
         return { hit: false, saveEntries: '' };
     }
@@ -108,7 +72,7 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
             if (!candidate.entries.trim()) {
                 continue;
             }
-            const candidateEntries = (0, utils_1.parseEntries)(candidate.entries, 'restore', { resolvePaths: false });
+            const candidateEntries = parseEntries(candidate.entries, 'restore', { resolvePaths: false });
             const candidateHit = await checkEntries(workspace, candidateEntries.map((entry) => entry.tag), flagArgs);
             if (candidateHit) {
                 core.info(`Cache hit with restore key ${candidate.tagPrefix}`);
@@ -122,7 +86,7 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
         throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
     }
     const restoreFlagArgs = hit ? flagArgs : flagArgs.filter((arg) => arg !== '--fail-on-cache-miss');
-    const restoreExitCode = await (0, utils_1.execBoringCache)(['restore', workspace, selectedRestoreEntries, ...restoreFlagArgs], { ignoreReturnCode: true });
+    const restoreExitCode = await execBoringCache(['restore', workspace, selectedRestoreEntries, ...restoreFlagArgs], { ignoreReturnCode: true });
     if (restoreExitCode !== 0) {
         throw new Error(`Cache restore failed for ${selectedRestoreEntries}`);
     }
@@ -138,7 +102,7 @@ async function checkEntries(workspace, tags, restoreFlagArgs) {
     }
     let stdout = '';
     const args = ['check', workspace, checkTags.join(','), ...checkFlagArgs(restoreFlagArgs), '--json'];
-    const exitCode = await (0, utils_1.execBoringCache)(args, {
+    const exitCode = await execBoringCache(args, {
         ignoreReturnCode: true,
         silent: true,
         listeners: {
@@ -176,22 +140,22 @@ function checkFlagArgs(restoreFlagArgs) {
     }
     return args;
 }
-async function run() {
+export async function run() {
     const originalCwd = process.cwd();
     let restoreFailureContext = {};
     try {
-        const inputs = (0, utils_1.getInputs)();
+        const inputs = getInputs();
         restoreFailureContext = {
-            diagnostics_level: (0, utils_1.loadDiagnosticsConfig)(inputs).level,
+            diagnostics_level: loadDiagnosticsConfig(inputs).level,
             verify_mode: inputs.verify,
         };
-        const saveEnabled = (0, utils_1.saveConfigured)(inputs);
+        const saveEnabled = saveConfigured(inputs);
         delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
-        const saveAllowed = saveEnabled ? (0, utils_1.applySaveTokenPolicy)(inputs) : false;
+        const saveAllowed = saveEnabled ? applySaveTokenPolicy(inputs) : false;
         if (!saveEnabled) {
-            (0, utils_1.applyRestoreOnlyTokenPolicy)();
+            applyRestoreOnlyTokenPolicy();
         }
-        const trustState = (0, utils_1.buildActionTrustState)(inputs, {
+        const trustState = buildActionTrustState(inputs, {
             saveConfigured: saveEnabled,
             saveAllowed,
         });
@@ -200,9 +164,9 @@ async function run() {
             : { ...inputs, readOnly: true };
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
-            await (0, utils_1.ensureBoringCache)(buildCliSetupOptions(inputs, cliPlatform));
+            await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
         }
-        const plan = await (0, utils_1.buildPlan)(inputs);
+        const plan = await buildPlan(inputs);
         restoreFailureContext = {
             ...restoreFailureContext,
             workspace: plan.workspace,
@@ -215,42 +179,42 @@ async function run() {
             trust_state: trustState,
         };
         process.chdir(plan.workingDirectory);
-        await (0, utils_1.applyPresetCacheEnv)(plan);
+        await applyPresetCacheEnv(plan);
         const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs));
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, (0, utils_1.buildFlagArgs)(inputs), plan.archiveRestoreCandidates);
+        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), plan.archiveRestoreCandidates);
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
-            usedMiseRuntime = await (0, utils_1.applyMiseSetup)(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
+            usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
         }
-        const modeRestore = await (0, mode_handlers_1.runModeRestore)(plan, effectiveInputs);
+        const modeRestore = await runModeRestore(plan, effectiveInputs);
         const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)
             .join(',');
         const verificationSpecs = [
-            ...(0, utils_1.buildGenericVerificationSpecs)(plan, inputs, usedMiseRuntime),
+            ...buildGenericVerificationSpecs(plan, inputs, usedMiseRuntime),
             ...(modeRestore.verificationSpecs || []),
         ];
-        const resolvedTags = (0, utils_1.resolveVerificationTags)(verificationSpecs, plan.workingDirectory);
-        const saveCapable = saveEnabled && (0, core_1.hasSaveToken)();
+        const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
+        const saveCapable = saveEnabled && hasSaveToken();
         const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
         const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
-        const deferredVerifyTags = (0, utils_1.resolveVerificationTags)(deferredVerifySpecs, plan.workingDirectory);
+        const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
         const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
-        const diagnostics = (0, utils_1.loadDiagnosticsConfig)(inputs);
+        const diagnostics = loadDiagnosticsConfig(inputs);
         core.setOutput('cache-hit', String(overallHit));
         core.setOutput('runtime-cache-hit', String(runtimeRestore.hit));
         core.setOutput('diagnostics-level', diagnostics.level);
         core.setOutput('resolved-mode', plan.mode);
-        core.setOutput('resolved-tools', (0, utils_1.serializeTools)(plan.runtimeTools));
+        core.setOutput('resolved-tools', serializeTools(plan.runtimeTools));
         core.setOutput('workspace', plan.workspace);
         core.setOutput('cache-tag', modeRestore.cacheTag || plan.cacheTagPrefix);
         core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
         core.setOutput('resolved-entries', plan.archiveEntries);
         core.setOutput('resolved-tags', resolvedTags.join(','));
-        (0, utils_1.writeActionEvidence)('restore', {
+        writeActionEvidence('restore', {
             phase_status: 'completed',
-            phase_summary: (0, utils_1.restorePhaseSummary)({
+            phase_summary: restorePhaseSummary({
                 cacheHit: overallHit,
                 runtimeCacheHit: runtimeRestore.hit,
                 trustState,
@@ -319,7 +283,7 @@ async function run() {
             core.info('Skipping save-expected tag verification in restore step: no save-capable token is available.');
         }
         if (inputs.verify !== 'none' && immediateVerifySpecs.length > 0) {
-            await (0, utils_1.verifyVerificationSpecs)(plan.workspace, immediateVerifySpecs, {
+            await verifyVerificationSpecs(plan.workspace, immediateVerifySpecs, {
                 mode: inputs.verify,
                 timeoutSeconds: inputs.verifyTimeoutSeconds,
                 requireServerSignature: inputs.verifyRequireServerSignature,
@@ -330,13 +294,13 @@ async function run() {
         if (!saveEnabled) {
             core.info('Post step save is disabled by save-policy: off.');
         }
-        if (saveEnabled && (0, utils_1.isPullRequestEvent)() && !saveAllowed) {
+        if (saveEnabled && isPullRequestEvent() && !saveAllowed) {
             core.info('Post step will stay restore-only unless save-on-pull-request: true is set.');
         }
     }
     catch (error) {
-        (0, utils_1.writeActionFailureEvidence)('restore', error, restoreFailureContext);
-        core.setFailed(`boringcache/one restore failed: ${(0, utils_1.actionErrorMessage)(error)}`);
+        writeActionFailureEvidence('restore', error, restoreFailureContext);
+        core.setFailed(`boringcache/one restore failed: ${actionErrorMessage(error)}`);
     }
     finally {
         process.chdir(originalCwd);

@@ -1,50 +1,7 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCacheConfig = getCacheConfig;
-exports.validateInputs = validateInputs;
-exports.resolvePath = resolvePath;
-exports.resolvePaths = resolvePaths;
-exports.parseEntries = parseEntries;
-exports.getPlatformSuffix = getPlatformSuffix;
-exports.getInputsWorkspace = getInputsWorkspace;
-exports.convertCacheFormatToEntries = convertCacheFormatToEntries;
-const core = __importStar(require("@actions/core"));
-const os = __importStar(require("os"));
-const path = __importStar(require("path"));
-async function getCacheConfig(key, enableCrossOsArchive, noPlatform = false) {
+import * as core from '@actions/core';
+import * as os from 'os';
+import * as path from 'path';
+export async function getCacheConfig(key, enableCrossOsArchive, noPlatform = false) {
     let workspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE ||
         'default/default';
     if (!workspace.includes('/')) {
@@ -59,7 +16,7 @@ async function getCacheConfig(key, enableCrossOsArchive, noPlatform = false) {
     const fullKey = key + platformSuffix;
     return { workspace, fullKey, platformSuffix };
 }
-function validateInputs(inputs) {
+export function validateInputs(inputs) {
     const hasCliFormat = inputs.workspace || inputs.entries;
     const hasCacheFormat = inputs.path || inputs.key;
     if (!hasCliFormat && !hasCacheFormat) {
@@ -83,7 +40,7 @@ function validateInputs(inputs) {
         throw new Error('Workspace must be in format "namespace/workspace" (e.g., "my-org/my-project")');
     }
 }
-function resolvePath(pathInput, baseDir) {
+export function resolvePath(pathInput, baseDir) {
     const trimmedPath = pathInput.trim();
     if (path.isAbsolute(trimmedPath)) {
         return trimmedPath;
@@ -93,7 +50,7 @@ function resolvePath(pathInput, baseDir) {
     }
     return path.resolve(baseDir || process.cwd(), trimmedPath);
 }
-function resolvePaths(pathInput, baseDir) {
+export function resolvePaths(pathInput, baseDir) {
     return pathInput
         .split('\n')
         .map(p => p.trim())
@@ -101,7 +58,7 @@ function resolvePaths(pathInput, baseDir) {
         .map(p => resolvePath(p, baseDir))
         .join('\n');
 }
-function parseEntries(entriesInput, _action, options = {}) {
+export function parseEntries(entriesInput, _action, options = {}) {
     const shouldResolve = options.resolvePaths ?? true;
     const baseDir = options.baseDir;
     return entriesInput
@@ -133,7 +90,7 @@ function parseEntries(entriesInput, _action, options = {}) {
         return { tag, restorePath, savePath };
     });
 }
-function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
+export function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
     if (noPlatform || enableCrossOsArchive) {
         return '';
     }
@@ -146,7 +103,7 @@ function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
  * Used by the generic action/save/restore actions.
  * NOTE: This is different from workspace.ts getWorkspace which takes a string.
  */
-function getInputsWorkspace(inputs) {
+export function getInputsWorkspace(inputs) {
     if (inputs.workspace && typeof inputs.workspace === 'string') {
         return inputs.workspace;
     }
@@ -156,7 +113,7 @@ function getInputsWorkspace(inputs) {
     }
     return 'default/default';
 }
-function convertCacheFormatToEntries(inputs, _action) {
+export function convertCacheFormatToEntries(inputs, _action) {
     if (!inputs.path || !inputs.key) {
         throw new Error('actions/cache format requires both path and key inputs');
     }
