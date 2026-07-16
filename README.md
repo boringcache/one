@@ -31,6 +31,11 @@ Docker mode:
     BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 ```
 
+For a persistent managed-builder lifecycle on ephemeral runners, opt into
+`cache-backend: state`. The Docker build returns at image-ready while the same
+CLI worker finalizes and atomically publishes state; the Action post phase
+always awaits that worker.
+
 ## Inputs
 
 The shipped input and output contract is in [`action.yml`](action.yml).
