@@ -1,66 +1,12 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMiseBinPath = getMiseBinPath;
-exports.getMiseDataDir = getMiseDataDir;
-exports.getMiseInstallsDir = getMiseInstallsDir;
-exports.getMiseShimsDir = getMiseShimsDir;
-exports.slugMiseTagPart = slugMiseTagPart;
-exports.scopeMiseToolVersion = scopeMiseToolVersion;
-exports.buildMiseToolTag = buildMiseToolTag;
-exports.buildMiseRuntimeTag = buildMiseRuntimeTag;
-exports.hasMiseToolVersion = hasMiseToolVersion;
-exports.hasToolVersionOnPath = hasToolVersionOnPath;
-exports.installMise = installMise;
-exports.installMiseTool = installMiseTool;
-exports.activateMiseTool = activateMiseTool;
-exports.reshimMise = reshimMise;
-exports.exportMiseEnv = exportMiseEnv;
-exports.readToolVersions = readToolVersions;
-exports.readToolVersionsValue = readToolVersionsValue;
-exports.readMiseTomlTools = readMiseTomlTools;
-exports.readMiseTomlVersion = readMiseTomlVersion;
-exports.readProjectMiseTools = readProjectMiseTools;
-const core = __importStar(require("@actions/core"));
-const exec = __importStar(require("@actions/exec"));
-const cache = __importStar(require("@actions/cache"));
-const crypto = __importStar(require("crypto"));
-const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
-const path = __importStar(require("path"));
-const tc = __importStar(require("@actions/tool-cache"));
+import * as core from '@actions/core';
+import * as exec from '@actions/exec';
+import * as cache from '@actions/cache';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { saveImmutableToolCache } from './action-cache';
+import * as tc from '@actions/tool-cache';
 const isWindows = process.platform === 'win32';
 const MISE_TOOL_NAME = 'mise';
 const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
@@ -68,25 +14,25 @@ const DEFAULT_MISE_VERSION = 'v2026.3.8';
 function runnerHomeDir() {
     return process.env.HOME || process.env.USERPROFILE || os.homedir();
 }
-function getMiseBinPath() {
+export function getMiseBinPath() {
     const homedir = runnerHomeDir();
     return isWindows
         ? path.join(homedir, '.local', 'bin', 'mise.exe')
         : path.join(homedir, '.local', 'bin', 'mise');
 }
-function getMiseDataDir() {
+export function getMiseDataDir() {
     if (isWindows) {
         return path.join(process.env.LOCALAPPDATA || path.join(runnerHomeDir(), 'AppData', 'Local'), 'mise');
     }
     return path.join(runnerHomeDir(), '.local', 'share', 'mise');
 }
-function getMiseInstallsDir() {
+export function getMiseInstallsDir() {
     return process.env.MISE_INSTALLS_DIR || path.join(getMiseDataDir(), 'installs');
 }
-function getMiseShimsDir() {
+export function getMiseShimsDir() {
     return path.join(getMiseDataDir(), 'shims');
 }
-function slugMiseTagPart(value) {
+export function slugMiseTagPart(value) {
     const normalized = value
         .trim()
         .toLowerCase()
@@ -96,7 +42,7 @@ function slugMiseTagPart(value) {
         .replace(/^[.-]+|[.-]+$/g, '');
     return normalized || 'unknown';
 }
-function scopeMiseToolVersion(version, scope = 'patch') {
+export function scopeMiseToolVersion(version, scope = 'patch') {
     const normalized = version.trim().replace(/^v(?=\d)/, '');
     const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
     if (!match) {
@@ -111,20 +57,20 @@ function scopeMiseToolVersion(version, scope = 'patch') {
     }
     return `${major}.${minor}.${patch}`;
 }
-function buildMiseToolTag(tools, scope = 'patch') {
+export function buildMiseToolTag(tools, scope = 'patch') {
     return tools
         .map((tool) => `${slugMiseTagPart(tool.name)}-${slugMiseTagPart(scopeMiseToolVersion(tool.version, scope))}`)
         .sort()
         .join('-');
 }
-function buildMiseRuntimeTag(prefix, tools, scope = 'patch') {
+export function buildMiseRuntimeTag(prefix, tools, scope = 'patch') {
     const toolTag = buildMiseToolTag(tools, scope);
     if (!toolTag) {
         return slugMiseTagPart(prefix);
     }
     return `${slugMiseTagPart(prefix)}-mise-${toolTag}`;
 }
-async function hasMiseToolVersion(toolName, version) {
+export async function hasMiseToolVersion(toolName, version) {
     const normalizedTool = normalizeToolName(toolName);
     let output = '';
     const exitCode = await exec.exec(getMiseBinPath(), ['ls', normalizedTool, '--installed', '--json'], {
@@ -157,7 +103,7 @@ async function hasMiseToolVersion(toolName, version) {
     }
     return entries.some((entry) => entry.installed !== false && isMatchingToolVersion(version, entry.version || ''));
 }
-async function hasToolVersionOnPath(toolName, version) {
+export async function hasToolVersionOnPath(toolName, version) {
     const normalizedTool = normalizeToolName(toolName);
     const probes = getToolVersionProbes(normalizedTool);
     for (const probe of probes) {
@@ -168,7 +114,7 @@ async function hasToolVersionOnPath(toolName, version) {
     }
     return false;
 }
-async function installMise() {
+export async function installMise() {
     const version = getMiseVersion();
     const normalizedVersion = version.replace(/^v/, '');
     const platform = getMisePlatformInfo();
@@ -193,13 +139,7 @@ async function installMise() {
     else {
         core.info(`Installing mise ${version}...`);
         toolPath = await downloadAndInstallMise(version, platform);
-        try {
-            await cache.saveCache(cachePaths, cacheInfo.cacheKey);
-            core.info(`Saved mise to cache (key: ${cacheInfo.cacheKey})`);
-        }
-        catch (error) {
-            core.debug(`mise cache save failed: ${error instanceof Error ? error.message : error}`);
-        }
+        await saveImmutableToolCache(cachePaths, cacheInfo.cacheKey, 'mise');
     }
     if (!toolPath) {
         throw new Error(`Failed to install mise ${version}`);
@@ -374,7 +314,7 @@ async function findMiseBinary(extractedPath, binaryName) {
     }
     throw new Error(`Unable to locate ${binaryName} in extracted mise archive`);
 }
-async function installMiseTool(toolName, version, options = {}) {
+export async function installMiseTool(toolName, version, options = {}) {
     const spec = `${toolName}@${version}`;
     const label = options.label || toolName;
     const global = options.global ?? true;
@@ -515,19 +455,19 @@ function getToolVersionProbes(toolName) {
             return [];
     }
 }
-async function activateMiseTool(toolName, version, options = {}) {
+export async function activateMiseTool(toolName, version, options = {}) {
     const spec = `${toolName}@${version}`;
     const label = options.label || toolName;
     const global = options.global ?? true;
     core.info(`Activating ${label} ${version}...`);
     await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
 }
-async function reshimMise(force = true) {
+export async function reshimMise(force = true) {
     const args = force ? ['reshim', '-f'] : ['reshim'];
     core.info('Refreshing mise shims...');
     await exec.exec(getMiseBinPath(), args);
 }
-async function exportMiseEnv(cwd) {
+export async function exportMiseEnv(cwd) {
     core.info('Exporting mise environment...');
     const envVars = await readMiseEnvJson(cwd);
     if (envVars) {
@@ -606,7 +546,7 @@ function parseDotenvLines(content) {
     }
     return entries;
 }
-async function readToolVersions(workingDir) {
+export async function readToolVersions(workingDir) {
     const toolVersionsPath = path.join(workingDir, '.tool-versions');
     try {
         const content = await fs.promises.readFile(toolVersionsPath, 'utf-8');
@@ -628,12 +568,12 @@ async function readToolVersions(workingDir) {
         return [];
     }
 }
-async function readToolVersionsValue(workingDir, toolName) {
+export async function readToolVersionsValue(workingDir, toolName) {
     const normalizedToolName = normalizeToolName(toolName);
     const tools = await readToolVersions(workingDir);
     return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
 }
-async function readMiseTomlTools(workingDir) {
+export async function readMiseTomlTools(workingDir) {
     const miseToml = path.join(workingDir, 'mise.toml');
     try {
         const content = await fs.promises.readFile(miseToml, 'utf-8');
@@ -686,12 +626,12 @@ async function readMiseTomlTools(workingDir) {
         return [];
     }
 }
-async function readMiseTomlVersion(workingDir, toolName) {
+export async function readMiseTomlVersion(workingDir, toolName) {
     const normalizedToolName = normalizeToolName(toolName);
     const tools = await readMiseTomlTools(workingDir);
     return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
 }
-async function readProjectMiseTools(workingDir) {
+export async function readProjectMiseTools(workingDir) {
     const toolVersions = await readToolVersions(workingDir);
     const miseTomlTools = await readMiseTomlTools(workingDir);
     const merged = new Map();
