@@ -1,8 +1,3 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizeMode = normalizeMode;
-exports.resolveModeSpec = resolveModeSpec;
-exports.assertImplementedMode = assertImplementedMode;
 const MODE_SPECS = {
     archive: {
         resolved: 'archive',
@@ -55,7 +50,7 @@ const MODE_SPECS = {
         description: 'Turbo remote cache proxy integration.',
     },
 };
-function normalizeMode(value) {
+export function normalizeMode(value) {
     const normalized = (value || 'auto').trim().toLowerCase();
     switch (normalized) {
         case 'auto':
@@ -74,7 +69,7 @@ function normalizeMode(value) {
             throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy.`);
     }
 }
-function resolveModeSpec(mode) {
+export function resolveModeSpec(mode) {
     const resolved = mode === 'auto' ? 'archive' : mode;
     const spec = MODE_SPECS[resolved];
     return {
@@ -82,7 +77,7 @@ function resolveModeSpec(mode) {
         ...spec,
     };
 }
-function assertImplementedMode(modeSpec) {
+export function assertImplementedMode(modeSpec) {
     if (modeSpec.implemented) {
         return;
     }
