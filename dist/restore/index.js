@@ -94265,6 +94265,7 @@ const promises_namespaceObject = require("timers/promises");
 
 const RECEIPT_SCHEMA = 'buildkit-state-handoff.v1';
 const IMAGE_READY_FILE = 'image-ready.json';
+const FINALIZE_REQUEST_FILE = 'finalize-request.json';
 const FINISHED_FILE = 'finished.json';
 const POLL_INTERVAL_MS = 250;
 const FINISH_TIMEOUT_MS = (/* unused pure expression or super */ null && (60 * 60 * 1000));
@@ -94282,7 +94283,7 @@ async function startStateWorker(args, options) {
     const logFd = external_fs_namespaceObject.openSync(logPath, 'wx', 0o600);
     const separator = args.indexOf('--');
     const workerArgs = [...args];
-    workerArgs.splice(separator >= 0 ? separator : workerArgs.length, 0, '--state-handoff-dir', directory);
+    workerArgs.splice(separator >= 0 ? separator : workerArgs.length, 0, '--state-handoff-dir', directory, '--state-handoff-defer-finalize');
     let child;
     try {
         child = (0,external_child_process_namespaceObject.spawn)('boringcache', workerArgs, {
@@ -94371,6 +94372,30 @@ async function state_worker_waitForStateWorker(handle, timeoutMs = FINISH_TIMEOU
         }
         await delay(POLL_INTERVAL_MS);
     }
+}
+function state_worker_requestStateFinalization(handle) {
+    const requestPath = path.join(handle.directory, FINALIZE_REQUEST_FILE);
+    if (fs.existsSync(requestPath)) {
+        readReceipt(requestPath, handle.pid, 'finalize-requested');
+        return;
+    }
+    const temporary = path.join(handle.directory, `.${FINALIZE_REQUEST_FILE}.${process.pid}.${Date.now()}.tmp`);
+    const receipt = {
+        schema_version: RECEIPT_SCHEMA,
+        phase: 'finalize-requested',
+        pid: handle.pid,
+        requested_at: new Date().toISOString(),
+    };
+    try {
+        fs.writeFileSync(temporary, `${JSON.stringify(receipt)}\n`, { flag: 'wx', mode: 0o600 });
+        fs.renameSync(temporary, requestPath);
+    }
+    finally {
+        if (fs.existsSync(temporary)) {
+            fs.rmSync(temporary);
+        }
+    }
+    core.info('BoringCache state finalization requested from the Action post phase.');
 }
 function readReceipt(receiptPath, expectedPid, expectedPhase) {
     let receipt;
@@ -99644,6 +99669,7 @@ async function runDockerSave(options = {}) {
     try {
         const stateWorker = getStateWorkerHandle();
         if (stateWorker) {
+            requestStateFinalization(stateWorker);
             await waitForStateWorker(stateWorker);
             saveStateWorkerHandle(stateWorker);
             emitStateSummary(getModeState('state-summary-path'));

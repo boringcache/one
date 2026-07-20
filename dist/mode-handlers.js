@@ -3,7 +3,7 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execBoringCache as execBoringCacheCore, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingRestoreTokenMessage, missingSaveTokenMessage, stateWorkerDirectory, startRegistryProxy, startStateWorker, stopRegistryProxy, waitForStateImageReady, waitForStateWorker, } from './core';
+import { execBoringCache as execBoringCacheCore, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingRestoreTokenMessage, missingSaveTokenMessage, requestStateFinalization, stateWorkerDirectory, startRegistryProxy, startStateWorker, stopRegistryProxy, waitForStateImageReady, waitForStateWorker, } from './core';
 import { DEFAULT_OCI_HYDRATION_POLICY, detectNodePackageManager, normalizeVerifyTimeoutSeconds, resolveCliArchiveEntries, } from './utils';
 const DOCKER_CACHE_DIR_FROM = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-from');
 const DOCKER_CACHE_DIR_TO = path.join(os.tmpdir(), 'boringcache-one-buildkit-cache-to');
@@ -2123,6 +2123,7 @@ async function runDockerSave(options = {}) {
     try {
         const stateWorker = getStateWorkerHandle();
         if (stateWorker) {
+            requestStateFinalization(stateWorker);
             await waitForStateWorker(stateWorker);
             saveStateWorkerHandle(stateWorker);
             emitStateSummary(getModeState('state-summary-path'));
