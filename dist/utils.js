@@ -11,8 +11,6 @@ export { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, ge
 export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 export const MAX_DIAGNOSTICS_LOG_LINES = 500;
 export const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
-export const DEFAULT_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS = 14;
-export const MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS = 90;
 export const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
 export const MAX_VERIFY_TIMEOUT_SECONDS = 900;
 export const MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
@@ -40,7 +38,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.93',
+        cliVersion: core.getInput('cli-version') || 'v1.13.94',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -66,8 +64,6 @@ export function getInputs() {
         trustedWorkspaceSigningKeyFingerprint: core.getInput('trusted-workspace-signing-key-fingerprint'),
         diagnostics: normalizeDiagnosticsMode(core.getInput('diagnostics')),
         diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
-        diagnosticsArtifactName: core.getInput('diagnostics-artifact-name').trim(),
-        diagnosticsArtifactRetentionDays: normalizeDiagnosticsArtifactRetentionDays(core.getInput('diagnostics-artifact-retention-days')),
         metadataHints: core.getInput('metadata-hints'),
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
@@ -346,17 +342,6 @@ export function normalizeDiagnosticsLogLines(value) {
     if (parsed > MAX_DIAGNOSTICS_LOG_LINES) {
         core.warning(`diagnostics-log-lines "${value}" is too high; tailing ${MAX_DIAGNOSTICS_LOG_LINES} lines to keep diagnostics bounded.`);
         return MAX_DIAGNOSTICS_LOG_LINES;
-    }
-    return parsed;
-}
-export function normalizeDiagnosticsArtifactRetentionDays(value) {
-    if (!value || !value.trim()) {
-        return DEFAULT_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS;
-    }
-    const parsed = parsePositiveIntegerInput(value, 'diagnostics-artifact-retention-days');
-    if (parsed > MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS) {
-        core.warning(`diagnostics-artifact-retention-days "${value}" is too high; retaining for at most ${MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS} days.`);
-        return MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS;
     }
     return parsed;
 }

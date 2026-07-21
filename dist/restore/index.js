@@ -10996,103 +10996,109 @@ function gte(i, y) {
 function expand(str, max, isTop) {
   var expansions = [];
 
-  var m = balanced('{', '}', str);
-  if (!m || /\$$/.test(m.pre)) return [str];
+  // The `{a},b}` rewrite below restarts expansion on a rewritten string with
+  // the same `max` and `isTop = true`. Loop instead of recursing so a long run
+  // of non-expanding `{}` groups can't exhaust the call stack.
+  for (;;) {
+    var m = balanced('{', '}', str);
+    if (!m || /\$$/.test(m.pre)) return [str];
 
-  var isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
-  var isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
-  var isSequence = isNumericSequence || isAlphaSequence;
-  var isOptions = m.body.indexOf(',') >= 0;
-  if (!isSequence && !isOptions) {
-    // {a},b}
-    if (m.post.match(/,(?!,).*\}/)) {
-      str = m.pre + '{' + m.body + escClose + m.post;
-      return expand(str, max, true);
-    }
-    return [str];
-  }
-
-  var n;
-  if (isSequence) {
-    n = m.body.split(/\.\./);
-  } else {
-    n = parseCommaParts(m.body);
-    if (n.length === 1) {
-      // x{{a,b}}y ==> x{a}y x{b}y
-      n = expand(n[0], max, false).map(embrace);
-      if (n.length === 1) {
-        var post = m.post.length
-          ? expand(m.post, max, false)
-          : [''];
-        return post.map(function(p) {
-          return m.pre + n[0] + p;
-        });
+    var isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
+    var isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
+    var isSequence = isNumericSequence || isAlphaSequence;
+    var isOptions = m.body.indexOf(',') >= 0;
+    if (!isSequence && !isOptions) {
+      // {a},b}
+      if (m.post.match(/,(?!,).*\}/)) {
+        str = m.pre + '{' + m.body + escClose + m.post;
+        isTop = true
+        continue
       }
+      return [str];
     }
-  }
 
-  // at this point, n is the parts, and we know it's not a comma set
-  // with a single entry.
-
-  // no need to expand pre, since it is guaranteed to be free of brace-sets
-  var pre = m.pre;
-  var post = m.post.length
-    ? expand(m.post, max, false)
-    : [''];
-
-  var N;
-
-  if (isSequence) {
-    var x = numeric(n[0]);
-    var y = numeric(n[1]);
-    var width = Math.max(n[0].length, n[1].length)
-    var incr = n.length == 3
-      ? Math.max(Math.abs(numeric(n[2])), 1)
-      : 1;
-    var test = lte;
-    var reverse = y < x;
-    if (reverse) {
-      incr *= -1;
-      test = gte;
-    }
-    var pad = n.some(isPadded);
-
-    N = [];
-
-    for (var i = x; test(i, y); i += incr) {
-      var c;
-      if (isAlphaSequence) {
-        c = String.fromCharCode(i);
-        if (c === '\\')
-          c = '';
-      } else {
-        c = String(i);
-        if (pad) {
-          var need = width - c.length;
-          if (need > 0) {
-            var z = new Array(need + 1).join('0');
-            if (i < 0)
-              c = '-' + z + c.slice(1);
-            else
-              c = z + c;
-          }
+    var n;
+    if (isSequence) {
+      n = m.body.split(/\.\./);
+    } else {
+      n = parseCommaParts(m.body);
+      if (n.length === 1) {
+        // x{{a,b}}y ==> x{a}y x{b}y
+        n = expand(n[0], max, false).map(embrace);
+        if (n.length === 1) {
+          var post = m.post.length
+            ? expand(m.post, max, false)
+            : [''];
+          return post.map(function(p) {
+            return m.pre + n[0] + p;
+          });
         }
       }
-      N.push(c);
     }
-  } else {
-    N = concatMap(n, function(el) { return expand(el, max, false) });
-  }
 
-  for (var j = 0; j < N.length; j++) {
-    for (var k = 0; k < post.length && expansions.length < max; k++) {
-      var expansion = pre + N[j] + post[k];
-      if (!isTop || isSequence || expansion)
-        expansions.push(expansion);
+    // at this point, n is the parts, and we know it's not a comma set
+    // with a single entry.
+
+    // no need to expand pre, since it is guaranteed to be free of brace-sets
+    var pre = m.pre;
+    var post = m.post.length
+      ? expand(m.post, max, false)
+      : [''];
+
+    var N;
+
+    if (isSequence) {
+      var x = numeric(n[0]);
+      var y = numeric(n[1]);
+      var width = Math.max(n[0].length, n[1].length)
+      var incr = n.length == 3
+        ? Math.max(Math.abs(numeric(n[2])), 1)
+        : 1;
+      var test = lte;
+      var reverse = y < x;
+      if (reverse) {
+        incr *= -1;
+        test = gte;
+      }
+      var pad = n.some(isPadded);
+
+      N = [];
+
+      for (var i = x; test(i, y) && N.length < max; i += incr) {
+        var c;
+        if (isAlphaSequence) {
+          c = String.fromCharCode(i);
+          if (c === '\\')
+            c = '';
+        } else {
+          c = String(i);
+          if (pad) {
+            var need = width - c.length;
+            if (need > 0) {
+              var z = new Array(need + 1).join('0');
+              if (i < 0)
+                c = '-' + z + c.slice(1);
+              else
+                c = z + c;
+            }
+          }
+        }
+        N.push(c);
+      }
+    } else {
+      N = concatMap(n, function(el) { return expand(el, max, false) });
     }
-  }
 
-  return expansions;
+    for (var j = 0; j < N.length; j++) {
+      for (var k = 0; k < post.length && expansions.length < max; k++) {
+        var expansion = pre + N[j] + post[k];
+        if (!isTop || isSequence || expansion)
+          expansions.push(expansion);
+      }
+    }
+
+    return expansions;
+  }
 }
 
 
@@ -94254,183 +94260,6 @@ async function findAvailablePort() {
     });
 }
 
-;// CONCATENATED MODULE: external "timers/promises"
-const promises_namespaceObject = require("timers/promises");
-;// CONCATENATED MODULE: ./lib/core/state-worker.ts
-
-
-
-
-
-
-const RECEIPT_SCHEMA = 'buildkit-state-handoff.v1';
-const IMAGE_READY_FILE = 'image-ready.json';
-const FINISHED_FILE = 'finished.json';
-const POLL_INTERVAL_MS = 250;
-const FINISH_TIMEOUT_MS = (/* unused pure expression or super */ null && (60 * 60 * 1000));
-const LOG_CHUNK_BYTES = 1024 * 1024;
-function stateWorkerDirectory() {
-    const root = process.env.RUNNER_TEMP || external_os_.tmpdir();
-    const runId = sanitizePathToken(process.env.GITHUB_RUN_ID || String(process.pid));
-    const action = sanitizePathToken(process.env.GITHUB_ACTION || 'one');
-    return external_path_.join(root, `boringcache-state-${runId}-${action}-${Date.now().toString(36)}`);
-}
-async function startStateWorker(args, options) {
-    const directory = external_path_.resolve(options.directory || stateWorkerDirectory());
-    external_fs_namespaceObject.mkdirSync(directory, { recursive: false, mode: 0o700 });
-    const logPath = external_path_.join(directory, 'worker.log');
-    const logFd = external_fs_namespaceObject.openSync(logPath, 'wx', 0o600);
-    const separator = args.indexOf('--');
-    const workerArgs = [...args];
-    workerArgs.splice(separator >= 0 ? separator : workerArgs.length, 0, '--state-handoff-dir', directory);
-    let child;
-    try {
-        child = (0,external_child_process_namespaceObject.spawn)('boringcache', workerArgs, {
-            cwd: options.cwd,
-            detached: true,
-            stdio: ['ignore', logFd, logFd],
-            env: options.env || process.env,
-        });
-        await new Promise((resolve, reject) => {
-            const onSpawn = () => {
-                child.removeListener('error', onError);
-                resolve();
-            };
-            const onError = (error) => {
-                child.removeListener('spawn', onSpawn);
-                reject(new Error(`Failed to start the BoringCache state worker: ${error.message}`));
-            };
-            child.once('spawn', onSpawn);
-            child.once('error', onError);
-        });
-        child.on('error', (error) => {
-            warning(`BoringCache state worker process error: ${error.message}`);
-        });
-        child.unref();
-    }
-    finally {
-        external_fs_namespaceObject.closeSync(logFd);
-    }
-    if (!child.pid) {
-        throw new Error('Failed to start the BoringCache state worker');
-    }
-    const handle = {
-        pid: child.pid,
-        directory,
-        logPath,
-        logOffset: 0,
-    };
-    info(`BoringCache state worker started (PID: ${handle.pid})`);
-    return handle;
-}
-async function waitForStateImageReady(handle) {
-    const readyPath = external_path_.join(handle.directory, IMAGE_READY_FILE);
-    const finishedPath = external_path_.join(handle.directory, FINISHED_FILE);
-    while (true) {
-        handle.logOffset = emitNewLog(handle.logPath, handle.logOffset);
-        if (external_fs_namespaceObject.existsSync(readyPath)) {
-            const receipt = readReceipt(readyPath, handle.pid, 'image-ready');
-            if (receipt.command_exit_code !== 0) {
-                throw new Error(`Invalid image-ready receipt with command exit code ${receipt.command_exit_code}`);
-            }
-            handle.cacheHit = receipt.state_restored === true;
-            info('Docker image is ready; BuildKit state finalization continues in the Action post phase.');
-            return handle;
-        }
-        if (external_fs_namespaceObject.existsSync(finishedPath)) {
-            const receipt = readReceipt(finishedPath, handle.pid, 'finished');
-            throw new Error(receipt.error || `BoringCache state worker finished before image-ready (exit ${receipt.exit_code})`);
-        }
-        if (!state_worker_isProcessAlive(handle.pid)) {
-            handle.logOffset = emitNewLog(handle.logPath, handle.logOffset);
-            throw new Error(`BoringCache state worker exited before publishing ${IMAGE_READY_FILE}`);
-        }
-        await (0,promises_namespaceObject.setTimeout)(POLL_INTERVAL_MS);
-    }
-}
-async function state_worker_waitForStateWorker(handle, timeoutMs = FINISH_TIMEOUT_MS) {
-    const finishedPath = path.join(handle.directory, FINISHED_FILE);
-    const deadline = Date.now() + timeoutMs;
-    while (true) {
-        handle.logOffset = emitNewLog(handle.logPath, handle.logOffset);
-        if (fs.existsSync(finishedPath)) {
-            const receipt = readReceipt(finishedPath, handle.pid, 'finished');
-            handle.logOffset = emitRemainingLog(handle.logPath, handle.logOffset);
-            if (!receipt.success || receipt.exit_code !== 0) {
-                throw new Error(receipt.error || `BoringCache state worker failed with exit code ${receipt.exit_code}`);
-            }
-            core.info('BoringCache state finalization and atomic publication completed.');
-            return receipt;
-        }
-        if (!state_worker_isProcessAlive(handle.pid)) {
-            handle.logOffset = emitNewLog(handle.logPath, handle.logOffset);
-            throw new Error(`BoringCache state worker exited without publishing ${FINISHED_FILE}`);
-        }
-        if (Date.now() >= deadline) {
-            throw new Error(`Timed out waiting for BoringCache state finalization after ${Math.round(timeoutMs / 1000)}s`);
-        }
-        await delay(POLL_INTERVAL_MS);
-    }
-}
-function readReceipt(receiptPath, expectedPid, expectedPhase) {
-    let receipt;
-    try {
-        receipt = JSON.parse(external_fs_namespaceObject.readFileSync(receiptPath, 'utf8'));
-    }
-    catch (error) {
-        throw new Error(`Invalid BoringCache state receipt ${receiptPath}: ${error.message}`);
-    }
-    if (receipt.schema_version !== RECEIPT_SCHEMA
-        || receipt.phase !== expectedPhase
-        || receipt.pid !== expectedPid) {
-        throw new Error(`Unexpected BoringCache state receipt ${receiptPath}: schema=${receipt.schema_version} phase=${receipt.phase} pid=${receipt.pid}`);
-    }
-    return receipt;
-}
-function emitNewLog(logPath, offset) {
-    if (!external_fs_namespaceObject.existsSync(logPath)) {
-        return offset;
-    }
-    const size = external_fs_namespaceObject.statSync(logPath).size;
-    if (size <= offset) {
-        return offset;
-    }
-    const length = Math.min(size - offset, LOG_CHUNK_BYTES);
-    const buffer = Buffer.alloc(length);
-    const fd = external_fs_namespaceObject.openSync(logPath, 'r');
-    try {
-        external_fs_namespaceObject.readSync(fd, buffer, 0, length, offset);
-    }
-    finally {
-        external_fs_namespaceObject.closeSync(fd);
-    }
-    const output = buffer.toString('utf8').trimEnd();
-    if (output) {
-        info(output);
-    }
-    return offset + length;
-}
-function emitRemainingLog(logPath, offset) {
-    let nextOffset = emitNewLog(logPath, offset);
-    while (nextOffset > offset) {
-        offset = nextOffset;
-        nextOffset = emitNewLog(logPath, offset);
-    }
-    return offset;
-}
-function state_worker_isProcessAlive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch (error) {
-        return error.code !== 'ESRCH';
-    }
-}
-function sanitizePathToken(value) {
-    return value.replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'one';
-}
-
 ;// CONCATENATED MODULE: ./lib/core/mise.ts
 
 
@@ -95186,7 +95015,6 @@ function normalizeToolName(value) {
 
 
 
-
 ;// CONCATENATED MODULE: ./lib/modes.ts
 const MODE_SPECS = {
     archive: {
@@ -95289,8 +95117,6 @@ function assertImplementedMode(modeSpec) {
 const utils_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 const MAX_DIAGNOSTICS_LOG_LINES = 500;
 const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
-const DEFAULT_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS = 14;
-const MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS = 90;
 const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
 const MAX_VERIFY_TIMEOUT_SECONDS = 900;
 const MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
@@ -95318,7 +95144,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.13.93',
+        cliVersion: getInput('cli-version') || 'v1.13.94',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -95344,8 +95170,6 @@ function getInputs() {
         trustedWorkspaceSigningKeyFingerprint: getInput('trusted-workspace-signing-key-fingerprint'),
         diagnostics: normalizeDiagnosticsMode(getInput('diagnostics')),
         diagnosticsLogLines: normalizeDiagnosticsLogLines(getInput('diagnostics-log-lines')),
-        diagnosticsArtifactName: getInput('diagnostics-artifact-name').trim(),
-        diagnosticsArtifactRetentionDays: normalizeDiagnosticsArtifactRetentionDays(getInput('diagnostics-artifact-retention-days')),
         metadataHints: getInput('metadata-hints'),
         proxyPort: getInput('proxy-port'),
         proxyNoGit: getBooleanInput('proxy-no-git'),
@@ -95624,17 +95448,6 @@ function normalizeDiagnosticsLogLines(value) {
     if (parsed > MAX_DIAGNOSTICS_LOG_LINES) {
         warning(`diagnostics-log-lines "${value}" is too high; tailing ${MAX_DIAGNOSTICS_LOG_LINES} lines to keep diagnostics bounded.`);
         return MAX_DIAGNOSTICS_LOG_LINES;
-    }
-    return parsed;
-}
-function normalizeDiagnosticsArtifactRetentionDays(value) {
-    if (!value || !value.trim()) {
-        return DEFAULT_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS;
-    }
-    const parsed = parsePositiveIntegerInput(value, 'diagnostics-artifact-retention-days');
-    if (parsed > MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS) {
-        warning(`diagnostics-artifact-retention-days "${value}" is too high; retaining for at most ${MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS} days.`);
-        return MAX_DIAGNOSTICS_ARTIFACT_RETENTION_DAYS;
     }
     return parsed;
 }
@@ -97779,27 +97592,6 @@ function modeStateKey(key) {
 function saveModeState(key, value) {
     saveState(modeStateKey(key), value);
 }
-function saveStateWorkerHandle(handle) {
-    saveModeState('state-worker-pid', String(handle.pid));
-    saveModeState('state-worker-directory', handle.directory);
-    saveModeState('state-worker-log-path', handle.logPath);
-    saveModeState('state-worker-log-offset', String(handle.logOffset));
-}
-function getStateWorkerHandle() {
-    const pid = Number.parseInt(getModeState('state-worker-pid'), 10);
-    const directory = getModeState('state-worker-directory');
-    const logPath = getModeState('state-worker-log-path');
-    const logOffset = Number.parseInt(getModeState('state-worker-log-offset'), 10);
-    if (!Number.isFinite(pid) || pid <= 0 || !directory || !logPath) {
-        return null;
-    }
-    return {
-        pid,
-        directory,
-        logPath,
-        logOffset: Number.isFinite(logOffset) && logOffset >= 0 ? logOffset : 0,
-    };
-}
 function getModeState(key) {
     return getState(modeStateKey(key));
 }
@@ -97931,15 +97723,12 @@ function emitCliPlannerWarnings(stderr) {
 }
 function normalizeDockerCacheBackend(value) {
     const backend = (value.trim() || 'boringcache');
-    if (backend === 'state' || backend === 'boringcache' || backend === 'registry' || backend === 'local') {
+    if (backend === 'boringcache' || backend === 'registry' || backend === 'local') {
         return backend;
     }
-    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected state, boringcache, registry, or local.`);
+    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected boringcache, registry, or local.`);
 }
 function buildKitCacheBackendFor(cacheBackend) {
-    if (cacheBackend === 'state') {
-        return 'state';
-    }
     return cacheBackend === 'registry' ? 'registry' : 'boringcache';
 }
 function normalizeDockerCommand(value) {
@@ -98305,60 +98094,6 @@ function setLocalCacheOutputs(cacheDirFrom, cacheDirTo, cacheMode) {
     setOutput('cache-dir', cacheDirFrom);
     setOutput('save-cache-dir', cacheDirTo);
 }
-function setStateCacheOutputs(port, logPath, summaryPath, buildkitLogPath) {
-    setOutput('registry-ref', '');
-    setOutput('cache-from', '');
-    setOutput('cache-to', '');
-    setOutput('buildkit-cache-backend', 'state');
-    setOutput('docker-cache-run-ref', '');
-    setOutput('docker-cache-from-refs', '');
-    setOutput('docker-cache-requested-from-refs', '');
-    setOutput('docker-cache-unreadable-from-refs', '');
-    setOutput('docker-cache-import-ready', 'true');
-    setOutput('docker-cache-promotion-refs', '');
-    setOutput('docker-ci-provider', '');
-    setOutput('docker-ci-run-id', '');
-    setOutput('docker-ci-run-attempt', '');
-    setOutput('docker-ci-ref-type', '');
-    setOutput('docker-ci-ref-name', '');
-    setOutput('docker-ci-run-started-at', '');
-    setOutput('cache-dir', '');
-    setOutput('save-cache-dir', '');
-    setOutput('proxy-port', String(port));
-    setOutput('proxy-log-path', logPath);
-    setOutput('buildkit-state-summary-path', summaryPath);
-    setOutput('buildkit-state-worker-log-path', logPath);
-    setOutput('buildkit-state-buildkit-log-path', buildkitLogPath);
-}
-function emitStateSummary(summaryPath) {
-    if (!summaryPath || !fs.existsSync(summaryPath)) {
-        throw new Error(`BoringCache state worker completed without its state summary: ${summaryPath || '(missing path)'}`);
-    }
-    let summary;
-    try {
-        summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
-    }
-    catch (error) {
-        throw new Error(`Invalid BoringCache state summary ${summaryPath}: ${error.message}`);
-    }
-    const restore = summary.restore;
-    const save = summary.save;
-    core.info(`BoringCache state summary: restore=${String(restore?.status || 'unknown')} `
-        + `finalize=${String(summary.finalize?.seconds ?? 'unknown')}s `
-        + `save=${String(save?.status || 'unknown')} publish=${String(save?.publish_status || 'unknown')}`);
-    const materialization = summary.state_materialization;
-    const activity = materialization?.build_activity;
-    if (materialization?.status === 'recorded') {
-        core.info(`BoringCache state materialization: candidates=${String(materialization.candidate_count ?? 0)} `
-            + `useful=${String(materialization.useful_candidate_count ?? 0)} `
-            + `discarded=${String(materialization.discarded_candidate_count ?? 0)} `
-            + `lead_ms=${String(materialization.minimum_lead_time_ms ?? 0)}/${String(materialization.maximum_lead_time_ms ?? 0)}/${String(materialization.total_lead_time_ms ?? 0)} `
-            + `bodies=${String(materialization.materialized_bodies ?? 0)}/${String(materialization.already_ready_bodies ?? 0)}/${String(materialization.failed_bodies ?? 0)} `
-            + `body_ms=${String(materialization.sum_duration_ms ?? 0)}/${String(materialization.max_duration_ms ?? 0)} `
-            + `build_active_ms=${String(activity?.active_union_ms ?? 0)} `
-            + `meaningful_gap_ms=${String(activity?.meaningful_gap_ms ?? 0)}/${String(activity?.meaningful_gap_count ?? 0)}`);
-    }
-}
 async function inspectDockerTemplate(containerName, template) {
     let output = '';
     const result = await exec_exec('docker', ['inspect', '-f', template, containerName], {
@@ -98564,15 +98299,11 @@ function resolveDockerfilePath(workingDirectory, contextPath, dockerfileInput) {
     if (external_path_.isAbsolute(dockerfileInput)) {
         return dockerfileInput;
     }
-    const contextRelative = external_path_.resolve(contextPath, dockerfileInput);
-    if (external_fs_namespaceObject.existsSync(contextRelative)) {
-        return contextRelative;
+    const workingDirectoryCandidate = external_path_.resolve(workingDirectory, dockerfileInput);
+    if (external_fs_namespaceObject.existsSync(workingDirectoryCandidate)) {
+        return workingDirectoryCandidate;
     }
-    const workingDirectoryRelative = external_path_.resolve(workingDirectory, dockerfileInput);
-    if (external_fs_namespaceObject.existsSync(workingDirectoryRelative)) {
-        return workingDirectoryRelative;
-    }
-    throw new Error(`Dockerfile does not exist relative to the build context or working directory: ${dockerfileInput}`);
+    return external_path_.resolve(contextPath, dockerfileInput);
 }
 async function buildDockerImage(opts) {
     const args = dockerBuildxArgs(opts);
@@ -98989,7 +98720,7 @@ async function stopSccacheServer() {
     }
     return summarizeSccacheStats(output);
 }
-async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan, failOnCacheError = false) {
+async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
     const proxy = await proxy_startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -98999,7 +98730,7 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false, p
         noPlatform: proxyPlan.no_platform,
         noGit: proxyPlan.no_git,
         readOnly,
-    }, proxyPlan, failOnCacheError));
+    }, proxyPlan));
     return proxy;
 }
 function parseSccacheIntegerStat(output, label) {
@@ -99302,6 +99033,10 @@ async function runDockerRestore(plan, inputs) {
     const buildkitdConfigInline = getInput('buildkitd-config-inline') || '';
     const cacheBackend = normalizeDockerCacheBackend(getInput('cache-backend') || 'registry');
     const buildkitCacheBackend = buildKitCacheBackendFor(cacheBackend);
+    if (cacheBackend === 'boringcache' && !shouldBuild) {
+        throw new Error('cache-backend=boringcache requires docker-command=build so boringcache docker can own '
+            + 'the builder, build, and run evidence. Use cache-backend=registry for setup-only compatibility.');
+    }
     const cliOwnsManagedBuild = cacheBackend === 'boringcache' && shouldBuild;
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
@@ -99320,122 +99055,6 @@ async function runDockerRestore(plan, inputs) {
     saveModeState('cache-tag', localCacheTag);
     saveModeState('verbose', String(inputs.verbose));
     saveModeState('exclude', inputs.exclude);
-    if (cacheBackend === 'state') {
-        if (!shouldBuild) {
-            throw new Error('cache-backend=state requires docker-command=build so the Action can own the complete state lifecycle.');
-        }
-        if (platforms.split(',').map((value) => value.trim()).filter(Boolean).length > 1) {
-            throw new Error('cache-backend=state supports one target platform per Action invocation; use one state tag per architecture.');
-        }
-        if (driverOpts.length > 0 || buildkitdConfigInline.trim()) {
-            throw new Error('cache-backend=state owns its managed BuildKit daemon and does not accept driver-opts or buildkitd-config-inline.');
-        }
-        if (driver !== 'docker-container') {
-            throw new Error('cache-backend=state owns its managed BuildKit daemon; leave driver set to docker-container.');
-        }
-        if (cacheMode !== 'max') {
-            throw new Error('cache-backend=state does not use cache export modes; leave cache-mode set to max.');
-        }
-        if (inputs.ociHydration !== 'metadata-only' || inputs.requireOciImportReady) {
-            throw new Error('cache-backend=state restores persistent builder state directly and does not accept OCI hydration/readiness controls.');
-        }
-        if (external_fs_namespaceObject.existsSync(DOCKER_METADATA_FILE)) {
-            external_fs_namespaceObject.rmSync(DOCKER_METADATA_FILE);
-        }
-        // The Action owns this proxy, so select a free runner port when the user
-        // does not request one. Direct CLI users retain the CLI's stable default.
-        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-        const directory = stateWorkerDirectory();
-        const summaryPath = external_path_.join(directory, 'state-summary.json');
-        const buildkitLogPath = external_path_.join(directory, 'buildkitd.log');
-        const dockerArgs = dockerBuildxArgs({
-            dockerfile,
-            context,
-            image,
-            tags,
-            buildArgs,
-            secrets,
-            target,
-            platforms,
-            push,
-            load,
-            noCache,
-            provenance,
-            sbom,
-            builder: '',
-            cacheMode,
-        });
-        const args = [
-            'docker',
-            '--workspace',
-            plan.workspace,
-            '--tag',
-            localCacheTag,
-            '--backend',
-            'state',
-            '--port',
-            String(requestedPort),
-        ];
-        if (inputs.failOnCacheError) {
-            args.push('--fail-on-cache-error');
-        }
-        if (inputs.proxyNoPlatform) {
-            args.push('--no-platform');
-        }
-        if (inputs.proxyNoGit) {
-            args.push('--no-git');
-        }
-        mode_handlers_appendCliPublicationPolicy(args, inputs.readOnly);
-        for (const tool of dockerToolCaches) {
-            args.push('--tool-cache', tool);
-        }
-        appendMetadataHintArgs(args, inputs.metadataHints);
-        args.push('--', 'docker', ...dockerArgs);
-        const handle = await runDockerBuildOperation(() => startStateWorker(args, {
-            cwd: context,
-            directory,
-            env: {
-                ...process.env,
-                DOCKER_BUILDKIT: '1',
-                BORINGCACHE_MANAGED_BUILDKIT_IMAGE: managedBuildKitImage(inputs.managedBuildkitImage),
-                BORINGCACHE_STATE_SUMMARY_PATH: summaryPath,
-                BORINGCACHE_MANAGED_BUILDKIT_LOG_PATH: buildkitLogPath,
-            },
-        }));
-        saveStateWorkerHandle(handle);
-        saveModeState('state-summary-path', summaryPath);
-        saveModeState('state-buildkit-log-path', buildkitLogPath);
-        saveState('proxy-log-path', handle.logPath);
-        setStateCacheOutputs(requestedPort, handle.logPath, summaryPath, buildkitLogPath);
-        setOutput('buildx-name', '');
-        setOutput('buildx-platforms', platforms);
-        await runDockerBuildOperation(() => waitForStateImageReady(handle));
-        saveStateWorkerHandle(handle);
-        const { imageId, digest } = readDockerMetadata();
-        setOutput('image-id', imageId);
-        setOutput('digest', digest);
-        setOutput('workspace', plan.workspace);
-        setOutput('cache-tag', localCacheTag);
-        return {
-            cacheTag: localCacheTag,
-            cacheHit: handle.cacheHit === true,
-            evidence: {
-                adapter: 'docker',
-                cache_backend: 'state',
-                buildkit_cache_backend: 'state',
-                lifecycle: 'finalizing-in-post',
-                state_summary_path: summaryPath,
-                worker_log_path: handle.logPath,
-            },
-            verificationSpecs: [{
-                    tag: localCacheTag,
-                    noPlatform: inputs.proxyNoPlatform,
-                    noGit: inputs.proxyNoGit,
-                    saveExpected: !inputs.readOnly,
-                    pathHint: plan.workingDirectory,
-                }],
-        };
-    }
     let builderName = '';
     if (cliOwnsManagedBuild) {
         if (driver !== 'docker-container') {
@@ -99540,7 +99159,7 @@ async function runDockerRestore(plan, inputs) {
                 ociRequiredReadableRefs: requestedImportRefTags,
                 requireOciImportReady: inputs.requireOciImportReady,
                 ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
-            }, dockerPlan.proxy, inputs.failOnCacheError));
+            }, dockerPlan.proxy));
             saveModeState('proxy-pid', String(proxy.pid));
             saveProxyModeState(proxy.port);
             saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
@@ -99642,13 +99261,6 @@ async function runDockerSave(options = {}) {
     const allowSaves = options.allowSaves !== false;
     const builderName = getModeState('builder-name');
     try {
-        const stateWorker = getStateWorkerHandle();
-        if (stateWorker) {
-            await waitForStateWorker(stateWorker);
-            saveStateWorkerHandle(stateWorker);
-            emitStateSummary(getModeState('state-summary-path'));
-            return;
-        }
         const proxyPid = getModeState('proxy-pid');
         if (proxyPid) {
             if (allowSaves) {
@@ -99710,9 +99322,6 @@ async function runBuildkitRestore(plan, inputs) {
     const tlsKeyInput = getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBooleanInput(getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
     const cacheBackend = normalizeDockerCacheBackend(getInput('cache-backend') || 'registry');
-    if (cacheBackend === 'state') {
-        throw new Error('cache-backend=state is currently supported by mode=docker; use the CLI directly for managed buildctl state lifecycles.');
-    }
     const buildkitCacheBackend = buildKitCacheBackendFor(cacheBackend);
     const registryTagInput = getInput('registry-tag') || '';
     const registryRefTagInput = getInput('registry-ref-tag') || '';
@@ -99763,7 +99372,7 @@ async function runBuildkitRestore(plan, inputs) {
             ociRequiredReadableRefs: requestedImportRefTags,
             requireOciImportReady: inputs.requireOciImportReady,
             ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
-        }, dockerPlan.proxy, inputs.failOnCacheError));
+        }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
@@ -99912,7 +99521,7 @@ async function runBazelRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.failOnCacheError));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     applyAdapterSetupPlan(setup);
@@ -99959,7 +99568,7 @@ async function runGoRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.failOnCacheError));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
@@ -99993,7 +99602,7 @@ async function runGradleRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.failOnCacheError));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     applyAdapterSetupPlan(setup);
@@ -100033,7 +99642,7 @@ async function runMavenRestore(plan, inputs) {
         noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-    }, proxyPlan.proxy, inputs.failOnCacheError));
+    }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     applyAdapterSetupPlan(setup);
@@ -100077,10 +99686,10 @@ async function runTurboProxyRestore(plan, inputs) {
     }
     let proxy;
     try {
-        proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy, inputs.failOnCacheError);
+        proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     catch {
-        proxy = await startPortableCacheProxy(workspace, await findAvailablePort(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy, inputs.failOnCacheError);
+        proxy = await startPortableCacheProxy(workspace, await findAvailablePort(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -100104,10 +99713,10 @@ async function runNxProxyRestore(plan, inputs) {
     const cacheTag = nxPlan.tag;
     let proxy;
     try {
-        proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy, inputs.failOnCacheError);
+        proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     }
     catch {
-        proxy = await startPortableCacheProxy(workspace, await findAvailablePort(), cacheTag, nxPlan.proxy.read_only, nxPlan.proxy, inputs.failOnCacheError);
+        proxy = await startPortableCacheProxy(workspace, await findAvailablePort(), cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -100249,7 +99858,7 @@ async function runRustRestore(plan, inputs) {
                 noPlatform: proxyPlan.proxy.no_platform,
                 verbose: inputs.verbose,
                 readOnly: proxyPlan.proxy.read_only,
-            }, proxyPlan.proxy, inputs.failOnCacheError));
+            }, proxyPlan.proxy));
             exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
             await startSccacheServer();
             saveModeState('proxy-pid', String(proxy.pid));

@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import { hasSaveToken, missingSaveTokenMessage } from './core';
 import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyPullRequestSaveScopeEnv, isPullRequestEvent, loadDiagnosticsConfig, readLogTail, readSavedSaveAllowance, readSavedSaveConfiguration, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, saveSkippedByConfigurationMessage, saveSkippedByPolicyMessage, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { runModeSave } from './mode-handlers';
-import { uploadStateDiagnosticsArtifact } from './core/diagnostics-artifact';
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
         return '';
@@ -129,10 +128,8 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
 export async function run() {
     const originalCwd = process.cwd();
     let postFailureContext = {};
-    let inputs;
-    let postFailed = false;
     try {
-        inputs = getInputs();
+        const inputs = getInputs();
         const cliVersion = core.getState('cli-version') || inputs.cliVersion;
         const cliPlatform = core.getState('cli-platform') || inputs.cliPlatform || undefined;
         let resolvedMode = core.getState('resolved-mode');
@@ -271,9 +268,7 @@ export async function run() {
         if (exclude) {
             args.push('--exclude', exclude);
         }
-        if (inputs.failOnCacheError) {
-            args.push('--fail-on-cache-error');
-        }
+        args.push('--fail-on-cache-error');
         await execBoringCache(args);
         const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
         if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
@@ -288,25 +283,10 @@ export async function run() {
         await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_and_generic_save' : 'saved');
     }
     catch (error) {
-        postFailed = true;
         writeActionFailureEvidence('post', error, postFailureContext);
         core.setFailed(`boringcache/one save failed: ${actionErrorMessage(error)}`);
     }
     finally {
         process.chdir(originalCwd);
-        if (inputs?.diagnosticsArtifactName) {
-            try {
-                await uploadStateDiagnosticsArtifact(inputs.diagnosticsArtifactName, inputs.diagnosticsArtifactRetentionDays);
-            }
-            catch (error) {
-                const message = `Could not upload BoringCache state diagnostics: ${actionErrorMessage(error)}`;
-                if (postFailed) {
-                    core.warning(message);
-                }
-                else {
-                    core.setFailed(message);
-                }
-            }
-        }
     }
 }
