@@ -80,13 +80,6 @@ inputs:
     description: 'When diagnostics includes logs, tail up to this many proxy log lines. Values above 500 are clamped to keep diagnostics bounded.'
     default: '40'
     required: false
-  diagnostics-artifact-name:
-    description: 'Optional artifact name for completed Docker state diagnostics. When set, the Action post phase uploads the state summary and managed BuildKit logs after finalization.'
-    required: false
-  diagnostics-artifact-retention-days:
-    description: 'Retention in days for an explicitly requested diagnostics artifact. Values above 90 are clamped.'
-    default: '14'
-    required: false
   metadata-hints:
     description: 'Low-cardinality proxy session labels as KEY=VALUE pairs, comma-separated or newline-separated. Use this for grouping hints such as phase=seed, project=web, tool=bazel, or benchmark=grpc-bazel.'
     required: false
@@ -156,7 +149,7 @@ inputs:
     default: 'docker-container'
     required: false
   docker-command:
-    description: 'Docker mode behavior: build (default) runs docker buildx build; setup only prepares Buildx and registry/local cache wiring. Must be build or setup.'
+    description: 'Docker mode behavior: build (default) runs docker buildx build; setup only prepares registry/local compatibility wiring and cannot be combined with cache-backend=boringcache. Must be build or setup.'
     default: 'build'
     required: false
   driver-opts:
@@ -166,11 +159,11 @@ inputs:
     description: 'Inline BuildKit daemon TOML config for Docker mode.'
     required: false
   cache-backend:
-    description: 'Docker cache backend: state for an Action-owned persistent managed builder lifecycle, boringcache for the managed BoringCache BuildKit backend, registry for the OCI registry-cache control path, or local for local directory cache. BuildKit mode supports boringcache, registry, or local.'
+    description: 'Docker or BuildKit cache backend: boringcache for the managed BoringCache BuildKit backend, registry for the OCI registry-cache control path, or local for local directory cache.'
     default: 'registry'
     required: false
   managed-buildkit-image:
-    description: 'Managed BuildKit image for cache-backend=boringcache or state. Defaults to the BoringCache BuildKit series channel; pin the immutable digest emitted by a BuildKit canary for state canaries.'
+    description: 'Managed BuildKit image for cache-backend=boringcache. Defaults to the BoringCache BuildKit series channel; pin an exact vX.Y.Z-bc.N tag for canaries.'
     default: 'ghcr.io/boringcache/buildkit:v0.30.0-bc'
     required: false
   cache-mode:
@@ -352,7 +345,7 @@ inputs:
     default: 'false'
     required: false
   fail-on-cache-error:
-    description: 'Fail the workflow when cache restore, save, proxy, or state publication fails. Defaults to false so a successful build remains successful; GitHub continue-on-error may still soften an explicitly strict step.'
+    description: 'Fail the workflow when cache restore, save, or proxy work fails. Defaults to false so a successful build remains successful; GitHub continue-on-error may still soften an explicitly strict step.'
     default: 'false'
     required: false
   require-oci-import-ready:
@@ -413,12 +406,6 @@ outputs:
     description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
   buildkit-cache-backend:
     description: 'Resolved BuildKit cache exporter/importer backend for Docker or BuildKit modes.'
-  buildkit-state-summary-path:
-    description: 'Docker state backend summary path. The file becomes complete when the Action post phase finishes.'
-  buildkit-state-worker-log-path:
-    description: 'Docker state backend worker log containing build and post-build lifecycle output.'
-  buildkit-state-buildkit-log-path:
-    description: 'Docker state backend managed BuildKit log. The file becomes complete when the Action post phase finishes.'
   docker-cache-run-ref:
     description: 'Provider-neutral immutable Docker or BuildKit OCI cache run ref tag when CI run-ref derivation is active'
   docker-cache-from-refs:
@@ -483,7 +470,7 @@ runs:
   using: 'node24'
   main: 'dist/restore/index.js'
   post: 'dist/save/index.js'
-  post-if: "always() && (inputs.cache-backend == 'state' || success() || inputs.save-always == 'true' || inputs.save-always == 'True' || inputs.save-always == 'TRUE')"
+  post-if: "success() || inputs.save-always == 'true' || inputs.save-always == 'True' || inputs.save-always == 'TRUE'"
 branding:
   icon: 'archive'
   color: 'blue'
