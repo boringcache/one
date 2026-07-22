@@ -62,7 +62,7 @@ inputs:
     default: 'none'
     required: false
   verify-timeout-seconds:
-    description: 'Timeout in seconds for verify=wait/warn tag checks and Docker/BuildKit OCI promotion checks. Values above 900 are clamped to keep verification bounded.'
+    description: 'Timeout in seconds for verify=wait/warn tag checks and managed Docker/BuildKit cache promotion checks. Values above 900 are clamped to keep verification bounded.'
     default: '180'
     required: false
   verify-require-server-signature:
@@ -142,14 +142,14 @@ inputs:
     description: 'Docker or BuildKit secrets, newline-separated.'
     required: false
   docker-tool-cache:
-    description: 'Docker mode only: expose BoringCache proxy env for tool remote-cache protocols inside Dockerfile RUN steps. Comma- or newline-separated TOOL:TAG values such as turbo:turbo-cache, or plain tool names backed by [adapters.<tool>].tag.'
+    description: 'Docker mode only: expose session-only BoringCache remote-cache config for Turbo, Nx, Bazel, Gradle, Maven, sccache, or Go inside matching Dockerfile RUN steps. Accepts comma- or newline-separated TOOL:TAG values, or plain tool names backed by [adapters.<tool>].tag.'
     required: false
   driver:
     description: 'Buildx driver for Docker mode.'
     default: 'docker-container'
     required: false
   docker-command:
-    description: 'Docker mode behavior: build (default) runs docker buildx build; setup only prepares registry/local compatibility wiring and cannot be combined with cache-backend=boringcache. Must be build or setup.'
+    description: 'Docker mode behavior: build (default) runs docker buildx build; setup prepares the managed BuildKit builder. Must be build or setup.'
     default: 'build'
     required: false
   driver-opts:
@@ -158,28 +158,13 @@ inputs:
   buildkitd-config-inline:
     description: 'Inline BuildKit daemon TOML config for Docker mode.'
     required: false
-  cache-backend:
-    description: 'Docker or BuildKit cache backend: boringcache for the managed BoringCache BuildKit backend, registry for the OCI registry-cache control path, or local for local directory cache.'
-    default: 'registry'
-    required: false
   managed-buildkit-image:
-    description: 'Managed BuildKit image for cache-backend=boringcache. Defaults to the signed release digest; pass an explicit digest for canaries.'
+    description: 'Managed BoringCache BuildKit image. Defaults to the signed release digest; pass an explicit digest for canaries.'
     default: 'ghcr.io/boringcache/buildkit@sha256:abcf0043c6a9b4804abdf522ffdc938f719d1ddb711b05a2870a5ad920b7cec4'
     required: false
   cache-mode:
     description: 'Build cache mode for Docker or BuildKit. Must be min or max.'
     default: 'max'
-    required: false
-  registry-tag:
-    description: 'Optional human-readable proxy cache tag for Docker or BuildKit registry backends. Generated OCI refs use the canonical /cache:<registry-ref-tag> shape while this tag controls the proxy cache namespace.'
-    required: false
-  registry-ref-tag:
-    description: 'Optional local/no-CI OCI tag suffix for proxy-backed Docker or BuildKit cache refs. Defaults to buildcache; CI-derived plans use standard PR/branch/default aliases.'
-    default: 'buildcache'
-    required: false
-  oci-hydration:
-    description: 'Expert Docker or BuildKit registry proxy hydration policy: metadata-only or bodies-before-ready.'
-    default: 'metadata-only'
     required: false
   buildkit-host:
     description: 'BuildKit address for buildctl mode, for example tcp://host:1234 or unix:///run/buildkit/buildkitd.sock.'
@@ -243,7 +228,7 @@ inputs:
     required: false
   maven-build-cache-extension-version:
     description: 'Version of org.apache.maven.extensions:maven-build-cache-extension to configure in Maven mode.'
-    default: '1.2.2'
+    default: '1.2.3'
     required: false
   maven-build-cache-id:
     description: 'Logical Maven remote build-cache id for the generated config.'
@@ -315,10 +300,10 @@ inputs:
     description: 'Optional repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). These resolve through the CLI source of truth before any extra raw entries are appended.'
     required: false
   entries:
-    description: 'Optional archive entries. Accepts repo/built-in entry ids such as bundler or node_modules, or raw tag:path pairs (comma-separated or newline-separated). Semantic entries resolve through the CLI source of truth. Use this to opt into hybrid local archive caches alongside proxy/build modes.'
+    description: 'Optional archive entries. Accepts repo/built-in entry ids such as bundler or node_modules, or raw tag:path pairs (one per line; legacy comma lists remain supported and literal commas can be written as \,). Semantic entries resolve through the CLI source of truth. Use this to opt into hybrid local archive caches alongside proxy/build modes.'
     required: false
   path:
-    description: 'A list of files, directories, and wildcard patterns to cache and restore (actions/cache compatible)'
+    description: 'Newline-separated exact paths and deterministic directory/** roots (actions/cache migration compatibility). Lines use actions/glob trimming and # remains a literal path prefix. Leading-! exclusions support only literal !directory/subdirectory/** subtrees under one directory/** root and cannot share a save with cache-runtime. Commas and internal spaces are literal.'
     required: false
   key:
     description: 'An explicit key for restoring and saving the cache (actions/cache compatible)'
@@ -328,7 +313,7 @@ inputs:
     required: false
   # GitHub Actions specific features (handled at action level)
   enableCrossOsArchive:
-    description: 'Enable cross-platform cache sharing by disabling automatic platform suffixes (translates to CLI --no-platform flag)'
+    description: 'Enable cross-platform cache sharing by disabling platform suffixes and forcing portable archive transport. Requires CLI v1.13.100+.'
     default: 'false'
     required: false
   save-always:
@@ -349,7 +334,7 @@ inputs:
     default: 'false'
     required: false
   require-oci-import-ready:
-    description: 'Fail Docker or BuildKit setup when any CLI-planned OCI import ref is unreadable through the started proxy'
+    description: 'Deprecated v1 compatibility input. Fail Docker or BuildKit setup when any planned managed cache ref is unreadable.'
     default: 'false'
     required: false
   lookup-only:
@@ -365,10 +350,13 @@ inputs:
     default: 'false'
     required: false
   exclude:
-    description: 'Glob patterns to exclude from cache (comma-separated, e.g., "*.out,*.log"). Excludes files that produce non-deterministic content.'
+    description: 'Legacy comma-separated glob patterns to exclude from cache (for example "*.out,*.log").'
+    required: false
+  exclude-patterns:
+    description: 'Literal exclusion patterns, one per line. Preserves commas and significant whitespace; prefix a directory pattern with ./ to anchor it to the selected cache root. Requires CLI v1.13.100+ for writable steps.'
     required: false
   allow-external-symlinks:
-    description: 'Allow restoring symlinks whose targets escape the restore root (CLI --allow-external-symlinks flag). Disabled by default; opt in for archives with workspace-back symlinks (e.g. pnpm store layouts whose project entries point back to the workspace).'
+    description: 'Allow saving and restoring symlinks whose targets escape the cache root (CLI --allow-external-symlinks flag). Requires CLI v1.13.100+. Disabled by default; opt in for archives with workspace-back symlinks (e.g. pnpm store layouts whose project entries point back to the workspace).'
     default: 'false'
     required: false
 outputs:
@@ -398,26 +386,24 @@ outputs:
     description: 'Resolved proxy port for proxy-backed modes'
   proxy-log-path:
     description: 'Proxy log file path for proxy-backed modes'
-  registry-ref:
-    description: 'Resolved registry cache ref for Docker or BuildKit registry backends.'
+  cache-ref:
+    description: 'Resolved managed Docker or BuildKit cache ref.'
   cache-from:
     description: 'Resolved Docker --cache-from or BuildKit --import-cache values for Docker or BuildKit modes, newline-separated when the CLI plan includes multiple import refs. PR-scoped refs may be absent on restore-only PR runs.'
   cache-to:
     description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
-  buildkit-cache-backend:
-    description: 'Resolved BuildKit cache exporter/importer backend for Docker or BuildKit modes.'
   docker-cache-run-ref:
-    description: 'Provider-neutral immutable Docker or BuildKit OCI cache run ref tag when CI run-ref derivation is active'
+    description: 'Provider-neutral immutable Docker or BuildKit cache run ref tag when CI run-ref derivation is active'
   docker-cache-from-refs:
-    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags that were actually readable and used for restore'
+    description: 'Newline-separated managed Docker or BuildKit cache ref tags that were actually readable and used for restore'
   docker-cache-requested-from-refs:
-    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags requested from the CLI plan before readability filtering'
+    description: 'Newline-separated managed Docker or BuildKit cache ref tags requested from the CLI plan before readability filtering'
   docker-cache-unreadable-from-refs:
-    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache import ref tags that were requested but not readable through the started proxy'
+    description: 'Newline-separated managed Docker or BuildKit cache ref tags that were requested but not readable'
   docker-cache-import-ready:
-    description: 'Whether every requested Docker or BuildKit OCI cache import ref was readable through the started proxy before the build began'
+    description: 'Whether every requested managed Docker or BuildKit cache ref was readable before the build began'
   docker-cache-promotion-refs:
-    description: 'Newline-separated provider-neutral Docker or BuildKit OCI cache alias ref tags requested for promotion'
+    description: 'Newline-separated managed Docker or BuildKit cache alias ref tags requested for promotion'
   docker-ci-provider:
     description: 'Provider-neutral CI provider name used for Docker or BuildKit cache run-ref derivation'
   docker-ci-run-id:
