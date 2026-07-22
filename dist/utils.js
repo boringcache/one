@@ -68,7 +68,6 @@ export function getInputs() {
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
-        ociHydration: normalizeOciHydrationPolicy(core.getInput('oci-hydration')),
         managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:abcf0043c6a9b4804abdf522ffdc938f719d1ddb711b05a2870a5ad920b7cec4',
         dockerToolCache: core.getInput('docker-tool-cache'),
         cacheProfiles: core.getInput('cache-profiles'),
@@ -344,15 +343,6 @@ export function normalizeDiagnosticsLogLines(value) {
         return MAX_DIAGNOSTICS_LOG_LINES;
     }
     return parsed;
-}
-export function normalizeOciHydrationPolicy(value) {
-    switch ((value || DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
-        case 'metadata-only':
-        case 'bodies-before-ready':
-            return (value || DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only or bodies-before-ready.`);
-    }
 }
 export function resolveDiagnosticsConfig(mode, logLines) {
     let level;
