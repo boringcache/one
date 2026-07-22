@@ -95144,7 +95144,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.13.97',
+        cliVersion: getInput('cli-version') || 'v1.13.99',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -95175,7 +95175,7 @@ function getInputs() {
         proxyNoGit: getBooleanInput('proxy-no-git'),
         proxyNoPlatform: getBooleanInput('proxy-no-platform'),
         ociHydration: normalizeOciHydrationPolicy(getInput('oci-hydration')),
-        managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit:v0.30.0-bc',
+        managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:abcf0043c6a9b4804abdf522ffdc938f719d1ddb711b05a2870a5ad920b7cec4',
         dockerToolCache: getInput('docker-tool-cache'),
         cacheProfiles: getInput('cache-profiles'),
         entries: getInput('entries'),
@@ -97331,7 +97331,44 @@ function getRestoreKeyCandidates(inputs) {
         .filter(Boolean);
 }
 
+;// CONCATENATED MODULE: ./lib/core/integrity.ts
+
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+async function sha256File(filePath) {
+    const hash = crypto.createHash('sha256');
+    for await (const chunk of fs.createReadStream(filePath)) {
+        hash.update(chunk);
+    }
+    return hash.digest('hex');
+}
+function parseSha256(content, assetName) {
+    const value = content.trim();
+    const match = value.match(/^([a-f0-9]{64})(?:\s+\*?(.+))?$/i);
+    if (!match) {
+        throw new Error(`Invalid SHA-256 checksum for ${assetName}`);
+    }
+    const [, digest, namedAsset] = match;
+    if (namedAsset && namedAsset !== assetName) {
+        throw new Error(`SHA-256 checksum names ${namedAsset}, expected ${assetName}`);
+    }
+    return digest.toLowerCase();
+}
+async function integrity_readSha256File(filePath, assetName) {
+    return parseSha256(await fs.promises.readFile(filePath, 'utf8'), assetName);
+}
+async function integrity_verifySha256(filePath, expectedDigest, assetName) {
+    if (!SHA256_PATTERN.test(expectedDigest)) {
+        throw new Error(`Invalid expected SHA-256 digest for ${assetName}`);
+    }
+    const actualDigest = await sha256File(filePath);
+    if (actualDigest !== expectedDigest.toLowerCase()) {
+        throw new Error(`SHA-256 verification failed for ${assetName}: expected ${expectedDigest.toLowerCase()}, got ${actualDigest}`);
+    }
+}
+
 ;// CONCATENATED MODULE: ./lib/mode-handlers.ts
+
 
 
 
@@ -97346,7 +97383,48 @@ const BUILDKIT_CACHE_DIR_FROM = external_path_.join(external_os_.tmpdir(), 'bori
 const BUILDKIT_CACHE_DIR_TO = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-metadata.json');
 const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit:v0.30.0-bc';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:abcf0043c6a9b4804abdf522ffdc938f719d1ddb711b05a2870a5ad920b7cec4';
+const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
+const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
+const BUILDCTL_VERSION = 'v0.31.2';
+// Immutable subjects from the provenance files published with BuildKit v0.31.2.
+const BUILDCTL_RELEASES = {
+    'darwin-arm64': {
+        platform: 'darwin-arm64',
+        sha256: 'c386267eab33e79f4a0cb6a59230b71cddbacb5bf9e93fdf2d2682f2b4fa1a18',
+    },
+    'darwin-x64': {
+        platform: 'darwin-amd64',
+        sha256: 'c99fd17d2f37a0bf025b26601fea6fdcf7831ec9858a1fa63bcacb2e06441a2d',
+    },
+    'linux-arm64': {
+        platform: 'linux-arm64',
+        sha256: '41fba1eed480376934fa4c8177ddd7021036b5168a0eb8e7ab5eccdf75d47a05',
+    },
+    'linux-x64': {
+        platform: 'linux-amd64',
+        sha256: 'fbabdb72433a35f5bb646e4cd424bf8567e5d055710cf55840f7af2020640791',
+    },
+    'win32-arm64': {
+        platform: 'windows-arm64',
+        sha256: 'dc370dce464c3d27c87367c381586c65f46ca7e165586afed5b42617f3ab42b7',
+    },
+    'win32-x64': {
+        platform: 'windows-amd64',
+        sha256: '02542a36873fe095b5606981a86301e249d2734931925cb2f287ea015de3f555',
+    },
+};
+const SCCACHE_DEFAULT_VERSION = 'v0.16.0';
+// Immutable digests published with the default sccache release. Explicit
+// version overrides must provide the publisher's adjacent .sha256 asset.
+const SCCACHE_DEFAULT_SHA256 = {
+    'sccache-v0.16.0-aarch64-apple-darwin.tar.gz': 'ded590cae2c72042c61178632906bef62d635fa20d45f8b22110a2241f430960',
+    'sccache-v0.16.0-aarch64-pc-windows-msvc.zip': '6a715fe44d9b7a2cac15c256411ef232d3b6276e2421bd3be16ab32af71fbf88',
+    'sccache-v0.16.0-aarch64-unknown-linux-musl.tar.gz': 'f73a5c39f96bb6ebb89cc7915cf182260d4cbf30765322c5e793d0fe8bd80784',
+    'sccache-v0.16.0-x86_64-apple-darwin.tar.gz': 'f7dbd055db75a938ab1539f5316c5d08e73a1b94c40ab170ddcc617f5bf18343',
+    'sccache-v0.16.0-x86_64-pc-windows-msvc.zip': 'b8514ed7552e148b0a032114f745118dcb801791adafafeaf9935e4bfb0edf1b',
+    'sccache-v0.16.0-x86_64-unknown-linux-musl.tar.gz': 'aec995a83ad3dff3d14b6314e08858b7b73d35ca85a5bcf3d3a9ec07dee35588',
+};
 class DockerBuildFailure extends Error {
     constructor(message) {
         super(message);
@@ -97410,6 +97488,23 @@ function currentHomeDir() {
 function isPathInside(parent, candidate) {
     const relative = path.relative(path.resolve(parent), path.resolve(candidate));
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+function secureCurlArgs(output, url) {
+    return [
+        '--fail',
+        '--silent',
+        '--show-error',
+        '--location',
+        '--proto',
+        '=https',
+        '--proto-redir',
+        '=https',
+        '--retry',
+        '3',
+        '--output',
+        output,
+        url,
+    ];
 }
 async function runModeRestore(plan, inputs) {
     switch (plan.mode) {
@@ -98141,10 +98236,30 @@ async function setupQemuIfNeeded(platforms) {
     if (!platforms) {
         return;
     }
-    const result = await exec.exec('docker', ['run', '--privileged', '--rm', 'tonistiigi/binfmt', '--install', 'all'], { ignoreReturnCode: true });
+    const result = await exec.exec('docker', ['run', '--privileged', '--rm', DEFAULT_BINFMT_IMAGE, '--install', 'all'], { ignoreReturnCode: true });
     if (result !== 0) {
         throw new Error(`Failed to set up QEMU for multi-platform builds (exit ${result})`);
     }
+}
+function assertPrivilegedRunnerPolicy(operation) {
+    if (process.env.GITHUB_ACTIONS !== 'true') {
+        return;
+    }
+    const runnerEnvironment = (process.env.RUNNER_ENVIRONMENT || '').trim();
+    if (runnerEnvironment === 'github-hosted') {
+        return;
+    }
+    if (process.env[EPHEMERAL_PRIVILEGED_RUNNER_ENV] === '1') {
+        core.warning(`${operation} is using host-level privileges on a self-managed runner because `
+            + `${EPHEMERAL_PRIVILEGED_RUNNER_ENV}=1. Destroy the single-tenant runner after this job.`);
+        return;
+    }
+    const runnerDescription = runnerEnvironment === 'self-hosted'
+        ? 'a self-hosted runner'
+        : 'a runner whose environment could not be verified';
+    throw new Error(`${operation} needs host-level privileges, so BoringCache will not run it on ${runnerDescription}. `
+        + `Use a GitHub-hosted runner, or set ${EPHEMERAL_PRIVILEGED_RUNNER_ENV}=1 only when the `
+        + 'self-hosted runner is single-tenant and destroyed after this job.');
 }
 function buildxBuilderName() {
     const runId = String(process.env.GITHUB_RUN_ID || Date.now());
@@ -98159,6 +98274,9 @@ function managedBuildKitImage(input) {
     const image = input.trim() || DEFAULT_MANAGED_BUILDKIT_IMAGE;
     if (!/^[A-Za-z0-9./:@_-]+$/.test(image)) {
         throw new Error(`Unsupported managed-buildkit-image "${input}". Expected a Docker image reference.`);
+    }
+    if (image.includes('@') && !/@sha256:[a-f0-9]{64}$/.test(image)) {
+        throw new Error(`Unsupported managed-buildkit-image "${input}". Digest references must use a 64-character lowercase sha256 digest.`);
     }
     return image;
 }
@@ -98400,25 +98518,84 @@ function readDockerMetadata() {
         return { imageId: '', digest: '' };
     }
 }
-function materializeMaybeFile(value, filename, rootDir) {
-    if (!value.trim()) {
-        return '';
-    }
-    const candidate = path.resolve(rootDir, value);
-    // BuildKit TLS file inputs may name files only inside the checked-out workspace.
-    // Absolute or parent-traversal values are treated as inline PEM content instead.
-    // codeql[js/path-injection]
-    if (fs.existsSync(candidate)) {
-        if (isPathInside(rootDir, candidate)) {
-            return candidate;
+function materializeBuildkitTlsFiles(inputs, rootDir) {
+    let temporaryDirectory = '';
+    const workspaceRoot = path.resolve(rootDir);
+    const physicalWorkspaceRoot = fs.realpathSync(workspaceRoot);
+    const cleanup = () => {
+        if (!temporaryDirectory) {
+            return;
         }
-        core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
+        fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+        temporaryDirectory = '';
+    };
+    const materialize = (value, filename) => {
+        if (!value.trim()) {
+            return '';
+        }
+        const candidate = path.resolve(workspaceRoot, value);
+        // BuildKit TLS file inputs may name files only inside the checked-out workspace.
+        // Absolute or parent-traversal values are treated as inline PEM content instead.
+        // codeql[js/path-injection]
+        let candidateStats;
+        try {
+            candidateStats = fs.lstatSync(candidate);
+        }
+        catch (error) {
+            if (error.code !== 'ENOENT') {
+                throw error;
+            }
+        }
+        if (candidateStats) {
+            if (isPathInside(workspaceRoot, candidate)) {
+                if (candidateStats.isSymbolicLink() || !candidateStats.isFile()) {
+                    throw new Error(`BuildKit TLS ${filename} path must be a regular, non-symlink file inside the workspace.`);
+                }
+                const physicalCandidate = fs.realpathSync(candidate);
+                if (!isPathInside(physicalWorkspaceRoot, physicalCandidate)) {
+                    throw new Error(`BuildKit TLS ${filename} path resolves outside the workspace.`);
+                }
+                return physicalCandidate;
+            }
+            core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
+        }
+        if (!temporaryDirectory) {
+            temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'boringcache-buildkit-tls-'));
+            fs.chmodSync(temporaryDirectory, 0o700);
+        }
+        const target = path.join(temporaryDirectory, filename);
+        // The unique private directory and exclusive create prevent a retained
+        // runner from redirecting or recovering inline TLS material.
+        // codeql[js/path-injection]
+        fs.writeFileSync(target, value, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+        return target;
+    };
+    try {
+        return {
+            tlsCa: materialize(inputs.ca, 'buildkit-ca.pem'),
+            tlsCert: materialize(inputs.cert, 'buildkit-cert.pem'),
+            tlsKey: materialize(inputs.key, 'buildkit-key.pem'),
+            cleanup,
+        };
     }
-    const target = path.join(os.tmpdir(), filename);
-    // Inline TLS content is materialized to a fixed filename under the runner temp directory.
-    // codeql[js/path-injection]
-    fs.writeFileSync(target, value);
-    return target;
+    catch (error) {
+        cleanup();
+        throw error;
+    }
+}
+async function buildWithMaterializedBuildkitTls(opts, inputs, rootDir) {
+    const tls = materializeBuildkitTlsFiles(inputs, rootDir);
+    try {
+        await buildWithBuildctl({
+            ...opts,
+            tlsCa: tls.tlsCa,
+            tlsCert: tls.tlsCert,
+            tlsKey: tls.tlsKey,
+        });
+    }
+    finally {
+        tls.cleanup();
+    }
 }
 async function installBuildctl() {
     addLocalBinPaths();
@@ -98433,16 +98610,21 @@ async function installBuildctl() {
     }
     catch {
     }
-    const version = 'v0.19.0';
+    const release = BUILDCTL_RELEASES[`${process.platform}-${process.arch}`];
+    if (!release) {
+        throw new Error(`Unsupported buildctl runner: ${process.platform}-${process.arch}`);
+    }
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'buildctl-'));
     const archivePath = path.join(tmpDir, 'buildkit.tar.gz');
     const installDir = path.join(currentHomeDir(), '.local', 'bin');
     try {
-        const url = `https://github.com/moby/buildkit/releases/download/${version}/buildkit-${version}.linux-amd64.tar.gz`;
-        const curlCode = await exec.exec('curl', ['-fsSL', '--output', archivePath, url], { ignoreReturnCode: true });
+        const assetName = `buildkit-${BUILDCTL_VERSION}.${release.platform}.tar.gz`;
+        const url = `https://github.com/moby/buildkit/releases/download/${BUILDCTL_VERSION}/${assetName}`;
+        const curlCode = await exec.exec('curl', secureCurlArgs(archivePath, url), { ignoreReturnCode: true });
         if (curlCode !== 0) {
             throw new Error(`Failed to download buildctl from ${url}`);
         }
+        await verifySha256(archivePath, release.sha256, assetName);
         await exec.exec('tar', ['-xzf', archivePath, '-C', tmpDir]);
         await fs.promises.mkdir(installDir, { recursive: true });
         const srcPath = path.join(tmpDir, 'bin', process.platform === 'win32' ? 'buildctl.exe' : 'buildctl');
@@ -98623,7 +98805,7 @@ function configureSccacheEnv(cacheSize, sccacheDir) {
 async function startSccacheServer() {
     await exec.exec('sccache', ['--start-server'], { ignoreReturnCode: true });
 }
-async function installSccache(versionInput = '0.14.0') {
+async function installSccache(versionInput = SCCACHE_DEFAULT_VERSION.slice(1)) {
     addLocalBinPaths();
     if (await hasToolVersionOnPath('sccache', versionInput)) {
         core.info(`Using existing sccache ${versionInput} from PATH`);
@@ -98643,27 +98825,51 @@ async function installSccache(versionInput = '0.14.0') {
             assetName = `sccache-${normalizedVersion}-aarch64-unknown-linux-musl`;
         }
     }
-    else if (process.platform === 'darwin' && process.arch === 'arm64') {
-        assetName = `sccache-${normalizedVersion}-aarch64-apple-darwin`;
+    else if (process.platform === 'darwin') {
+        if (process.arch === 'arm64') {
+            assetName = `sccache-${normalizedVersion}-aarch64-apple-darwin`;
+        }
+        else if (process.arch === 'x64') {
+            assetName = `sccache-${normalizedVersion}-x86_64-apple-darwin`;
+        }
     }
-    else if (process.platform === 'win32' && process.arch === 'x64') {
-        assetName = `sccache-${normalizedVersion}-x86_64-pc-windows-msvc`;
+    else if (process.platform === 'win32') {
+        if (process.arch === 'arm64') {
+            assetName = `sccache-${normalizedVersion}-aarch64-pc-windows-msvc`;
+        }
+        else if (process.arch === 'x64') {
+            assetName = `sccache-${normalizedVersion}-x86_64-pc-windows-msvc`;
+        }
     }
     if (!assetName) {
-        await exec.exec('cargo', ['install', 'sccache', '--locked']);
+        await exec.exec('cargo', ['install', 'sccache', '--version', normalizedVersion.slice(1), '--locked']);
         return;
     }
     const extension = process.platform === 'win32' ? '.zip' : '.tar.gz';
-    const url = `https://github.com/mozilla/sccache/releases/download/${normalizedVersion}/${assetName}${extension}`;
+    const archiveName = `${assetName}${extension}`;
+    const url = `https://github.com/mozilla/sccache/releases/download/${normalizedVersion}/${archiveName}`;
     const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sccache-'));
     const archivePath = path.join(tempDir, `sccache${extension}`);
+    const checksumPath = path.join(tempDir, 'sccache.sha256');
     try {
-        const curlCode = await exec.exec('curl', ['-sS', '--fail', '--location', '--output', archivePath, url], {
+        const curlCode = await exec.exec('curl', secureCurlArgs(archivePath, url), {
             ignoreReturnCode: true,
         });
         if (curlCode !== 0) {
             throw new Error(`Failed to download sccache from ${url}`);
         }
+        let expectedDigest = normalizedVersion === SCCACHE_DEFAULT_VERSION
+            ? SCCACHE_DEFAULT_SHA256[archiveName]
+            : undefined;
+        if (!expectedDigest) {
+            const checksumUrl = `${url}.sha256`;
+            const checksumCode = await exec.exec('curl', secureCurlArgs(checksumPath, checksumUrl), { ignoreReturnCode: true });
+            if (checksumCode !== 0) {
+                throw new Error(`Failed to download sccache checksum from ${checksumUrl}`);
+            }
+            expectedDigest = await readSha256File(checksumPath, archiveName);
+        }
+        await verifySha256(archivePath, expectedDigest, archiveName);
         if (process.platform === 'win32') {
             await exec.exec('unzip', ['-q', archivePath, '-d', tempDir]);
         }
@@ -98677,7 +98883,7 @@ async function installSccache(versionInput = '0.14.0') {
         const binaryName = process.platform === 'win32' ? 'sccache.exe' : 'sccache';
         const srcPath = path.join(tempDir, assetName, binaryName);
         const destPath = path.join(installDir, binaryName);
-        // The source is from the verified release archive and destination is runner-local tool state.
+        // The source is from a SHA-256-verified release archive and destination is runner-local tool state.
         // codeql[js/path-injection]
         await fs.promises.copyFile(srcPath, destPath);
         if (process.platform !== 'win32') {
@@ -99038,6 +99244,12 @@ async function runDockerRestore(plan, inputs) {
             + 'the builder, build, and run evidence. Use cache-backend=registry for setup-only compatibility.');
     }
     const cliOwnsManagedBuild = cacheBackend === 'boringcache' && shouldBuild;
+    if (cliOwnsManagedBuild) {
+        assertPrivilegedRunnerPolicy('Managed BoringCache BuildKit');
+    }
+    if (platforms) {
+        assertPrivilegedRunnerPolicy('QEMU/binfmt registration');
+    }
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
     }
@@ -99341,9 +99553,6 @@ async function runBuildkitRestore(plan, inputs) {
         fs.rmSync(BUILDKIT_METADATA_FILE);
     }
     await installBuildctl();
-    const tlsCa = materializeMaybeFile(tlsCaInput, 'buildkit-ca.pem', workspaceRoot);
-    const tlsCert = materializeMaybeFile(tlsCertInput, 'buildkit-cert.pem', workspaceRoot);
-    const tlsKey = materializeMaybeFile(tlsKeyInput, 'buildkit-key.pem', workspaceRoot);
     if (registryCachePlan) {
         let proxyBindHost = '127.0.0.1';
         let refHost = '127.0.0.1';
@@ -99395,11 +99604,8 @@ async function runBuildkitRestore(plan, inputs) {
             unreadableRefTags: effectiveImports.unreadableRefTags,
             importReady: effectiveImports.importReady,
         });
-        await buildWithBuildctl({
+        await buildWithMaterializedBuildkitTls({
             addr: buildkitHost,
-            tlsCa,
-            tlsCert,
-            tlsKey,
             tlsSkipVerify,
             contextPath,
             dockerfileDir,
@@ -99417,7 +99623,7 @@ async function runBuildkitRestore(plan, inputs) {
             push,
             noCache,
             metadataFile: BUILDKIT_METADATA_FILE,
-        });
+        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput }, workspaceRoot);
         modeEvidence = registryCacheEvidence('buildkit', dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
     }
     else {
@@ -99433,11 +99639,8 @@ async function runBuildkitRestore(plan, inputs) {
             cache_dir_to: BUILDKIT_CACHE_DIR_TO,
             import_ready: true,
         };
-        await buildWithBuildctl({
+        await buildWithMaterializedBuildkitTls({
             addr: buildkitHost,
-            tlsCa,
-            tlsCert,
-            tlsKey,
             tlsSkipVerify,
             contextPath,
             dockerfileDir,
@@ -99455,7 +99658,7 @@ async function runBuildkitRestore(plan, inputs) {
             push,
             noCache,
             metadataFile: BUILDKIT_METADATA_FILE,
-        });
+        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput }, workspaceRoot);
     }
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', resolvedWorkspace);
@@ -99737,7 +99940,7 @@ async function runRustRestore(plan, inputs) {
     const cacheCargoBin = parseBooleanInput(core.getInput('cache-cargo-bin'), 'cache-cargo-bin', false);
     const cacheTarget = parseBooleanInput(core.getInput('cache-target'), 'cache-target', true);
     const useSccache = parseBooleanInput(core.getInput('sccache'), 'sccache', false);
-    const sccacheVersion = core.getInput('sccache-version') || '0.14.0';
+    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
     const sccacheMode = normalizeSccacheMode(core.getInput('sccache-mode'));
     const sccacheCacheSize = core.getInput('sccache-cache-size') || '5G';
     const targets = core.getInput('targets');

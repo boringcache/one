@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.97'
+    default: 'v1.13.99'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -163,8 +163,8 @@ inputs:
     default: 'registry'
     required: false
   managed-buildkit-image:
-    description: 'Managed BuildKit image for cache-backend=boringcache. Defaults to the BoringCache BuildKit series channel; pin an exact vX.Y.Z-bc.N tag for canaries.'
-    default: 'ghcr.io/boringcache/buildkit:v0.30.0-bc'
+    description: 'Managed BuildKit image for cache-backend=boringcache. Defaults to the signed release digest; pass an explicit digest for canaries.'
+    default: 'ghcr.io/boringcache/buildkit@sha256:abcf0043c6a9b4804abdf522ffdc938f719d1ddb711b05a2870a5ad920b7cec4'
     required: false
   cache-mode:
     description: 'Build cache mode for Docker or BuildKit. Must be min or max.'
@@ -282,8 +282,8 @@ inputs:
     default: 'false'
     required: false
   sccache-version:
-    description: 'sccache version to install when the binary is not already available.'
-    default: '0.14.0'
+    description: 'sccache version to install when the binary is not already available. Explicit versions require the matching publisher .sha256 release asset.'
+    default: '0.16.0'
     required: false
   sccache-cache-size:
     description: 'Maximum local sccache cache size.'
