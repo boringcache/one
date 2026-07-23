@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import { hasSaveToken } from './core';
-import { applySaveTokenPolicy, applyRestoreOnlyTokenPolicy, applyPresetCacheEnv, applyMiseSetup, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getInputs, isPullRequestEvent, saveConfigured, loadDiagnosticsConfig, parseEntries, readLogTail, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applySaveTokenPolicy, applyRestoreOnlyTokenPolicy, applyPresetCacheEnv, applyMiseSetup, actionErrorMessage, assertLegacyArchiveEntriesAreLossless, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getInputs, isPullRequestEvent, saveConfigured, loadDiagnosticsConfig, parseEntries, readLogTail, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, supportsPortableArchiveArgs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 function buildRuntimeRestoreFlagArgs(inputs) {
     const flagArgs = [];
@@ -12,6 +12,9 @@ function buildRuntimeRestoreFlagArgs(inputs) {
     }
     if (inputs.failOnCacheError) {
         flagArgs.push('--fail-on-cache-error');
+    }
+    if (inputs.allowExternalSymlinks) {
+        flagArgs.push('--allow-external-symlinks');
     }
     return flagArgs;
 }
@@ -56,30 +59,36 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs, restoreCandidates = []) {
+async function restoreEntries(workspace, entriesString, flagArgs, restoreCandidates = [], portableArchiveArgs = true) {
     if (!entriesString.trim()) {
         return { hit: false, saveEntries: '' };
     }
-    const parsedEntries = parseEntries(entriesString, 'restore', { resolvePaths: false });
+    const parsedEntries = parseEntries(entriesString, 'restore', {
+        resolvePaths: false,
+        separatorMode: 'newline',
+    });
     if (parsedEntries.length === 0) {
         return { hit: false, saveEntries: '' };
     }
     const restoreEntriesArg = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`).join(',');
-    const saveEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.savePath}`).join(',');
+    const saveEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.savePath}`).join('\n');
     const restoreMissShouldFail = flagArgs.includes('--fail-on-cache-miss');
     const primaryHit = await checkEntries(workspace, parsedEntries.map((entry) => entry.tag), flagArgs);
-    let selectedRestoreEntries = restoreEntriesArg;
+    let selectedRestoreEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`);
     let hit = primaryHit;
     if (!hit) {
         for (const candidate of restoreCandidates) {
             if (!candidate.entries.trim()) {
                 continue;
             }
-            const candidateEntries = parseEntries(candidate.entries, 'restore', { resolvePaths: false });
+            const candidateEntries = parseEntries(candidate.entries, 'restore', {
+                resolvePaths: false,
+                separatorMode: 'newline',
+            });
             const candidateHit = await checkEntries(workspace, candidateEntries.map((entry) => entry.tag), flagArgs);
             if (candidateHit) {
                 core.info(`Cache hit with restore key ${candidate.tagPrefix}`);
-                selectedRestoreEntries = candidate.entries;
+                selectedRestoreEntries = candidateEntries.map((entry) => `${entry.tag}:${entry.restorePath}`);
                 hit = true;
                 break;
             }
@@ -89,9 +98,21 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
         throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
     }
     const restoreFlagArgs = hit ? flagArgs : flagArgs.filter((arg) => arg !== '--fail-on-cache-miss');
-    const restoreExitCode = await execBoringCache(['restore', workspace, selectedRestoreEntries, ...restoreFlagArgs], { ignoreReturnCode: true });
+    let restoreArgs;
+    if (portableArchiveArgs) {
+        restoreArgs = [
+            'restore', workspace,
+            ...selectedRestoreEntries.flatMap((entry) => ['--entry', entry]),
+            ...restoreFlagArgs,
+        ];
+    }
+    else {
+        assertLegacyArchiveEntriesAreLossless(selectedRestoreEntries, 'restore');
+        restoreArgs = ['restore', workspace, selectedRestoreEntries.join(','), ...restoreFlagArgs];
+    }
+    const restoreExitCode = await execBoringCache(restoreArgs, { ignoreReturnCode: true });
     if (restoreExitCode !== 0) {
-        throw new Error(`Cache restore failed for ${selectedRestoreEntries}`);
+        throw new Error(`Cache restore failed for ${selectedRestoreEntries.join(', ')}`);
     }
     return {
         hit,
@@ -170,6 +191,7 @@ export async function run() {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
         }
         const plan = await buildPlan(effectiveInputs);
+        const portableArchiveArgs = supportsPortableArchiveArgs(inputs.cliVersion);
         restoreFailureContext = {
             ...restoreFailureContext,
             workspace: plan.workspace,
@@ -183,8 +205,8 @@ export async function run() {
         };
         process.chdir(plan.workingDirectory);
         await applyPresetCacheEnv(plan);
-        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs));
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), plan.archiveRestoreCandidates);
+        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs), [], portableArchiveArgs);
+        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), plan.archiveRestoreCandidates, portableArchiveArgs);
         let usedMiseRuntime = false;
         if (plan.setup === 'mise') {
             usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
@@ -192,7 +214,7 @@ export async function run() {
         const modeRestore = await runModeRestore(plan, effectiveInputs);
         const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
             .filter(Boolean)
-            .join(',');
+            .join('\n');
         const verificationSpecs = [
             ...buildGenericVerificationSpecs(plan, inputs, usedMiseRuntime),
             ...(modeRestore.verificationSpecs || []),
@@ -267,7 +289,7 @@ export async function run() {
         core.saveState('generic-cache-entries', genericSaveEntries);
         core.saveState('generic-cache-workspace', plan.workspace);
         core.saveState('runtime-mise-used', String(usedMiseRuntime));
-        core.saveState('generic-cache-exclude', inputs.exclude);
+        core.saveState('generic-cache-excludes', JSON.stringify(plan.archiveExcludes));
         core.saveState('no-platform', String(inputs.noPlatform));
         core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));
         core.saveState('force', String(inputs.force));
