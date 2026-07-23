@@ -98619,7 +98619,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.13.101',
+        cliVersion: getInput('cli-version') || 'v1.13.102',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
