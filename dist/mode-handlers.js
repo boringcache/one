@@ -1071,9 +1071,9 @@ function readDockerMetadata() {
         return { imageId: '', digest: '' };
     }
 }
-function materializeBuildkitTlsFiles(inputs, rootDir) {
+function materializeBuildkitTlsFiles(inputs) {
     let temporaryDirectory = '';
-    const workspaceRoot = path.resolve(rootDir);
+    const workspaceRoot = path.resolve(process.cwd());
     const physicalWorkspaceRoot = fs.realpathSync(workspaceRoot);
     const cleanup = () => {
         if (!temporaryDirectory) {
@@ -1089,28 +1089,32 @@ function materializeBuildkitTlsFiles(inputs, rootDir) {
         const candidate = path.resolve(workspaceRoot, value);
         // BuildKit TLS file inputs may name files only inside the checked-out workspace.
         // Absolute or parent-traversal values are treated as inline PEM content instead.
-        // codeql[js/path-injection]
+        const relativeCandidate = path.relative(workspaceRoot, candidate);
         let candidateStats;
-        try {
-            candidateStats = fs.lstatSync(candidate);
+        if (relativeCandidate === '..'
+            || relativeCandidate.startsWith(`..${path.sep}`)
+            || path.isAbsolute(relativeCandidate)) {
+            core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
         }
-        catch (error) {
-            if (error.code !== 'ENOENT') {
-                throw error;
+        else {
+            try {
+                candidateStats = fs.lstatSync(candidate);
+            }
+            catch (error) {
+                if (error.code !== 'ENOENT') {
+                    throw error;
+                }
             }
         }
         if (candidateStats) {
-            if (isPathInside(workspaceRoot, candidate)) {
-                if (candidateStats.isSymbolicLink() || !candidateStats.isFile()) {
-                    throw new Error(`BuildKit TLS ${filename} path must be a regular, non-symlink file inside the workspace.`);
-                }
-                const physicalCandidate = fs.realpathSync(candidate);
-                if (!isPathInside(physicalWorkspaceRoot, physicalCandidate)) {
-                    throw new Error(`BuildKit TLS ${filename} path resolves outside the workspace.`);
-                }
-                return physicalCandidate;
+            if (candidateStats.isSymbolicLink() || !candidateStats.isFile()) {
+                throw new Error(`BuildKit TLS ${filename} path must be a regular, non-symlink file inside the workspace.`);
             }
-            core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
+            const physicalCandidate = fs.realpathSync(candidate);
+            if (!isPathInside(physicalWorkspaceRoot, physicalCandidate)) {
+                throw new Error(`BuildKit TLS ${filename} path resolves outside the workspace.`);
+            }
+            return physicalCandidate;
         }
         if (!temporaryDirectory) {
             temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'boringcache-buildkit-tls-'));
@@ -1136,8 +1140,8 @@ function materializeBuildkitTlsFiles(inputs, rootDir) {
         throw error;
     }
 }
-async function buildWithMaterializedBuildkitTls(opts, inputs, rootDir) {
-    const tls = materializeBuildkitTlsFiles(inputs, rootDir);
+async function buildWithMaterializedBuildkitTls(opts, inputs) {
+    const tls = materializeBuildkitTlsFiles(inputs);
     try {
         await buildWithBuildctl({
             ...opts,
@@ -1750,9 +1754,9 @@ function buildRustCacheArgs(action, workspace, entry, verbose, exclude = '') {
     }
     return args;
 }
-async function restoreRustArchiveEntry(workspace, entry, verbose) {
+async function restoreRustArchiveEntry(workspace, entry, verbose, failOnCacheError) {
     const preflightHit = await checkRustTagHit(workspace, entry.tag);
-    const exitCode = await execRustBoringCache(buildRustCacheArgs('restore', workspace, entry, verbose));
+    const exitCode = await execBoringCache(buildRustCacheArgs('restore', workspace, entry, verbose), { ignoreReturnCode: !failOnCacheError });
     return preflightHit && exitCode === 0;
 }
 function toolEnabled(plan, toolName) {
@@ -2007,7 +2011,6 @@ async function runDockerSave(options = {}) {
     }
 }
 async function runBuildkitRestore(plan, inputs) {
-    const workspaceRoot = process.env.GITHUB_WORKSPACE || plan.workingDirectory;
     const contextInput = core.getInput('context') || '.';
     const contextPath = path.resolve(plan.workingDirectory, contextInput);
     const dockerfileInput = core.getInput('dockerfile') || 'Dockerfile';
@@ -2121,7 +2124,7 @@ async function runBuildkitRestore(plan, inputs) {
             push,
             noCache,
             metadataFile: BUILDKIT_METADATA_FILE,
-        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput }, workspaceRoot);
+        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput });
         modeEvidence = buildKitCacheEvidence('buildkit', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
     }
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
@@ -2488,19 +2491,19 @@ async function runRustRestore(plan, inputs) {
     let targetRestored = false;
     let sccacheRestored = false;
     if (cargoRegistryEntry) {
-        registryRestored = await restoreRustArchiveEntry(workspace, cargoRegistryEntry, inputs.verbose);
+        registryRestored = await restoreRustArchiveEntry(workspace, cargoRegistryEntry, inputs.verbose, inputs.failOnCacheError);
         saveRustArchiveEntryState('cargo-registry', cargoRegistryEntry);
     }
     if (cargoGitEntry) {
-        cargoGitRestored = await restoreRustArchiveEntry(workspace, cargoGitEntry, inputs.verbose);
+        cargoGitRestored = await restoreRustArchiveEntry(workspace, cargoGitEntry, inputs.verbose, inputs.failOnCacheError);
         saveRustArchiveEntryState('cargo-git', cargoGitEntry);
     }
     if (cargoBinEntry) {
-        cargoBinRestored = await restoreRustArchiveEntry(workspace, cargoBinEntry, inputs.verbose);
+        cargoBinRestored = await restoreRustArchiveEntry(workspace, cargoBinEntry, inputs.verbose, inputs.failOnCacheError);
         saveRustArchiveEntryState('cargo-bin', cargoBinEntry);
     }
     if (targetEntry) {
-        targetRestored = await restoreRustArchiveEntry(workspace, targetEntry, inputs.verbose);
+        targetRestored = await restoreRustArchiveEntry(workspace, targetEntry, inputs.verbose, inputs.failOnCacheError);
         saveRustArchiveEntryState('target', targetEntry);
     }
     if (useSccache && sccacheEntry) {
@@ -2542,7 +2545,7 @@ async function runRustRestore(plan, inputs) {
             setProxyOutputs(proxy.port);
         }
         else {
-            sccacheRestored = await restoreRustArchiveEntry(workspace, sccacheEntry, inputs.verbose);
+            sccacheRestored = await restoreRustArchiveEntry(workspace, sccacheEntry, inputs.verbose, inputs.failOnCacheError);
             await startSccacheServer();
             saveRustArchiveEntryState('sccache', sccacheEntry);
             saveModeState('sccache-preflight-hit', String(sccacheRestored));

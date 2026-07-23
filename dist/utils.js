@@ -40,7 +40,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.100',
+        cliVersion: core.getInput('cli-version') || 'v1.13.101',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -1785,13 +1785,13 @@ export function assertCrossOsArchiveTransportSupported(version) {
     if (supportsPortableArchiveArgs(version)) {
         return;
     }
-    throw new Error(`enableCrossOsArchive requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so the Action can force portable archive transport. Update cli-version before sharing this tag across operating systems.`);
+    throw new Error(`enableCrossOsArchive requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so the Action can force tar archive transport. Update cli-version before sharing this tag across operating systems.`);
 }
 export function assertExternalSymlinkRoundTripSupported(version) {
     if (supportsPortableArchiveArgs(version)) {
         return;
     }
-    throw new Error(`allow-external-symlinks requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so save and restore use the same symlink policy. Update cli-version before enabling this input.`);
+    throw new Error(`allow-external-symlinks requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ for content-addressed layouts. Tar archive transport leaves symlink handling to tar. Update cli-version before enabling this input.`);
 }
 export function assertLegacyArchiveEntriesAreLossless(entries, operation) {
     const incompatible = entries.find((entry) => {
@@ -1831,7 +1831,7 @@ export function appendSaveExcludeArgs(args, excludes, version) {
     }
     const incompatible = excludes.find((pattern) => pattern.includes(',') || pattern.startsWith('./'));
     if (incompatible !== undefined) {
-        throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to preserve root-scoped exclusions and exclusion names containing commas. Update cli-version instead of allowing a lossy legacy invocation.`);
+        throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to preserve exclusion patterns and exclusion names containing commas. Update cli-version instead of allowing a lossy legacy invocation.`);
     }
     for (const pattern of excludes) {
         args.push('--exclude', pattern);

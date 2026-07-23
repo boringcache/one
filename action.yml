@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.100'
+    default: 'v1.13.101'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -313,7 +313,7 @@ inputs:
     required: false
   # GitHub Actions specific features (handled at action level)
   enableCrossOsArchive:
-    description: 'Enable cross-platform cache sharing by disabling platform suffixes and forcing portable archive transport. Requires CLI v1.13.100+.'
+    description: 'Share one tag across operating systems by disabling platform suffixes and forcing canonical tar archive transport. Equivalent representable content can reuse one tar root; BoringCache does not translate filesystem semantics. Requires CLI v1.13.100+.'
     default: 'false'
     required: false
   save-always:
@@ -353,10 +353,10 @@ inputs:
     description: 'Legacy comma-separated glob patterns to exclude from cache (for example "*.out,*.log").'
     required: false
   exclude-patterns:
-    description: 'Literal exclusion patterns, one per line. Preserves commas and significant whitespace; prefix a directory pattern with ./ to anchor it to the selected cache root. Requires CLI v1.13.100+ for writable steps.'
+    description: 'Tar exclusion patterns, one per line. Preserves commas and significant whitespace. Requires CLI v1.13.100+ for writable steps.'
     required: false
   allow-external-symlinks:
-    description: 'Allow saving and restoring symlinks whose targets escape the cache root (CLI --allow-external-symlinks flag). Requires CLI v1.13.100+. Disabled by default; opt in for archives with workspace-back symlinks (e.g. pnpm store layouts whose project entries point back to the workspace).'
+    description: 'Allow external symlinks in content-addressed layouts (CLI --allow-external-symlinks flag). Tar archive transport leaves symlink handling to tar. Requires CLI v1.13.100+.'
     default: 'false'
     required: false
 outputs:

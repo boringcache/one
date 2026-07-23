@@ -2,7 +2,7 @@ const MODE_SPECS = {
     archive: {
         resolved: 'archive',
         implemented: true,
-        description: 'Portable archive caching and actions/cache compatibility.',
+        description: 'Opaque tar archive caching and actions/cache compatibility.',
     },
     docker: {
         resolved: 'docker',
