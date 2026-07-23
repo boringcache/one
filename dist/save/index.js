@@ -93174,7 +93174,7 @@ function warnIfUsingLegacyApiToken() {
     warnedAboutLegacyApiToken = true;
     notice('Using BORINGCACHE_API_TOKEN as a legacy compatibility fallback. Prefer BORINGCACHE_RESTORE_TOKEN and BORINGCACHE_SAVE_TOKEN for new workflows.');
 }
-function auth_missingRestoreTokenMessage() {
+function missingRestoreTokenMessage() {
     return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_SAVE_TOKEN, or BORINGCACHE_API_TOKEN.';
 }
 function auth_missingSaveTokenMessage() {
@@ -93701,27 +93701,52 @@ function inputs_resolvePaths(pathInput, baseDir) {
 function inputs_parseEntries(entriesInput, _action, options = {}) {
     const shouldResolve = options.resolvePaths ?? true;
     const baseDir = options.baseDir;
-    return entriesInput
-        .split(/\r?\n|,/)
-        .map(entry => entry.trim())
-        .filter(entry => entry)
+    const separatorMode = options.separatorMode ?? 'legacy';
+    const entrySpecs = [];
+    let current = '';
+    for (let index = 0; index < entriesInput.length; index += 1) {
+        const character = entriesInput[index];
+        if (separatorMode === 'legacy'
+            && character === '\\'
+            && entriesInput[index + 1] === ',') {
+            current += ',';
+            index += 1;
+        }
+        else if ((character === ',' && separatorMode === 'legacy')
+            || (character === '\n' && separatorMode !== 'single')) {
+            entrySpecs.push(current);
+            current = '';
+        }
+        else if (character !== '\r') {
+            current += character;
+        }
+    }
+    entrySpecs.push(current);
+    return entrySpecs
+        .filter(entry => entry.trim())
         .map(entry => {
         const colonIndex = entry.indexOf(':');
         if (colonIndex === -1) {
             throw new Error(`Invalid entry format: ${entry}. Expected format: tag:path or tag:restore_path=>save_path`);
         }
         const tag = entry.substring(0, colonIndex).trim();
-        const pathSpec = entry.substring(colonIndex + 1).trim();
+        const rawPathSpec = entry.substring(colonIndex + 1);
+        const pathSpec = shouldResolve ? rawPathSpec.trim() : rawPathSpec;
         if (!tag) {
             throw new Error(`Invalid entry format: ${entry}. Tag cannot be empty`);
+        }
+        if (!pathSpec.trim()) {
+            throw new Error(`Invalid entry format: ${entry}. Path cannot be empty`);
         }
         let restorePathInput = pathSpec;
         let savePathInput = pathSpec;
         const redirectIndex = pathSpec.indexOf('=>');
         if (redirectIndex !== -1) {
-            restorePathInput = pathSpec.substring(0, redirectIndex).trim();
-            savePathInput = pathSpec.substring(redirectIndex + 2).trim();
-            if (!restorePathInput || !savePathInput) {
+            const rawRestorePath = pathSpec.substring(0, redirectIndex);
+            const rawSavePath = pathSpec.substring(redirectIndex + 2);
+            restorePathInput = shouldResolve ? rawRestorePath.trim() : rawRestorePath;
+            savePathInput = shouldResolve ? rawSavePath.trim() : rawSavePath;
+            if (!restorePathInput.trim() || !savePathInput.trim()) {
                 throw new Error(`Invalid entry format: ${entry}. Expected restore and save paths when using => syntax`);
             }
         }
@@ -94035,7 +94060,7 @@ async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60_
 }
 function logOciImportReadiness(readiness) {
     if (readiness.ready) {
-        info(`BoringCache proxy OCI import refs are readable: ${readiness.readableRefs.join(', ')}`);
+        info(`BoringCache managed cache import refs are readable: ${readiness.readableRefs.join(', ')}`);
         return;
     }
     const statusSuffix = [
@@ -94050,9 +94075,9 @@ function logOciImportReadiness(readiness) {
     ]
         .filter(Boolean)
         .join(' ');
-    const message = `BoringCache proxy became ready before OCI import refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
+    const message = `BoringCache managed cache became ready before planned restore refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
     if (readiness.readableRefs.length === 0) {
-        notice(`${message}. Continuing without registry imports; this is expected for cold seed jobs.`);
+        notice(`${message}. Continuing without cache imports; this is expected for cold seed jobs.`);
         return;
     }
     warning(message);
@@ -94062,9 +94087,9 @@ function assertOciImportReady(readiness) {
         return;
     }
     if (readiness.readableRefs.length === 0) {
-        throw new Error(`No OCI cache import refs were readable. requested=[${readiness.requestedRefs.join(', ')}]`);
+        throw new Error(`No managed cache import refs were readable. requested=[${readiness.requestedRefs.join(', ')}]`);
     }
-    throw new Error(`Some OCI cache import refs were unreadable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
+    throw new Error(`Some managed cache import refs were unreadable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
 }
 /**
  * Start the BoringCache proxy.
@@ -94082,7 +94107,7 @@ async function proxy_startRegistryProxy(options) {
     }
     if (!authToken) {
         if (effectiveReadOnly) {
-            throw new Error(`${auth_missingRestoreTokenMessage()} This is required for proxy mode.`);
+            throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
         }
         throw new Error(`${auth_missingSaveTokenMessage()} This is required for proxy mode.`);
     }
@@ -94175,7 +94200,7 @@ async function proxy_startRegistryProxy(options) {
             };
         }
         if (options.requireOciImportReady) {
-            throw new Error('No OCI cache import refs were requested while require-oci-import-ready was enabled.');
+            throw new Error('No managed cache import refs were requested while strict import readiness was enabled.');
         }
         return handle;
     }
@@ -95114,12 +95139,14 @@ function assertImplementedMode(modeSpec) {
 
 
 
+
 const utils_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 const MAX_DIAGNOSTICS_LOG_LINES = 500;
 const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
 const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
 const MAX_VERIFY_TIMEOUT_SECONDS = 900;
 const MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
+const PORTABLE_ARCHIVE_ARGS_MIN_VERSION = '1.13.100';
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
@@ -95144,7 +95171,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.13.99',
+        cliVersion: getInput('cli-version') || 'v1.13.100',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -95174,11 +95201,10 @@ function getInputs() {
         proxyPort: getInput('proxy-port'),
         proxyNoGit: getBooleanInput('proxy-no-git'),
         proxyNoPlatform: getBooleanInput('proxy-no-platform'),
-        ociHydration: normalizeOciHydrationPolicy(getInput('oci-hydration')),
-        managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:abcf0043c6a9b4804abdf522ffdc938f719d1ddb711b05a2870a5ad920b7cec4',
+        managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:2f6ddc6319f598180955e89e3a846b259b216458d528912c1477700670c96869',
         dockerToolCache: getInput('docker-tool-cache'),
         cacheProfiles: getInput('cache-profiles'),
-        entries: getInput('entries'),
+        entries: getInput('entries', { trimWhitespace: false }),
         path: getInput('path'),
         key: getInput('key'),
         restoreKeys: getInput('restore-keys'),
@@ -95191,6 +95217,7 @@ function getInputs() {
         force: getBooleanInput('force'),
         verbose: getBooleanInput('verbose'),
         exclude: getInput('exclude'),
+        excludePatterns: getInput('exclude-patterns', { trimWhitespace: false }),
         allowExternalSymlinks: getBooleanInput('allow-external-symlinks'),
     };
 }
@@ -95450,15 +95477,6 @@ function normalizeDiagnosticsLogLines(value) {
         return MAX_DIAGNOSTICS_LOG_LINES;
     }
     return parsed;
-}
-function normalizeOciHydrationPolicy(value) {
-    switch ((value || utils_DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase()) {
-        case 'metadata-only':
-        case 'bodies-before-ready':
-            return (value || utils_DEFAULT_OCI_HYDRATION_POLICY).trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported oci-hydration "${value}". Expected metadata-only or bodies-before-ready.`);
-    }
 }
 function resolveDiagnosticsConfig(mode, logLines) {
     let level;
@@ -96047,7 +96065,7 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
     if (!entries.trim()) {
         return;
     }
-    for (const entry of parseEntries(entries, 'restore')) {
+    for (const entry of parseEntries(entries, 'restore', { separatorMode: 'newline' })) {
         specs.push({
             tag: entry.tag,
             noPlatform,
@@ -96826,18 +96844,277 @@ function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionS
     }
     return `${runtimeTag}:${getMiseInstallsDir()}`;
 }
-function normalizeEntriesInput(entries) {
-    return entries
+function splitEntriesInput(entries) {
+    const values = [];
+    let current = '';
+    for (let index = 0; index < entries.length; index += 1) {
+        const character = entries[index];
+        if (character === '\\' && entries[index + 1] === ',') {
+            current += ',';
+            index += 1;
+        }
+        else if (character === ',' || character === '\n') {
+            values.push(current);
+            current = '';
+        }
+        else if (character !== '\r') {
+            current += character;
+        }
+    }
+    values.push(current);
+    return values.filter((entry) => entry.trim());
+}
+function parseCliVersion(version) {
+    const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    if (!match) {
+        return null;
+    }
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+async function resolveCliCapabilityVersion(version) {
+    const requestedVersion = version.trim();
+    if (requestedVersion.toLowerCase() === 'skip' || parseCliVersion(requestedVersion)) {
+        return requestedVersion;
+    }
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await execBoringCache(['--version'], {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    const output = `${stdout}\n${stderr}`;
+    const match = output.match(/\bboringcache\s+v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/i);
+    if (exitCode !== 0 || !match) {
+        throw new Error(`Unable to determine installed BoringCache CLI capabilities for cli-version '${requestedVersion || '(empty)'}'. `
+            + `Expected 'boringcache --version' to report a semantic version, but it exited ${exitCode}`
+            + `${output.trim() ? `: ${output.trim()}` : '.'}`);
+    }
+    return match[1];
+}
+function supportsPortableArchiveArgs(version) {
+    const parsed = parseCliVersion(version);
+    const minimum = parseCliVersion(PORTABLE_ARCHIVE_ARGS_MIN_VERSION);
+    if (!parsed) {
+        return false;
+    }
+    for (let index = 0; index < parsed.length; index += 1) {
+        if (parsed[index] !== minimum[index]) {
+            return parsed[index] > minimum[index];
+        }
+    }
+    return true;
+}
+function assertCrossOsArchiveTransportSupported(version) {
+    if (supportsPortableArchiveArgs(version)) {
+        return;
+    }
+    throw new Error(`enableCrossOsArchive requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so the Action can force portable archive transport. Update cli-version before sharing this tag across operating systems.`);
+}
+function assertExternalSymlinkRoundTripSupported(version) {
+    if (supportsPortableArchiveArgs(version)) {
+        return;
+    }
+    throw new Error(`allow-external-symlinks requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so save and restore use the same symlink policy. Update cli-version before enabling this input.`);
+}
+function assertLegacyArchiveEntriesAreLossless(entries, operation) {
+    const incompatible = entries.find((entry) => {
+        const separator = entry.indexOf(':');
+        if (separator <= 0) {
+            return true;
+        }
+        const tag = entry.slice(0, separator);
+        const selectedPath = entry.slice(separator + 1);
+        return entry.includes(',')
+            || tag !== tag.trim()
+            || selectedPath !== selectedPath.trim();
+    });
+    if (!incompatible) {
+        return;
+    }
+    throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to ${operation} cache paths containing commas or significant leading/trailing whitespace. Update cli-version instead of allowing a lossy legacy invocation.`);
+}
+function splitExcludeInput(input) {
+    if (!input) {
+        return [];
+    }
+    return input.split(',').filter((pattern) => pattern.length > 0);
+}
+function splitLiteralExcludeInput(input) {
+    if (!input) {
+        return [];
+    }
+    return input.split(/\r?\n/).filter((pattern) => pattern.length > 0);
+}
+function appendSaveExcludeArgs(args, excludes, version) {
+    if (supportsPortableArchiveArgs(version)) {
+        for (const pattern of excludes) {
+            args.push('--exclude-pattern', pattern);
+        }
+        return;
+    }
+    const incompatible = excludes.find((pattern) => pattern.includes(',') || pattern.startsWith('./'));
+    if (incompatible !== undefined) {
+        throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to preserve root-scoped exclusions and exclusion names containing commas. Update cli-version instead of allowing a lossy legacy invocation.`);
+    }
+    for (const pattern of excludes) {
+        args.push('--exclude', pattern);
+    }
+}
+function splitActionsCachePathInput(input) {
+    return input
         .split(/\r?\n/)
         .map((entry) => entry.trim())
-        .filter(Boolean)
-        .join(',');
-}
-function splitEntriesInput(entries) {
-    return entries
-        .split(/[\r\n,]/)
-        .map((entry) => entry.trim())
         .filter(Boolean);
+}
+function absoluteGlobPattern(pattern, workingDirectory) {
+    let value = pattern;
+    let negate = '';
+    while (value.startsWith('!')) {
+        negate += '!';
+        value = value.slice(1);
+    }
+    const selectedPath = value.trim();
+    if (selectedPath === '~' || selectedPath.startsWith('~/')) {
+        const expanded = selectedPath === '~'
+            ? external_os_.homedir()
+            : external_path_.join(external_os_.homedir(), selectedPath.slice(2));
+        return `${negate}${expanded}`;
+    }
+    if (external_path_.isAbsolute(selectedPath)) {
+        return `${negate}${selectedPath}`;
+    }
+    return `${negate}${external_path_.join(workingDirectory, selectedPath)}`;
+}
+function hasUnescapedGlob(pattern) {
+    for (let index = 0; index < pattern.length; index += 1) {
+        if (pattern[index] === '\\' && process.platform !== 'win32') {
+            index += 1;
+            continue;
+        }
+        if (pattern[index] === '*' || pattern[index] === '?' || pattern[index] === '[') {
+            return true;
+        }
+    }
+    return false;
+}
+function hasInvalidGlobDotSegments(pattern) {
+    const normalized = process.platform === 'win32'
+        ? pattern.replace(/\\/g, '/')
+        : pattern;
+    return normalized
+        .split('/')
+        .some((segment, index) => segment === '..' || (segment === '.' && index !== 0));
+}
+function resolveLiteralActionsCachePath(pattern, workingDirectory) {
+    const selectedPath = pattern.trim();
+    const expanded = selectedPath === '~'
+        ? external_os_.homedir()
+        : selectedPath.startsWith('~/')
+            ? external_path_.join(external_os_.homedir(), selectedPath.slice(2))
+            : selectedPath;
+    return external_path_.isAbsolute(expanded) ? expanded : external_path_.join(workingDirectory, expanded);
+}
+function pathIsWithin(parent, candidate) {
+    const relative = external_path_.relative(parent, candidate);
+    return relative === '' || (!relative.startsWith(`..${external_path_.sep}`) && relative !== '..' && !external_path_.isAbsolute(relative));
+}
+function coalesceCacheRoots(paths) {
+    const roots = [];
+    for (const candidate of paths) {
+        if (roots.some((root) => pathIsWithin(root, candidate))) {
+            continue;
+        }
+        for (let index = roots.length - 1; index >= 0; index -= 1) {
+            if (pathIsWithin(candidate, roots[index])) {
+                roots.splice(index, 1);
+            }
+        }
+        roots.push(candidate);
+    }
+    return roots;
+}
+async function resolveActionsCachePaths(input, workingDirectory) {
+    const patterns = splitActionsCachePathInput(input);
+    if (patterns.length === 0) {
+        return { paths: [], excludes: [] };
+    }
+    const roots = [];
+    const exclusions = [];
+    let sawExclusion = false;
+    for (const pattern of patterns) {
+        if (pattern.startsWith('!')) {
+            sawExclusion = true;
+            exclusions.push(pattern.slice(1));
+            continue;
+        }
+        if (sawExclusion) {
+            throw new Error('BoringCache path compatibility requires all include roots before exclusion patterns. Move leading-! exclusions after the paths they filter.');
+        }
+        if (process.platform !== 'win32' && pattern.includes('\\')) {
+            throw new Error(`Unsupported actions/cache path pattern "${pattern}". Escaped glob characters cannot be translated to a literal CLI cache root without changing their meaning; use an exact path with no escapes.`);
+        }
+        const absolutePattern = absoluteGlobPattern(pattern, workingDirectory);
+        const globber = await create(absolutePattern, {
+            followSymbolicLinks: true,
+            implicitDescendants: false,
+        });
+        if (!hasUnescapedGlob(pattern)) {
+            roots.push({
+                requested: pattern.trim(),
+                absolute: resolveLiteralActionsCachePath(pattern, workingDirectory),
+                descendantGlob: false,
+            });
+            continue;
+        }
+        if (!/\/\*\*\/?$/.test(pattern) || hasUnescapedGlob(pattern.replace(/\/\*\*\/?$/, ''))) {
+            throw new Error(`Unsupported actions/cache path pattern "${pattern}". BoringCache preserves one deterministic archive root per tag, so wildcard roots must use the form directory/**. Use exact paths or BoringCache entries for other shapes.`);
+        }
+        roots.push({
+            requested: pattern.replace(/\/\*\*\/?$/, ''),
+            absolute: globber.getSearchPaths()[0],
+            descendantGlob: true,
+        });
+    }
+    if (exclusions.length > 0 && (roots.length !== 1 || !roots[0].descendantGlob)) {
+        throw new Error('actions/cache exclusion patterns require exactly one directory/** include root. Exact roots and multiple roots cannot safely scope exclusions in a shared save batch.');
+    }
+    const selectedRootPaths = coalesceCacheRoots(roots.map((root) => root.absolute));
+    const selectedRoots = selectedRootPaths.map((absolute) => roots.find((root) => root.absolute === absolute));
+    if (exclusions.length > 0 && selectedRoots.length !== 1) {
+        throw new Error('actions/cache exclusion patterns require exactly one deterministic directory/** root. Split multiple roots into separate BoringCache entries so exclusions cannot affect the wrong cache.');
+    }
+    const excludePatterns = exclusions.map((pattern) => {
+        if (pattern.startsWith('!')) {
+            throw new Error('Repeated ! path negation is not supported. Use one leading ! exclusion after the include root.');
+        }
+        if (process.platform !== 'win32' && pattern.includes('\\')) {
+            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". Escaped glob characters cannot be translated to the CLI matcher without changing their meaning; use a literal descendant subtree with no escapes.`);
+        }
+        if (!/\/\*\*\/?$/.test(pattern) || hasUnescapedGlob(pattern.replace(/\/\*\*\/?$/, ''))) {
+            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". BoringCache currently supports only a literal descendant subtree in the form !directory/subdirectory/** so its root scope can be preserved exactly. Split other glob shapes into separate BoringCache entries.`);
+        }
+        const subtree = pattern.replace(/\/\*\*\/?$/, '');
+        if (hasInvalidGlobDotSegments(subtree)) {
+            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". Internal . segments and all .. segments are rejected by actions/glob and cannot be normalized into a different cache exclusion.`);
+        }
+        const absolutePattern = resolveLiteralActionsCachePath(subtree, workingDirectory);
+        const root = selectedRoots[0].absolute;
+        const relativePattern = external_path_.relative(root, absolutePattern);
+        if (!relativePattern || relativePattern === '..' || relativePattern.startsWith(`..${external_path_.sep}`)) {
+            throw new Error(`actions/cache exclusion pattern "!${pattern}" must stay inside its directory/** cache root.`);
+        }
+        const normalized = relativePattern.split(external_path_.sep).join('/');
+        return `./${normalized}/`;
+    });
+    return { paths: selectedRoots.map((root) => root.requested), excludes: excludePatterns };
 }
 function appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
@@ -96860,7 +97137,7 @@ function findNearestRepoConfigPath(workingDirectory) {
     }
 }
 async function runDryRunPlan(workingDirectory, options) {
-    const { workspaceInput, entryIds = [], profileNames = [], manualTagPathPairs = [], archivePaths = [], archiveTagPrefix = '', archiveRestorePrefixes = [], cacheTag = '', toolTagSuffix = '', noPlatform = false, readOnly = false, fallbackWorkspace, } = options;
+    const { workspaceInput, entryIds = [], profileNames = [], manualTagPathPairs = [], archivePaths = [], archiveTagPrefix = '', archiveRestorePrefixes = [], cacheTag = '', toolTagSuffix = '', noPlatform = false, readOnly = false, fallbackWorkspace, portableArchiveArgs = true, } = options;
     const executePlan = async (candidateWorkspace) => {
         const args = ['run'];
         const trimmedWorkspace = candidateWorkspace.trim();
@@ -96868,7 +97145,15 @@ async function runDryRunPlan(workingDirectory, options) {
             args.push(trimmedWorkspace);
         }
         if (manualTagPathPairs.length > 0) {
-            args.push(manualTagPathPairs.join(','));
+            if (portableArchiveArgs) {
+                for (const pair of manualTagPathPairs) {
+                    args.push('--manual-entry', pair);
+                }
+            }
+            else {
+                assertLegacyArchiveEntriesAreLossless(manualTagPathPairs, 'save');
+                args.push(manualTagPathPairs.join(','));
+            }
         }
         for (const profileName of profileNames) {
             args.push('--profile', profileName);
@@ -96962,7 +97247,7 @@ async function utils_resolveCliArchiveEntries(workingDirectory, options) {
 function isUnknownEntryResolutionError(error) {
     return error instanceof Error && /Unknown cache entry/i.test(error.message);
 }
-async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawTag, cacheTag, toolTagSuffix, readOnly, fallbackWorkspace) {
+async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawTag, cacheTag, toolTagSuffix, readOnly, fallbackWorkspace, portableArchiveArgs = true) {
     try {
         return await runDryRunPlan(workingDirectory, {
             workspaceInput,
@@ -96971,6 +97256,7 @@ async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawT
             toolTagSuffix,
             readOnly,
             fallbackWorkspace,
+            portableArchiveArgs,
         });
     }
     catch (error) {
@@ -97043,25 +97329,30 @@ async function detectNodeDefaultArchiveEntries(workingDirectory) {
 async function buildArchiveEntries(inputs, runtimeTools) {
     let archiveEntries = [];
     let restoreCandidates = [];
+    let archiveExcludes = [];
     let usesCacheFormat = false;
     const envVars = {};
     let cacheTagPrefix;
     let resolvedWorkspace;
     let sourceEntries = inputs.entries;
-    const cacheProfiles = splitEntriesInput(inputs.cacheProfiles);
+    const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
     const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
     const fallbackWorkspace = resolveWorkspace(inputs.workspace);
     const cliWorkspaceInput = inputs.workspace.trim();
     const cliToolTagSuffix = inputs.setup === 'mise'
         ? buildMiseToolTag(runtimeTools, inputs.toolVersionScope)
         : null;
+    const portableArchiveArgs = supportsPortableArchiveArgs(inputs.cliVersion);
     const mergeCliPlan = (plan) => {
         archiveEntries.push(...plan.tag_path_pairs);
         if (!cacheTagPrefix) {
             const firstEntry = plan.archive_entries?.[0];
             const firstPair = plan.tag_path_pairs[0];
             cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
-                || (firstPair ? inputs_parseEntries(firstPair, 'restore', { resolvePaths: false })[0]?.tag : undefined);
+                || (firstPair ? inputs_parseEntries(firstPair, 'restore', {
+                    resolvePaths: false,
+                    separatorMode: 'single',
+                })[0]?.tag : undefined);
         }
         Object.assign(envVars, plan.env_vars);
         if (!resolvedWorkspace && plan.workspace) {
@@ -97076,7 +97367,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
                 rawEntries.push(entry);
             }
             else {
-                semanticEntries.push(entry);
+                semanticEntries.push(entry.trim());
             }
         }
         if (cacheProfiles.length > 0 || semanticEntries.length > 0) {
@@ -97091,12 +97382,15 @@ async function buildArchiveEntries(inputs, runtimeTools) {
             }));
         }
         for (const entryToken of rawEntries) {
-            const parsedEntry = inputs_parseEntries(entryToken, 'restore', { resolvePaths: false })[0];
+            const parsedEntry = inputs_parseEntries(entryToken, 'restore', {
+                resolvePaths: false,
+                separatorMode: 'single',
+            })[0];
             if (!parsedEntry) {
                 continue;
             }
             if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
-                const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, inputs.cacheTag, cliToolTagSuffix, inputs.readOnly, fallbackWorkspace);
+                const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, inputs.cacheTag, cliToolTagSuffix, inputs.readOnly, fallbackWorkspace, portableArchiveArgs);
                 const shouldUpgrade = resolved
                     && resolved.tag_path_pairs.length > 0
                     && (cliPlanUsesRepoConfigResolution(resolved)
@@ -97120,6 +97414,7 @@ async function buildArchiveEntries(inputs, runtimeTools) {
                 toolTagSuffix: cliToolTagSuffix,
                 readOnly: inputs.readOnly,
                 fallbackWorkspace,
+                portableArchiveArgs,
             }));
         }
     }
@@ -97127,29 +97422,32 @@ async function buildArchiveEntries(inputs, runtimeTools) {
         if (!inputs.path || !inputs.key) {
             throw new Error('actions/cache compatibility mode requires both path and key');
         }
+        const resolvedArchivePaths = await resolveActionsCachePaths(inputs.path, inputs.workingDirectory);
+        archiveExcludes = resolvedArchivePaths.excludes;
+        if (!inputs.readOnly && archiveExcludes.length > 0 && !portableArchiveArgs) {
+            throw new Error(`actions/cache path exclusions require BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so their cache-root scope is preserved exactly. Update cli-version, or use a restore-only step with read-only: true.`);
+        }
         const archivePathPlan = await runDryRunPlan(inputs.workingDirectory, {
             workspaceInput: cliWorkspaceInput,
-            archivePaths: inputs.path
-                .split(/\r?\n/)
-                .map((entry) => entry.trim())
-                .filter(Boolean),
+            archivePaths: resolvedArchivePaths.paths,
             archiveTagPrefix: inputs.key,
             archiveRestorePrefixes: getRestoreKeyCandidates(inputs),
             noPlatform: inputs.noPlatform || inputs.enableCrossOsArchive,
             readOnly: inputs.readOnly,
             fallbackWorkspace,
+            portableArchiveArgs,
         });
         archiveEntries = archivePathPlan.tag_path_pairs;
         restoreCandidates = (archivePathPlan.archive_restore_candidates || []).map((candidate) => ({
             tagPrefix: candidate.tag_prefix,
-            entries: candidate.tag_path_pairs.join(','),
+            entries: candidate.tag_path_pairs.join('\n'),
         }));
         usesCacheFormat = true;
         cacheTagPrefix = inputs.key.trim() || undefined;
     }
     else {
         sourceEntries = await detectDefaultArchiveEntries(inputs);
-        const defaultEntryIds = splitEntriesInput(sourceEntries);
+        const defaultEntryIds = splitEntriesInput(sourceEntries).map((entry) => entry.trim());
         if (defaultEntryIds.length > 0) {
             mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
                 workspaceInput: cliWorkspaceInput,
@@ -97162,7 +97460,8 @@ async function buildArchiveEntries(inputs, runtimeTools) {
         }
     }
     return {
-        entries: archiveEntries.join(','),
+        entries: archiveEntries.join('\n'),
+        excludes: archiveExcludes,
         restoreCandidates,
         usesCacheFormat,
         envVars,
@@ -97170,12 +97469,21 @@ async function buildArchiveEntries(inputs, runtimeTools) {
         workspace: resolvedWorkspace,
     };
 }
-function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries) {
+function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries, pathExcludes) {
+    if (inputs.enableCrossOsArchive) {
+        assertCrossOsArchiveTransportSupported(inputs.cliVersion);
+    }
+    if (inputs.allowExternalSymlinks) {
+        assertExternalSymlinkRoundTripSupported(inputs.cliVersion);
+    }
     if ((inputs.entries || inputs.cacheProfiles.trim()) && (inputs.path || inputs.key)) {
         warning('Both explicit entries/cache-profiles and actions/cache compatibility inputs were provided. Using entries/cache-profiles.');
     }
     if ((inputs.path && !inputs.key) || (!inputs.path && inputs.key)) {
         throw new Error('actions/cache compatibility mode requires both path and key');
+    }
+    if (pathExcludes.length > 0 && runtimeEntry) {
+        throw new Error('actions/cache path exclusions cannot share a save batch with the Mise runtime cache. Set cache-runtime: false or move the path cache to a separate boringcache/one step so exclusions remain scoped to their directory/** root.');
     }
     if (inputs.setup !== 'mise' && inputs.tools.trim()) {
         warning(`Ignoring tools because setup=${inputs.setup}`);
@@ -97228,7 +97536,7 @@ async function buildPlan(inputs) {
     const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
         ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
         : null;
-    validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries);
+    validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries, archiveEntries.excludes);
     return {
         workspace,
         workingDirectory: inputs.workingDirectory,
@@ -97242,6 +97550,11 @@ async function buildPlan(inputs) {
         runtimeEntry,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
+        archiveExcludes: [
+            ...splitExcludeInput(inputs.exclude),
+            ...splitLiteralExcludeInput(inputs.excludePatterns),
+            ...archiveEntries.excludes,
+        ],
         archiveRestoreCandidates: archiveEntries.restoreCandidates,
         usesCacheFormat: archiveEntries.usesCacheFormat,
     };
@@ -97277,9 +97590,6 @@ function buildFlagArgs(inputs) {
     }
     if (inputs.verbose) {
         flagArgs.push('--verbose');
-    }
-    if (inputs.exclude) {
-        flagArgs.push('--exclude', inputs.exclude);
     }
     if (inputs.allowExternalSymlinks) {
         flagArgs.push('--allow-external-symlinks');
@@ -97376,14 +97686,9 @@ async function integrity_verifySha256(filePath, expectedDigest, assetName) {
 
 
 
-const DOCKER_CACHE_DIR_FROM = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-cache-from');
-const DOCKER_CACHE_DIR_TO = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-cache-to');
 const DOCKER_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'boringcache-one-docker-metadata.json');
-const BUILDKIT_CACHE_DIR_FROM = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-local-from');
-const BUILDKIT_CACHE_DIR_TO = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-local-to');
 const BUILDKIT_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-metadata.json');
-const DEFAULT_REGISTRY_CACHE_REF_TAG = 'buildcache';
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:abcf0043c6a9b4804abdf522ffdc938f719d1ddb711b05a2870a5ad920b7cec4';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:2f6ddc6319f598180955e89e3a846b259b216458d528912c1477700670c96869';
 const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
 const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
 const BUILDCTL_VERSION = 'v0.31.2';
@@ -97462,8 +97767,8 @@ function adapterProxyVerificationSpec(tag, proxyPlan, pathHint) {
         saveExpected: !proxyPlan.read_only,
     };
 }
-function registryCacheVerificationSpecs(cacheTag, ociCache, noPlatform, noGit, saveExpected, pathHint) {
-    void ociCache;
+function buildKitCacheVerificationSpecs(cacheTag, buildKitCache, noPlatform, noGit, saveExpected, pathHint) {
+    void buildKitCache;
     const uniqueTags = Array.from(new Set([cacheTag].map((tag) => tag.trim()).filter(Boolean)));
     return uniqueTags.map((tag) => ({
         tag,
@@ -97744,10 +98049,10 @@ async function verifyOciPromotionRefsAfterStop() {
     const cacheTag = getModeState('cache-tag');
     const port = Number.parseInt(getModeState('proxy-port'), 10);
     if (!workspace || !cacheTag) {
-        throw new Error(`Cannot verify OCI promotion refs without workspace and cache tag. requested=[${refs.join(', ')}]`);
+        throw new Error(`Cannot verify managed cache promotion refs without workspace and cache tag. requested=[${refs.join(', ')}]`);
     }
     if (!Number.isFinite(port) || port <= 0) {
-        throw new Error(`Cannot verify OCI promotion refs without a proxy port. requested=[${refs.join(', ')}]`);
+        throw new Error(`Cannot verify managed cache promotion refs without a proxy port. requested=[${refs.join(', ')}]`);
     }
     const host = getModeState('proxy-host') || '127.0.0.1';
     let verificationProxyPid = null;
@@ -97770,12 +98075,12 @@ async function verifyOciPromotionRefsAfterStop() {
         verificationProxyPid = verificationProxy.pid > 0 ? verificationProxy.pid : null;
         const readiness = verificationProxy.ociImportReadiness;
         if (!readiness?.ready) {
-            throw new Error(`OCI promotion refs were not readable after proxy shutdown. readable=[${readiness?.readableRefs.join(', ') || ''}] unreadable=[${readiness?.unreadableRefs.join(', ') || refs.join(', ')}]`);
+            throw new Error(`Managed cache promotion refs were not readable after proxy shutdown. readable=[${readiness?.readableRefs.join(', ') || ''}] unreadable=[${readiness?.unreadableRefs.join(', ') || refs.join(', ')}]`);
         }
-        info(`Verified OCI promotion refs after proxy shutdown: ${readiness.readableRefs.join(', ')}`);
+        info(`Verified managed cache promotion refs after proxy shutdown: ${readiness.readableRefs.join(', ')}`);
     }
     catch (error) {
-        throw new Error(`OCI promotion refs were not readable after proxy shutdown. requested=[${refs.join(', ')}]: ${mode_handlers_errorMessage(error)}`);
+        throw new Error(`Managed cache promotion refs were not readable after proxy shutdown. requested=[${refs.join(', ')}]: ${mode_handlers_errorMessage(error)}`);
     }
     finally {
         if (verificationProxyPid !== null) {
@@ -97796,7 +98101,7 @@ async function verifyOciPromotionRefsThenStopProxy(proxyPid) {
         await proxy_stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined);
     }
     catch (stopError) {
-        throw new Error(`Failed to stop BoringCache proxy cleanly before OCI promotion verification: ${mode_handlers_errorMessage(stopError)}`);
+        throw new Error(`Failed to stop BoringCache proxy cleanly before managed cache promotion verification: ${mode_handlers_errorMessage(stopError)}`);
     }
     await verifyOciPromotionRefsAfterStop();
 }
@@ -97815,16 +98120,6 @@ function emitCliPlannerWarnings(stderr) {
             core.warning(line.replace(/^warning:\s*/, ''));
         }
     }
-}
-function normalizeDockerCacheBackend(value) {
-    const backend = (value.trim() || 'boringcache');
-    if (backend === 'boringcache' || backend === 'registry' || backend === 'local') {
-        return backend;
-    }
-    throw new Error(`Unsupported Docker/BuildKit cache backend: ${value}. Expected boringcache, registry, or local.`);
-}
-function buildKitCacheBackendFor(cacheBackend) {
-    return cacheBackend === 'registry' ? 'registry' : 'boringcache';
 }
 function normalizeDockerCommand(value) {
     const command = (value.trim() || 'build');
@@ -97853,9 +98148,6 @@ function normalizeRustupProfile(value) {
         return profile;
     }
     throw new Error(`Unsupported profile "${value}". Expected minimal, default, or complete.`);
-}
-function usesRegistryCachePlan(backend) {
-    return backend !== 'local';
 }
 async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, noPlatform, noGit, readOnly, options = {}) {
     const args = [adapter, '--workspace', workspace];
@@ -97928,10 +98220,9 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     assertSupportedCliDryRunSchema(adapter, plan);
     return plan;
 }
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', buildkitCacheBackend = 'boringcache', dockerToolCacheInput = '') {
+async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput = '', dockerToolCacheInput = '') {
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
-    const trimmedCacheRefTag = cacheRefTag.trim();
     if (trimmedCacheTag) {
         args.push('--tag', trimmedCacheTag);
     }
@@ -97956,14 +98247,6 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     }
     if (cacheMode.trim()) {
         args.push('--cache-mode', cacheMode.trim());
-    }
-    args.push('--backend', buildkitCacheBackend);
-    if (trimmedCacheRefTag) {
-        args.push('--cache-ref-tag', trimmedCacheRefTag);
-    }
-    const trimmedOciHydration = ociHydration.trim();
-    if (trimmedOciHydration) {
-        args.push('--oci-hydration', trimmedOciHydration);
     }
     if (adapter === 'docker') {
         for (const tool of parseList(dockerToolCacheInput)) {
@@ -98010,27 +98293,16 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     assertSupportedCliDryRunSchema(adapter, plan);
-    if (!plan.oci_cache?.registry_ref || !plan.oci_cache.cache_from) {
-        throw new Error(`boringcache ${adapter} dry-run JSON did not include OCI cache planning data`);
+    if (!plan.buildkit_cache?.cache_ref || !plan.buildkit_cache.cache_from) {
+        throw new Error(`boringcache ${adapter} dry-run JSON did not include managed BuildKit cache planning data`);
     }
     return plan;
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', buildkitCacheBackend = 'boringcache', dockerToolCacheInput = '') {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, cacheRefTag, ociHydration, metadataHintsInput, buildkitCacheBackend, dockerToolCacheInput);
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput = '', dockerToolCacheInput = '') {
+    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput, dockerToolCacheInput);
 }
-async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, cacheRefTag, ociHydration, metadataHintsInput = '', buildkitCacheBackend = 'boringcache') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, cacheRefTag, ociHydration, metadataHintsInput, buildkitCacheBackend);
-}
-async function restoreSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!hasRestoreToken()) {
-        core.notice(`Skipping cache restore (${missingRestoreTokenMessage()})`);
-        return;
-    }
-    const args = ['restore', workspace, `${cacheKey}:${cacheDir}`];
-    if (flags.verbose) {
-        args.push('--verbose');
-    }
-    await mode_handlers_execBoringCache(args);
+async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput = '') {
+    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput);
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!auth_hasSaveToken()) {
@@ -98050,10 +98322,7 @@ async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     }
     await mode_handlers_execBoringCache(args);
 }
-function getEffectiveRegistryTag(cacheTag, registryTag) {
-    return registryTag || cacheTag;
-}
-function extractRegistryCacheRefTag(cacheFrom) {
+function extractCacheRefTag(cacheFrom) {
     const refMatch = cacheFrom.match(/(?:^|,)ref=([^,]+)/);
     const ref = refMatch?.[1]?.trim();
     if (!ref) {
@@ -98066,22 +98335,22 @@ function extractRegistryCacheRefTag(cacheFrom) {
     }
     return ref.slice(lastColon + 1);
 }
-function registryCacheFromRefTags(ociCache) {
-    if (!ociCache) {
+function buildKitCacheFromRefTags(buildKitCache) {
+    if (!buildKitCache) {
         return [];
     }
-    if (ociCache.cache_from_ref_tags?.length) {
-        return ociCache.cache_from_ref_tags;
+    if (buildKitCache.cache_from_ref_tags?.length) {
+        return buildKitCache.cache_from_ref_tags;
     }
-    return (ociCache.cache_from_refs || [])
-        .map(extractRegistryCacheRefTag)
+    return (buildKitCache.cache_from_refs || [])
+        .map(extractCacheRefTag)
         .filter((tag) => Boolean(tag));
 }
-function registryCacheImportSpecs(ociCache, refTags) {
-    const imports = ociCache.cache_from_refs?.length ? ociCache.cache_from_refs : [ociCache.cache_from];
+function buildKitCacheImportSpecs(buildKitCache, refTags) {
+    const imports = buildKitCache.cache_from_refs?.length ? buildKitCache.cache_from_refs : [buildKitCache.cache_from];
     const byRefTag = new Map();
     for (const cacheFrom of imports) {
-        const refTag = extractRegistryCacheRefTag(cacheFrom);
+        const refTag = extractCacheRefTag(cacheFrom);
         if (refTag && !byRefTag.has(refTag)) {
             byRefTag.set(refTag, cacheFrom.trim());
         }
@@ -98095,36 +98364,35 @@ function registryCacheImportSpecs(ociCache, refTags) {
             .filter(Boolean);
     return selectedImports;
 }
-function effectiveRegistryCacheImports(ociCache, proxy) {
-    const requestedRefTags = registryCacheFromRefTags(ociCache);
+function effectiveBuildKitCacheImports(buildKitCache, proxy) {
+    const requestedRefTags = buildKitCacheFromRefTags(buildKitCache);
     const readableRefTags = proxy?.ociImportReadiness
         ? proxy.ociImportReadiness.readableRefs
         : requestedRefTags;
     const unreadableRefTags = proxy?.ociImportReadiness?.unreadableRefs || [];
     return {
-        importSpecs: registryCacheImportSpecs(ociCache, readableRefTags),
+        importSpecs: buildKitCacheImportSpecs(buildKitCache, readableRefTags),
         readableRefTags,
         requestedRefTags,
         unreadableRefTags,
         importReady: proxy?.ociImportReadiness?.ready ?? true,
     };
 }
-function registryCacheEvidence(adapter, ociCache, imports, cacheTo) {
-    const runMetadata = ociCache.run_metadata;
-    const effectiveBuildKitCacheBackend = ociCache.buildkit_cache_backend === 'registry' ? 'registry' : 'boringcache';
+function buildKitCacheEvidence(adapter, buildKitCache, imports, cacheTo) {
+    const runMetadata = buildKitCache.run_metadata;
     return {
         adapter,
-        cache_backend: effectiveBuildKitCacheBackend,
-        buildkit_cache_backend: effectiveBuildKitCacheBackend,
-        registry_ref: ociCache.registry_ref,
+        cache_backend: 'boringcache',
+        buildkit_cache_backend: 'boringcache',
+        cache_ref: buildKitCache.cache_ref,
         cache_from: imports.importSpecs,
         cache_to: cacheTo || '',
         requested_ref_tags: imports.requestedRefTags,
         readable_ref_tags: imports.readableRefTags,
         unreadable_ref_tags: imports.unreadableRefTags,
         import_ready: imports.importReady,
-        immutable_run_ref_tag: ociCache.immutable_run_ref_tag || '',
-        promotion_ref_tags: ociCache.promotion_ref_tags || [],
+        immutable_run_ref_tag: buildKitCache.immutable_run_ref_tag || '',
+        promotion_ref_tags: buildKitCache.promotion_ref_tags || [],
         ci: {
             provider: runMetadata?.provider || '',
             run_uid: runMetadata?.run_uid || '',
@@ -98135,59 +98403,38 @@ function registryCacheEvidence(adapter, ociCache, imports, cacheTo) {
         },
     };
 }
-function recordOciRegistryPlanState(ociPlan, cacheTag) {
-    saveModeState('workspace', ociPlan.workspace);
+function recordBuildKitCachePlanState(buildKitPlan, cacheTag) {
+    saveModeState('workspace', buildKitPlan.workspace);
     saveModeState('cache-tag', cacheTag);
     return {
-        resolvedWorkspace: ociPlan.workspace,
+        resolvedWorkspace: buildKitPlan.workspace,
         resolvedCacheTag: cacheTag,
-        registryVerification: {
-            noPlatform: ociPlan.proxy.no_platform,
-            noGit: ociPlan.proxy.no_git,
-            saveExpected: !ociPlan.proxy.read_only,
+        buildKitVerification: {
+            noPlatform: buildKitPlan.proxy.no_platform,
+            noGit: buildKitPlan.proxy.no_git,
+            saveExpected: !buildKitPlan.proxy.read_only,
         },
-        registryOciCache: ociPlan.oci_cache,
+        buildKitCacheState: buildKitPlan.buildkit_cache,
     };
 }
-function setRegistryCacheOutputs(spec) {
-    core.setOutput('registry-ref', spec.ref);
+function setBuildKitCacheOutputs(spec) {
+    core.setOutput('cache-ref', spec.ref);
     core.setOutput('cache-from', spec.from.join('\n'));
     core.setOutput('cache-to', spec.to || '');
-    core.setOutput('buildkit-cache-backend', spec.ociCache?.buildkit_cache_backend || 'registry');
-    core.setOutput('docker-cache-run-ref', spec.ociCache?.immutable_run_ref_tag || '');
-    core.setOutput('docker-cache-from-refs', (spec.usedRefTags || registryCacheFromRefTags(spec.ociCache)).join('\n'));
-    core.setOutput('docker-cache-requested-from-refs', registryCacheFromRefTags(spec.ociCache).join('\n'));
+    core.setOutput('docker-cache-run-ref', spec.buildKitCache?.immutable_run_ref_tag || '');
+    core.setOutput('docker-cache-from-refs', (spec.usedRefTags || buildKitCacheFromRefTags(spec.buildKitCache)).join('\n'));
+    core.setOutput('docker-cache-requested-from-refs', buildKitCacheFromRefTags(spec.buildKitCache).join('\n'));
     core.setOutput('docker-cache-unreadable-from-refs', (spec.unreadableRefTags || []).join('\n'));
     core.setOutput('docker-cache-import-ready', String(spec.importReady ?? true));
-    core.setOutput('docker-cache-promotion-refs', (spec.ociCache?.promotion_ref_tags || []).join('\n'));
-    core.setOutput('docker-ci-provider', spec.ociCache?.run_metadata?.provider || '');
-    core.setOutput('docker-ci-run-id', spec.ociCache?.run_metadata?.run_uid || '');
-    core.setOutput('docker-ci-run-attempt', spec.ociCache?.run_metadata?.run_attempt || '');
-    core.setOutput('docker-ci-ref-type', spec.ociCache?.run_metadata?.source_ref_type || '');
-    core.setOutput('docker-ci-ref-name', spec.ociCache?.run_metadata?.source_ref_name || '');
-    core.setOutput('docker-ci-run-started-at', spec.ociCache?.run_metadata?.run_started_at || '');
+    core.setOutput('docker-cache-promotion-refs', (spec.buildKitCache?.promotion_ref_tags || []).join('\n'));
+    core.setOutput('docker-ci-provider', spec.buildKitCache?.run_metadata?.provider || '');
+    core.setOutput('docker-ci-run-id', spec.buildKitCache?.run_metadata?.run_uid || '');
+    core.setOutput('docker-ci-run-attempt', spec.buildKitCache?.run_metadata?.run_attempt || '');
+    core.setOutput('docker-ci-ref-type', spec.buildKitCache?.run_metadata?.source_ref_type || '');
+    core.setOutput('docker-ci-ref-name', spec.buildKitCache?.run_metadata?.source_ref_name || '');
+    core.setOutput('docker-ci-run-started-at', spec.buildKitCache?.run_metadata?.run_started_at || '');
     core.setOutput('cache-dir', '');
     core.setOutput('save-cache-dir', '');
-}
-function setLocalCacheOutputs(cacheDirFrom, cacheDirTo, cacheMode) {
-    core.setOutput('registry-ref', '');
-    core.setOutput('cache-from', `type=local,src=${cacheDirFrom}`);
-    core.setOutput('cache-to', `type=local,dest=${cacheDirTo},mode=${cacheMode}`);
-    core.setOutput('buildkit-cache-backend', '');
-    core.setOutput('docker-cache-run-ref', '');
-    core.setOutput('docker-cache-from-refs', '');
-    core.setOutput('docker-cache-requested-from-refs', '');
-    core.setOutput('docker-cache-unreadable-from-refs', '');
-    core.setOutput('docker-cache-import-ready', 'true');
-    core.setOutput('docker-cache-promotion-refs', '');
-    core.setOutput('docker-ci-provider', '');
-    core.setOutput('docker-ci-run-id', '');
-    core.setOutput('docker-ci-run-attempt', '');
-    core.setOutput('docker-ci-ref-type', '');
-    core.setOutput('docker-ci-ref-name', '');
-    core.setOutput('docker-ci-run-started-at', '');
-    core.setOutput('cache-dir', cacheDirFrom);
-    core.setOutput('save-cache-dir', cacheDirTo);
 }
 async function inspectDockerTemplate(containerName, template) {
     let output = '';
@@ -98405,10 +98652,6 @@ function dockerBuildxArgs(opts) {
     if (opts.cacheTo) {
         args.push('--cache-to', opts.cacheTo);
     }
-    else if (opts.cacheDirFrom) {
-        args.push('--cache-from', `type=local,src=${opts.cacheDirFrom}`);
-        args.push('--cache-to', `type=local,dest=${opts.cacheDirTo},mode=${opts.cacheMode}`);
-    }
     args.push('--metadata-file', DOCKER_METADATA_FILE);
     args.push('.');
     return args;
@@ -98436,15 +98679,13 @@ async function buildDockerImage(opts) {
         throw new Error(`docker buildx build failed with exit code ${result}`);
     }
 }
-function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, command, commandArgs) {
+function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, cacheMode, command, commandArgs) {
     const args = [
         adapter,
         '--workspace',
         workspace,
         '--tag',
         cacheTag,
-        '--backend',
-        buildkitCacheBackend,
         '--port',
         String(port),
         '--cache-mode',
@@ -98466,12 +98707,6 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, buil
     if (inputs.failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
-    if (registryRefTagInput.trim()) {
-        args.push('--cache-ref-tag', registryRefTagInput.trim());
-    }
-    if (inputs.ociHydration.trim()) {
-        args.push('--oci-hydration', inputs.ociHydration.trim());
-    }
     if (adapter === 'docker') {
         for (const tool of parseList(inputs.dockerToolCache)) {
             args.push('--tool-cache', tool);
@@ -98481,15 +98716,13 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, buil
     args.push('--', command, ...commandArgs);
     return args;
 }
-async function buildDockerImageWithCliAdapter(workspace, cacheTag, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, opts) {
+async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, cacheMode, opts) {
     const dockerBuildArgs = dockerBuildxArgs({
         ...opts,
         cacheFrom: undefined,
         cacheTo: undefined,
-        cacheDirFrom: undefined,
-        cacheDirTo: undefined,
     });
-    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, buildkitCacheBackend, port, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput, 'docker', dockerBuildArgs);
+    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, cacheMode, 'docker', dockerBuildArgs);
     const result = await mode_handlers_execBoringCache(args, {
         cwd: opts.context,
         env: {
@@ -98499,7 +98732,7 @@ async function buildDockerImageWithCliAdapter(workspace, cacheTag, buildkitCache
         },
     });
     if (result !== 0) {
-        throw new Error(`boringcache docker --backend ${buildkitCacheBackend} failed with exit code ${result}`);
+        throw new Error(`boringcache docker failed with exit code ${result}`);
     }
 }
 function readDockerMetadata() {
@@ -98518,9 +98751,9 @@ function readDockerMetadata() {
         return { imageId: '', digest: '' };
     }
 }
-function materializeBuildkitTlsFiles(inputs, rootDir) {
+function materializeBuildkitTlsFiles(inputs) {
     let temporaryDirectory = '';
-    const workspaceRoot = path.resolve(rootDir);
+    const workspaceRoot = path.resolve(process.cwd());
     const physicalWorkspaceRoot = fs.realpathSync(workspaceRoot);
     const cleanup = () => {
         if (!temporaryDirectory) {
@@ -98536,28 +98769,32 @@ function materializeBuildkitTlsFiles(inputs, rootDir) {
         const candidate = path.resolve(workspaceRoot, value);
         // BuildKit TLS file inputs may name files only inside the checked-out workspace.
         // Absolute or parent-traversal values are treated as inline PEM content instead.
-        // codeql[js/path-injection]
+        const relativeCandidate = path.relative(workspaceRoot, candidate);
         let candidateStats;
-        try {
-            candidateStats = fs.lstatSync(candidate);
+        if (relativeCandidate === '..'
+            || relativeCandidate.startsWith(`..${path.sep}`)
+            || path.isAbsolute(relativeCandidate)) {
+            core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
         }
-        catch (error) {
-            if (error.code !== 'ENOENT') {
-                throw error;
+        else {
+            try {
+                candidateStats = fs.lstatSync(candidate);
+            }
+            catch (error) {
+                if (error.code !== 'ENOENT') {
+                    throw error;
+                }
             }
         }
         if (candidateStats) {
-            if (isPathInside(workspaceRoot, candidate)) {
-                if (candidateStats.isSymbolicLink() || !candidateStats.isFile()) {
-                    throw new Error(`BuildKit TLS ${filename} path must be a regular, non-symlink file inside the workspace.`);
-                }
-                const physicalCandidate = fs.realpathSync(candidate);
-                if (!isPathInside(physicalWorkspaceRoot, physicalCandidate)) {
-                    throw new Error(`BuildKit TLS ${filename} path resolves outside the workspace.`);
-                }
-                return physicalCandidate;
+            if (candidateStats.isSymbolicLink() || !candidateStats.isFile()) {
+                throw new Error(`BuildKit TLS ${filename} path must be a regular, non-symlink file inside the workspace.`);
             }
-            core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
+            const physicalCandidate = fs.realpathSync(candidate);
+            if (!isPathInside(physicalWorkspaceRoot, physicalCandidate)) {
+                throw new Error(`BuildKit TLS ${filename} path resolves outside the workspace.`);
+            }
+            return physicalCandidate;
         }
         if (!temporaryDirectory) {
             temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'boringcache-buildkit-tls-'));
@@ -98583,8 +98820,8 @@ function materializeBuildkitTlsFiles(inputs, rootDir) {
         throw error;
     }
 }
-async function buildWithMaterializedBuildkitTls(opts, inputs, rootDir) {
-    const tls = materializeBuildkitTlsFiles(inputs, rootDir);
+async function buildWithMaterializedBuildkitTls(opts, inputs) {
+    const tls = materializeBuildkitTlsFiles(inputs);
     try {
         await buildWithBuildctl({
             ...opts,
@@ -98684,10 +98921,6 @@ function buildctlArgs(opts) {
     }
     if (opts.exportCache) {
         args.push('--export-cache', opts.exportCache);
-    }
-    else if (opts.cacheDirFrom) {
-        args.push('--import-cache', `type=local,src=${opts.cacheDirFrom}`);
-        args.push('--export-cache', `type=local,dest=${opts.cacheDirTo},mode=${opts.cacheMode}`);
     }
     if (opts.output?.trim()) {
         args.push('--output', opts.output.trim());
@@ -99237,13 +99470,7 @@ async function runDockerRestore(plan, inputs) {
     const driver = core.getInput('driver') || 'docker-container';
     const driverOpts = parseMultiline(core.getInput('driver-opts') || '');
     const buildkitdConfigInline = core.getInput('buildkitd-config-inline') || '';
-    const cacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'registry');
-    const buildkitCacheBackend = buildKitCacheBackendFor(cacheBackend);
-    if (cacheBackend === 'boringcache' && !shouldBuild) {
-        throw new Error('cache-backend=boringcache requires docker-command=build so boringcache docker can own '
-            + 'the builder, build, and run evidence. Use cache-backend=registry for setup-only compatibility.');
-    }
-    const cliOwnsManagedBuild = cacheBackend === 'boringcache' && shouldBuild;
+    const cliOwnsManagedBuild = shouldBuild;
     if (cliOwnsManagedBuild) {
         assertPrivilegedRunnerPolicy('Managed BoringCache BuildKit');
     }
@@ -99253,13 +99480,9 @@ async function runDockerRestore(plan, inputs) {
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
     }
-    const registryTagInput = core.getInput('registry-tag') || '';
-    const registryRefTagInput = core.getInput('registry-ref-tag') || '';
     const localCacheTag = inputs.cacheTag || slugify(image);
-    const cacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
-    const registryCachePlan = usesRegistryCachePlan(cacheBackend);
-    let registryVerification = null;
-    let registryOciCache;
+    let buildKitVerification = null;
+    let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = localCacheTag;
@@ -99270,21 +99493,21 @@ async function runDockerRestore(plan, inputs) {
     let builderName = '';
     if (cliOwnsManagedBuild) {
         if (driver !== 'docker-container') {
-            throw new Error('cache-backend=boringcache owns its managed BuildKit daemon; leave driver set to docker-container.');
+            throw new Error('BoringCache owns its managed BuildKit daemon; leave driver set to docker-container.');
         }
         if (driverOpts.length > 0 || buildkitdConfigInline.trim()) {
-            throw new Error('cache-backend=boringcache owns its managed BuildKit daemon for docker-command=build; '
+            throw new Error('BoringCache owns its managed BuildKit daemon for docker-command=build; '
                 + 'use managed-buildkit-image instead of driver-opts and leave buildkitd-config-inline empty.');
         }
     }
     else {
-        builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryCachePlan, cacheBackend === 'boringcache', inputs.managedBuildkitImage);
+        builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, true, true, inputs.managedBuildkitImage);
     }
     saveModeState('builder-name', builderName);
     core.setOutput('buildx-name', builderName);
     core.setOutput('buildx-platforms', builderName ? await getBuilderPlatforms(builderName) : platforms);
     await setupQemuIfNeeded(platforms);
-    if (registryCachePlan) {
+    {
         let proxyBindHost = cliOwnsManagedBuild ? '' : '127.0.0.1';
         let refHost = cliOwnsManagedBuild ? '' : '127.0.0.1';
         if (!cliOwnsManagedBuild && driver === 'docker-container') {
@@ -99299,16 +99522,16 @@ async function runDockerRestore(plan, inputs) {
         // a free runner port instead of assuming the conventional setup-only
         // port is unused. Setup-only keeps 5000 for its externally consumed refs.
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', cliOwnsManagedBuild ? undefined : 5000);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, buildkitCacheBackend, dockerToolCache);
-        const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, localCacheTag, requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, cacheMode, inputs.metadataHints, dockerToolCache);
+        const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const usesCliWrappedBuild = cliOwnsManagedBuild || dockerToolCaches.length > 0;
         if (usesCliWrappedBuild) {
-            const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
+            const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
             resolvedWorkspace = planState.resolvedWorkspace;
             resolvedCacheTag = planState.resolvedCacheTag;
-            registryVerification = planState.registryVerification;
-            registryOciCache = planState.registryOciCache;
+            buildKitVerification = planState.buildKitVerification;
+            buildKitCacheState = planState.buildKitCacheState;
             let readinessProxy;
             if (cliOwnsManagedBuild && inputs.requireOciImportReady) {
                 readinessProxy = await startRegistryProxy(actionProxyOptions({
@@ -99326,18 +99549,18 @@ async function runDockerRestore(plan, inputs) {
                 }, dockerPlan.proxy, true));
                 await stopRegistryProxy(readinessProxy.pid, readinessProxy.port);
             }
-            const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache, readinessProxy);
-            setRegistryCacheOutputs({
-                ref: dockerPlan.oci_cache.registry_ref,
+            const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, readinessProxy);
+            setBuildKitCacheOutputs({
+                ref: dockerPlan.buildkit_cache.cache_ref,
                 from: effectiveImports.importSpecs,
-                to: dockerPlan.oci_cache.cache_to,
-                ociCache: dockerPlan.oci_cache,
+                to: dockerPlan.buildkit_cache.cache_to,
+                buildKitCache: dockerPlan.buildkit_cache,
                 usedRefTags: effectiveImports.readableRefTags,
                 unreadableRefTags: effectiveImports.unreadableRefTags,
                 importReady: effectiveImports.importReady,
             });
             if (shouldBuild) {
-                await runDockerBuildOperation(() => buildDockerImageWithCliAdapter(dockerPlan.workspace, getEffectiveRegistryTag(localCacheTag, registryTagInput), buildkitCacheBackend, requestedPort, proxyBindHost, refHost, inputs, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, {
+                await runDockerBuildOperation(() => buildDockerImageWithCliAdapter(dockerPlan.workspace, localCacheTag, requestedPort, proxyBindHost, refHost, inputs, cacheMode, {
                     dockerfile,
                     context,
                     image,
@@ -99355,7 +99578,7 @@ async function runDockerRestore(plan, inputs) {
                     cacheMode,
                 }));
             }
-            modeEvidence = registryCacheEvidence('docker', dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
+            modeEvidence = buildKitCacheEvidence('docker', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
         }
         else {
             const proxy = await startRegistryProxy(actionProxyOptions({
@@ -99370,26 +99593,26 @@ async function runDockerRestore(plan, inputs) {
                 readOnly: dockerPlan.proxy.read_only,
                 ociRequiredReadableRefs: requestedImportRefTags,
                 requireOciImportReady: inputs.requireOciImportReady,
-                ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
+                ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
             }, dockerPlan.proxy));
             saveModeState('proxy-pid', String(proxy.pid));
             saveProxyModeState(proxy.port);
             saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
             saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
             saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
-            saveModeState('oci-promotion-ref-tags', (dockerPlan.oci_cache?.promotion_ref_tags || []).join(','));
+            saveModeState('oci-promotion-ref-tags', (dockerPlan.buildkit_cache?.promotion_ref_tags || []).join(','));
             setProxyOutputs(proxy.port);
-            const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
+            const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
             resolvedWorkspace = planState.resolvedWorkspace;
             resolvedCacheTag = planState.resolvedCacheTag;
-            registryVerification = planState.registryVerification;
-            registryOciCache = planState.registryOciCache;
-            const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache, proxy);
-            setRegistryCacheOutputs({
-                ref: dockerPlan.oci_cache.registry_ref,
+            buildKitVerification = planState.buildKitVerification;
+            buildKitCacheState = planState.buildKitCacheState;
+            const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
+            setBuildKitCacheOutputs({
+                ref: dockerPlan.buildkit_cache.cache_ref,
                 from: effectiveImports.importSpecs,
-                to: dockerPlan.oci_cache.cache_to,
-                ociCache: dockerPlan.oci_cache,
+                to: dockerPlan.buildkit_cache.cache_to,
+                buildKitCache: dockerPlan.buildkit_cache,
                 usedRefTags: effectiveImports.readableRefTags,
                 unreadableRefTags: effectiveImports.unreadableRefTags,
                 importReady: effectiveImports.importReady,
@@ -99412,45 +99635,10 @@ async function runDockerRestore(plan, inputs) {
                     builder: builderName,
                     cacheMode,
                     cacheFrom: effectiveImports.importSpecs,
-                    cacheTo: dockerPlan.oci_cache.cache_to,
+                    cacheTo: dockerPlan.buildkit_cache.cache_to,
                 }));
             }
-            modeEvidence = registryCacheEvidence('docker', dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
-        }
-    }
-    else {
-        ensureDir(DOCKER_CACHE_DIR_FROM);
-        ensureDir(DOCKER_CACHE_DIR_TO);
-        saveModeState('cache-dir', DOCKER_CACHE_DIR_TO);
-        await restoreSimpleCache(plan.workspace, localCacheTag, DOCKER_CACHE_DIR_FROM, cacheFlags);
-        setLocalCacheOutputs(DOCKER_CACHE_DIR_FROM, DOCKER_CACHE_DIR_TO, cacheMode);
-        modeEvidence = {
-            adapter: 'docker',
-            cache_backend: 'local',
-            cache_dir_from: DOCKER_CACHE_DIR_FROM,
-            cache_dir_to: DOCKER_CACHE_DIR_TO,
-            import_ready: true,
-        };
-        if (shouldBuild) {
-            await runDockerBuildOperation(() => buildDockerImage({
-                dockerfile,
-                context,
-                image,
-                tags,
-                buildArgs,
-                secrets,
-                target,
-                platforms,
-                push,
-                load,
-                noCache,
-                provenance,
-                sbom,
-                builder: builderName,
-                cacheMode,
-                cacheDirFrom: DOCKER_CACHE_DIR_FROM,
-                cacheDirTo: DOCKER_CACHE_DIR_TO,
-            }));
+            modeEvidence = buildKitCacheEvidence('docker', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
         }
     }
     if (shouldBuild) {
@@ -99460,13 +99648,13 @@ async function runDockerRestore(plan, inputs) {
     }
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = registryVerification?.saveExpected ?? !inputs.readOnly;
+    const saveExpected = buildKitVerification?.saveExpected ?? !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         evidence: modeEvidence,
         // docker-command=setup defers the build to later workflow steps, so treat
         // write-capable registry refs as save-expected and verify after post-save.
-        verificationSpecs: registryCacheVerificationSpecs(resolvedCacheTag, registryOciCache, registryVerification?.noPlatform || false, registryVerification?.noGit || false, saveExpected, plan.workingDirectory),
+        verificationSpecs: buildKitCacheVerificationSpecs(resolvedCacheTag, buildKitCacheState, buildKitVerification?.noPlatform || false, buildKitVerification?.noGit || false, saveExpected, plan.workingDirectory),
     };
 }
 async function runDockerSave(options = {}) {
@@ -99503,7 +99691,6 @@ async function runDockerSave(options = {}) {
     }
 }
 async function runBuildkitRestore(plan, inputs) {
-    const workspaceRoot = process.env.GITHUB_WORKSPACE || plan.workingDirectory;
     const contextInput = core.getInput('context') || '.';
     const contextPath = path.resolve(plan.workingDirectory, contextInput);
     const dockerfileInput = core.getInput('dockerfile') || 'Dockerfile';
@@ -99533,15 +99720,9 @@ async function runBuildkitRestore(plan, inputs) {
     const tlsCertInput = core.getInput('buildkit-tls-cert') || '';
     const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBooleanInput(core.getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
-    const cacheBackend = normalizeDockerCacheBackend(core.getInput('cache-backend') || 'registry');
-    const buildkitCacheBackend = buildKitCacheBackendFor(cacheBackend);
-    const registryTagInput = core.getInput('registry-tag') || '';
-    const registryRefTagInput = core.getInput('registry-ref-tag') || '';
     const localCacheTag = inputs.cacheTag || slugify(image);
-    const cacheFlags = { verbose: inputs.verbose, exclude: inputs.exclude };
-    const registryCachePlan = usesRegistryCachePlan(cacheBackend);
-    let registryVerification = null;
-    let registryOciCache;
+    let buildKitVerification = null;
+    let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = localCacheTag;
@@ -99553,7 +99734,7 @@ async function runBuildkitRestore(plan, inputs) {
         fs.rmSync(BUILDKIT_METADATA_FILE);
     }
     await installBuildctl();
-    if (registryCachePlan) {
+    {
         let proxyBindHost = '127.0.0.1';
         let refHost = '127.0.0.1';
         if (buildkitHost.startsWith('docker-container://')) {
@@ -99565,8 +99746,8 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
-        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, getEffectiveRegistryTag(localCacheTag, registryTagInput), requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, cacheMode, registryRefTagInput || DEFAULT_REGISTRY_CACHE_REF_TAG, inputs.ociHydration, inputs.metadataHints, buildkitCacheBackend);
-        const requestedImportRefTags = registryCacheFromRefTags(dockerPlan.oci_cache);
+        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, localCacheTag, requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, cacheMode, inputs.metadataHints);
+        const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await startRegistryProxy(actionProxyOptions({
             command: 'cache-registry',
@@ -99580,26 +99761,26 @@ async function runBuildkitRestore(plan, inputs) {
             readOnly: dockerPlan.proxy.read_only,
             ociRequiredReadableRefs: requestedImportRefTags,
             requireOciImportReady: inputs.requireOciImportReady,
-            ociAliasPromotionRefs: dockerPlan.oci_cache?.promotion_ref_tags || [],
+            ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
         saveProxyModeState(proxy.port);
         saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
         saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
         saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
-        saveModeState('oci-promotion-ref-tags', (dockerPlan.oci_cache?.promotion_ref_tags || []).join(','));
+        saveModeState('oci-promotion-ref-tags', (dockerPlan.buildkit_cache?.promotion_ref_tags || []).join(','));
         setProxyOutputs(proxy.port);
-        const planState = recordOciRegistryPlanState(dockerPlan, cacheTag);
+        const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
         resolvedWorkspace = planState.resolvedWorkspace;
         resolvedCacheTag = planState.resolvedCacheTag;
-        registryVerification = planState.registryVerification;
-        registryOciCache = planState.registryOciCache;
-        const effectiveImports = effectiveRegistryCacheImports(dockerPlan.oci_cache, proxy);
-        setRegistryCacheOutputs({
-            ref: dockerPlan.oci_cache.registry_ref,
+        buildKitVerification = planState.buildKitVerification;
+        buildKitCacheState = planState.buildKitCacheState;
+        const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
+        setBuildKitCacheOutputs({
+            ref: dockerPlan.buildkit_cache.cache_ref,
             from: effectiveImports.importSpecs,
-            to: dockerPlan.oci_cache.cache_to,
-            ociCache: dockerPlan.oci_cache,
+            to: dockerPlan.buildkit_cache.cache_to,
+            buildKitCache: dockerPlan.buildkit_cache,
             usedRefTags: effectiveImports.readableRefTags,
             unreadableRefTags: effectiveImports.unreadableRefTags,
             importReady: effectiveImports.importReady,
@@ -99617,57 +99798,23 @@ async function runBuildkitRestore(plan, inputs) {
             platforms,
             cacheMode,
             importCache: effectiveImports.importSpecs,
-            exportCache: dockerPlan.oci_cache.cache_to,
+            exportCache: dockerPlan.buildkit_cache.cache_to,
             output,
             imageTags,
             push,
             noCache,
             metadataFile: BUILDKIT_METADATA_FILE,
-        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput }, workspaceRoot);
-        modeEvidence = registryCacheEvidence('buildkit', dockerPlan.oci_cache, effectiveImports, dockerPlan.oci_cache.cache_to);
-    }
-    else {
-        ensureDir(BUILDKIT_CACHE_DIR_FROM);
-        ensureDir(BUILDKIT_CACHE_DIR_TO);
-        saveModeState('cache-dir', BUILDKIT_CACHE_DIR_TO);
-        await restoreSimpleCache(plan.workspace, localCacheTag, BUILDKIT_CACHE_DIR_FROM, cacheFlags);
-        setLocalCacheOutputs(BUILDKIT_CACHE_DIR_FROM, BUILDKIT_CACHE_DIR_TO, cacheMode);
-        modeEvidence = {
-            adapter: 'buildkit',
-            cache_backend: 'local',
-            cache_dir_from: BUILDKIT_CACHE_DIR_FROM,
-            cache_dir_to: BUILDKIT_CACHE_DIR_TO,
-            import_ready: true,
-        };
-        await buildWithMaterializedBuildkitTls({
-            addr: buildkitHost,
-            tlsSkipVerify,
-            contextPath,
-            dockerfileDir,
-            dockerfileName,
-            buildArgs,
-            secrets,
-            sshSpecs,
-            target,
-            platforms,
-            cacheMode,
-            cacheDirFrom: BUILDKIT_CACHE_DIR_FROM,
-            cacheDirTo: BUILDKIT_CACHE_DIR_TO,
-            output,
-            imageTags,
-            push,
-            noCache,
-            metadataFile: BUILDKIT_METADATA_FILE,
-        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput }, workspaceRoot);
+        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput });
+        modeEvidence = buildKitCacheEvidence('buildkit', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
     }
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = registryVerification?.saveExpected ?? !inputs.readOnly;
+    const saveExpected = buildKitVerification?.saveExpected ?? !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         evidence: modeEvidence,
-        verificationSpecs: registryCacheVerificationSpecs(resolvedCacheTag, registryOciCache, registryVerification?.noPlatform || false, registryVerification?.noGit || false, saveExpected, plan.workingDirectory),
+        verificationSpecs: buildKitCacheVerificationSpecs(resolvedCacheTag, buildKitCacheState, buildKitVerification?.noPlatform || false, buildKitVerification?.noGit || false, saveExpected, plan.workingDirectory),
     };
 }
 async function runBuildkitSave(options = {}) {
@@ -100285,9 +100432,12 @@ function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
         return '';
     }
-    return inputs_parseEntries(entriesString, 'restore', { resolvePaths: false })
+    return inputs_parseEntries(entriesString, 'restore', {
+        resolvePaths: false,
+        separatorMode: 'newline',
+    })
         .map((entry) => `${entry.tag}:${entry.savePath}`)
-        .join(',');
+        .join('\n');
 }
 function parseSavedVerificationSpecs(raw) {
     if (!raw.trim()) {
@@ -100317,6 +100467,22 @@ function parseSavedVerificationSpecs(raw) {
 function filterVerifiableSpecs(specs) {
     return specs.filter((spec) => !spec.pathHint || external_fs_namespaceObject.existsSync(spec.pathHint));
 }
+function parseSavedExcludes(raw, legacy) {
+    if (raw.trim()) {
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        }
+        catch {
+            throw new Error('Saved BoringCache exclusion state is invalid JSON; refusing to save a cache with dropped or changed exclusions.');
+        }
+        if (!Array.isArray(parsed) || !parsed.every((pattern) => typeof pattern === 'string')) {
+            throw new Error('Saved BoringCache exclusion state is not a string array; refusing to save a cache with dropped or changed exclusions.');
+        }
+        return parsed;
+    }
+    return splitExcludeInput(legacy);
+}
 function buildCliSetupOptions(inputs, cliVersion, cliPlatform) {
     return {
         version: cliVersion,
@@ -100340,7 +100506,10 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
             noGit: true,
         }));
     }
-    const entrySpecs = inputs_parseEntries(entriesString, 'restore', { resolvePaths: false })
+    const entrySpecs = inputs_parseEntries(entriesString, 'restore', {
+        resolvePaths: false,
+        separatorMode: 'newline',
+    })
         .map((entry) => ({
         tag: entry.tag,
         noPlatform,
@@ -100406,20 +100575,24 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
 async function run() {
     const originalCwd = process.cwd();
     let postFailureContext = {};
+    let strictPostFailure = false;
     try {
         const inputs = getInputs();
+        strictPostFailure = inputs.failOnCacheError;
         const cliVersion = getState('cli-version') || inputs.cliVersion;
+        let cliCapabilityVersion = getState('cli-capability-version');
         const cliPlatform = getState('cli-platform') || inputs.cliPlatform || undefined;
         let resolvedMode = getState('resolved-mode');
         let workingDirectory = getState('working-directory');
         let genericEntries = getState('generic-cache-entries');
         let genericWorkspace = getState('generic-cache-workspace');
-        let exclude = getState('generic-cache-exclude');
+        let excludes = parseSavedExcludes(getState('generic-cache-excludes'), getState('generic-cache-exclude'));
         let noPlatform = getState('no-platform') === 'true';
         let enableCrossOsArchive = getState('enableCrossOsArchive') === 'true';
         let force = getState('force') === 'true';
         let verbose = getState('verbose') === 'true';
         const verifyMode = (getState('verify-mode') || inputs.verify);
+        strictPostFailure ||= verifyMode === 'check';
         const verifyTimeoutSeconds = normalizeVerifyTimeoutSeconds(getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
         const verifyRequireServerSignature = getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = readSavedSaveConfiguration(inputs, getState('save-configured'));
@@ -100449,8 +100622,15 @@ async function run() {
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
         }
+        if (!cliCapabilityVersion) {
+            cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);
+        }
         if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
-            const plan = await buildPlan({ ...inputs, readOnly: inputs.readOnly || !saveAllowed });
+            const plan = await buildPlan({
+                ...inputs,
+                cliVersion: cliCapabilityVersion,
+                readOnly: inputs.readOnly || !saveAllowed,
+            });
             resolvedMode = plan.mode;
             if (!workingDirectory) {
                 workingDirectory = plan.workingDirectory;
@@ -100461,9 +100641,9 @@ async function run() {
             if (!genericEntries) {
                 genericEntries = [plan.runtimeEntry, toSaveEntries(plan.archiveEntries)]
                     .filter(Boolean)
-                    .join(',');
+                    .join('\n');
             }
-            exclude = inputs.exclude;
+            excludes = plan.archiveExcludes;
             noPlatform = inputs.noPlatform;
             enableCrossOsArchive = inputs.enableCrossOsArchive;
             force = inputs.force;
@@ -100533,20 +100713,45 @@ async function run() {
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_no_generic_save' : 'no_generic_save');
             return;
         }
-        const args = ['save', genericWorkspace, genericEntries];
+        const saveEntries = inputs_parseEntries(genericEntries, 'save', {
+            resolvePaths: false,
+            separatorMode: 'newline',
+        })
+            .map((entry) => `${entry.tag}:${entry.savePath}`);
+        const portableArchiveArgs = supportsPortableArchiveArgs(cliCapabilityVersion);
+        if (enableCrossOsArchive) {
+            assertCrossOsArchiveTransportSupported(cliCapabilityVersion);
+        }
+        const args = ['save', genericWorkspace];
+        if (portableArchiveArgs) {
+            for (const entry of saveEntries) {
+                args.push('--entry', entry);
+            }
+        }
+        else {
+            assertLegacyArchiveEntriesAreLossless(saveEntries, 'save');
+            args.push(saveEntries.join(','));
+        }
         if (force) {
             args.push('--force');
         }
         if (enableCrossOsArchive || noPlatform) {
             args.push('--no-platform');
         }
+        if (enableCrossOsArchive) {
+            args.push('--archive-transport');
+        }
         if (verbose) {
             args.push('--verbose');
         }
-        if (exclude) {
-            args.push('--exclude', exclude);
+        appendSaveExcludeArgs(args, excludes, cliCapabilityVersion);
+        if (inputs.failOnCacheError) {
+            args.push('--fail-on-cache-error');
         }
-        args.push('--fail-on-cache-error');
+        if (inputs.allowExternalSymlinks) {
+            assertExternalSymlinkRoundTripSupported(cliCapabilityVersion);
+            args.push('--allow-external-symlinks');
+        }
         await execBoringCache(args);
         const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
         if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
@@ -100562,7 +100767,13 @@ async function run() {
     }
     catch (error) {
         writeActionFailureEvidence('post', error, postFailureContext);
-        setFailed(`boringcache/one save failed: ${actionErrorMessage(error)}`);
+        const message = `boringcache/one save failed: ${actionErrorMessage(error)}`;
+        if (strictPostFailure) {
+            setFailed(message);
+        }
+        else {
+            warning(`${message}. The build remains successful because fail-on-cache-error is false.`);
+        }
     }
     finally {
         process.chdir(originalCwd);
