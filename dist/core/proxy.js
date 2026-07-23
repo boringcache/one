@@ -257,7 +257,7 @@ export async function waitForOciRefsReadable(host, port, requestedRefs, timeoutM
 }
 export function logOciImportReadiness(readiness) {
     if (readiness.ready) {
-        core.info(`BoringCache proxy OCI import refs are readable: ${readiness.readableRefs.join(', ')}`);
+        core.info(`BoringCache managed cache import refs are readable: ${readiness.readableRefs.join(', ')}`);
         return;
     }
     const statusSuffix = [
@@ -272,9 +272,9 @@ export function logOciImportReadiness(readiness) {
     ]
         .filter(Boolean)
         .join(' ');
-    const message = `BoringCache proxy became ready before OCI import refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
+    const message = `BoringCache managed cache became ready before planned restore refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
     if (readiness.readableRefs.length === 0) {
-        core.notice(`${message}. Continuing without registry imports; this is expected for cold seed jobs.`);
+        core.notice(`${message}. Continuing without cache imports; this is expected for cold seed jobs.`);
         return;
     }
     core.warning(message);
@@ -284,9 +284,9 @@ export function assertOciImportReady(readiness) {
         return;
     }
     if (readiness.readableRefs.length === 0) {
-        throw new Error(`No OCI cache import refs were readable. requested=[${readiness.requestedRefs.join(', ')}]`);
+        throw new Error(`No managed cache import refs were readable. requested=[${readiness.requestedRefs.join(', ')}]`);
     }
-    throw new Error(`Some OCI cache import refs were unreadable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
+    throw new Error(`Some managed cache import refs were unreadable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]`);
 }
 /**
  * Start the BoringCache proxy.
@@ -397,7 +397,7 @@ export async function startRegistryProxy(options) {
             };
         }
         if (options.requireOciImportReady) {
-            throw new Error('No OCI cache import refs were requested while require-oci-import-ready was enabled.');
+            throw new Error('No managed cache import refs were requested while strict import readiness was enabled.');
         }
         return handle;
     }

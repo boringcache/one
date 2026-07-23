@@ -61,27 +61,52 @@ export function resolvePaths(pathInput, baseDir) {
 export function parseEntries(entriesInput, _action, options = {}) {
     const shouldResolve = options.resolvePaths ?? true;
     const baseDir = options.baseDir;
-    return entriesInput
-        .split(/\r?\n|,/)
-        .map(entry => entry.trim())
-        .filter(entry => entry)
+    const separatorMode = options.separatorMode ?? 'legacy';
+    const entrySpecs = [];
+    let current = '';
+    for (let index = 0; index < entriesInput.length; index += 1) {
+        const character = entriesInput[index];
+        if (separatorMode === 'legacy'
+            && character === '\\'
+            && entriesInput[index + 1] === ',') {
+            current += ',';
+            index += 1;
+        }
+        else if ((character === ',' && separatorMode === 'legacy')
+            || (character === '\n' && separatorMode !== 'single')) {
+            entrySpecs.push(current);
+            current = '';
+        }
+        else if (character !== '\r') {
+            current += character;
+        }
+    }
+    entrySpecs.push(current);
+    return entrySpecs
+        .filter(entry => entry.trim())
         .map(entry => {
         const colonIndex = entry.indexOf(':');
         if (colonIndex === -1) {
             throw new Error(`Invalid entry format: ${entry}. Expected format: tag:path or tag:restore_path=>save_path`);
         }
         const tag = entry.substring(0, colonIndex).trim();
-        const pathSpec = entry.substring(colonIndex + 1).trim();
+        const rawPathSpec = entry.substring(colonIndex + 1);
+        const pathSpec = shouldResolve ? rawPathSpec.trim() : rawPathSpec;
         if (!tag) {
             throw new Error(`Invalid entry format: ${entry}. Tag cannot be empty`);
+        }
+        if (!pathSpec.trim()) {
+            throw new Error(`Invalid entry format: ${entry}. Path cannot be empty`);
         }
         let restorePathInput = pathSpec;
         let savePathInput = pathSpec;
         const redirectIndex = pathSpec.indexOf('=>');
         if (redirectIndex !== -1) {
-            restorePathInput = pathSpec.substring(0, redirectIndex).trim();
-            savePathInput = pathSpec.substring(redirectIndex + 2).trim();
-            if (!restorePathInput || !savePathInput) {
+            const rawRestorePath = pathSpec.substring(0, redirectIndex);
+            const rawSavePath = pathSpec.substring(redirectIndex + 2);
+            restorePathInput = shouldResolve ? rawRestorePath.trim() : rawRestorePath;
+            savePathInput = shouldResolve ? rawSavePath.trim() : rawSavePath;
+            if (!restorePathInput.trim() || !savePathInput.trim()) {
                 throw new Error(`Invalid entry format: ${entry}. Expected restore and save paths when using => syntax`);
             }
         }
