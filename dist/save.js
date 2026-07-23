@@ -1,15 +1,18 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { hasSaveToken, missingSaveTokenMessage } from './core';
-import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyPullRequestSaveScopeEnv, isPullRequestEvent, loadDiagnosticsConfig, readLogTail, readSavedSaveAllowance, readSavedSaveConfiguration, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, saveSkippedByConfigurationMessage, saveSkippedByPolicyMessage, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { actionErrorMessage, appendSaveExcludeArgs, assertCrossOsArchiveTransportSupported, assertExternalSymlinkRoundTripSupported, assertLegacyArchiveEntriesAreLossless, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyPullRequestSaveScopeEnv, isPullRequestEvent, loadDiagnosticsConfig, readLogTail, readSavedSaveAllowance, readSavedSaveConfiguration, resolveCliCapabilityVersion, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, saveSkippedByConfigurationMessage, saveSkippedByPolicyMessage, supportsPortableArchiveArgs, splitExcludeInput, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { runModeSave } from './mode-handlers';
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
         return '';
     }
-    return parseEntries(entriesString, 'restore', { resolvePaths: false })
+    return parseEntries(entriesString, 'restore', {
+        resolvePaths: false,
+        separatorMode: 'newline',
+    })
         .map((entry) => `${entry.tag}:${entry.savePath}`)
-        .join(',');
+        .join('\n');
 }
 function parseSavedVerificationSpecs(raw) {
     if (!raw.trim()) {
@@ -39,6 +42,22 @@ function parseSavedVerificationSpecs(raw) {
 function filterVerifiableSpecs(specs) {
     return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
 }
+function parseSavedExcludes(raw, legacy) {
+    if (raw.trim()) {
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        }
+        catch {
+            throw new Error('Saved BoringCache exclusion state is invalid JSON; refusing to save a cache with dropped or changed exclusions.');
+        }
+        if (!Array.isArray(parsed) || !parsed.every((pattern) => typeof pattern === 'string')) {
+            throw new Error('Saved BoringCache exclusion state is not a string array; refusing to save a cache with dropped or changed exclusions.');
+        }
+        return parsed;
+    }
+    return splitExcludeInput(legacy);
+}
 function buildCliSetupOptions(inputs, cliVersion, cliPlatform) {
     return {
         version: cliVersion,
@@ -62,7 +81,10 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
             noGit: true,
         }));
     }
-    const entrySpecs = parseEntries(entriesString, 'restore', { resolvePaths: false })
+    const entrySpecs = parseEntries(entriesString, 'restore', {
+        resolvePaths: false,
+        separatorMode: 'newline',
+    })
         .map((entry) => ({
         tag: entry.tag,
         noPlatform,
@@ -128,20 +150,24 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
 export async function run() {
     const originalCwd = process.cwd();
     let postFailureContext = {};
+    let strictPostFailure = false;
     try {
         const inputs = getInputs();
+        strictPostFailure = inputs.failOnCacheError;
         const cliVersion = core.getState('cli-version') || inputs.cliVersion;
+        let cliCapabilityVersion = core.getState('cli-capability-version');
         const cliPlatform = core.getState('cli-platform') || inputs.cliPlatform || undefined;
         let resolvedMode = core.getState('resolved-mode');
         let workingDirectory = core.getState('working-directory');
         let genericEntries = core.getState('generic-cache-entries');
         let genericWorkspace = core.getState('generic-cache-workspace');
-        let exclude = core.getState('generic-cache-exclude');
+        let excludes = parseSavedExcludes(core.getState('generic-cache-excludes'), core.getState('generic-cache-exclude'));
         let noPlatform = core.getState('no-platform') === 'true';
         let enableCrossOsArchive = core.getState('enableCrossOsArchive') === 'true';
         let force = core.getState('force') === 'true';
         let verbose = core.getState('verbose') === 'true';
         const verifyMode = (core.getState('verify-mode') || inputs.verify);
+        strictPostFailure ||= verifyMode === 'check';
         const verifyTimeoutSeconds = normalizeVerifyTimeoutSeconds(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const saveConfigured = readSavedSaveConfiguration(inputs, core.getState('save-configured'));
@@ -171,8 +197,15 @@ export async function run() {
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
         }
+        if (!cliCapabilityVersion) {
+            cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);
+        }
         if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
-            const plan = await buildPlan({ ...inputs, readOnly: inputs.readOnly || !saveAllowed });
+            const plan = await buildPlan({
+                ...inputs,
+                cliVersion: cliCapabilityVersion,
+                readOnly: inputs.readOnly || !saveAllowed,
+            });
             resolvedMode = plan.mode;
             if (!workingDirectory) {
                 workingDirectory = plan.workingDirectory;
@@ -183,9 +216,9 @@ export async function run() {
             if (!genericEntries) {
                 genericEntries = [plan.runtimeEntry, toSaveEntries(plan.archiveEntries)]
                     .filter(Boolean)
-                    .join(',');
+                    .join('\n');
             }
-            exclude = inputs.exclude;
+            excludes = plan.archiveExcludes;
             noPlatform = inputs.noPlatform;
             enableCrossOsArchive = inputs.enableCrossOsArchive;
             force = inputs.force;
@@ -255,20 +288,45 @@ export async function run() {
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_no_generic_save' : 'no_generic_save');
             return;
         }
-        const args = ['save', genericWorkspace, genericEntries];
+        const saveEntries = parseEntries(genericEntries, 'save', {
+            resolvePaths: false,
+            separatorMode: 'newline',
+        })
+            .map((entry) => `${entry.tag}:${entry.savePath}`);
+        const portableArchiveArgs = supportsPortableArchiveArgs(cliCapabilityVersion);
+        if (enableCrossOsArchive) {
+            assertCrossOsArchiveTransportSupported(cliCapabilityVersion);
+        }
+        const args = ['save', genericWorkspace];
+        if (portableArchiveArgs) {
+            for (const entry of saveEntries) {
+                args.push('--entry', entry);
+            }
+        }
+        else {
+            assertLegacyArchiveEntriesAreLossless(saveEntries, 'save');
+            args.push(saveEntries.join(','));
+        }
         if (force) {
             args.push('--force');
         }
         if (enableCrossOsArchive || noPlatform) {
             args.push('--no-platform');
         }
+        if (enableCrossOsArchive) {
+            args.push('--archive-transport');
+        }
         if (verbose) {
             args.push('--verbose');
         }
-        if (exclude) {
-            args.push('--exclude', exclude);
+        appendSaveExcludeArgs(args, excludes, cliCapabilityVersion);
+        if (inputs.failOnCacheError) {
+            args.push('--fail-on-cache-error');
         }
-        args.push('--fail-on-cache-error');
+        if (inputs.allowExternalSymlinks) {
+            assertExternalSymlinkRoundTripSupported(cliCapabilityVersion);
+            args.push('--allow-external-symlinks');
+        }
         await execBoringCache(args);
         const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
         if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
@@ -284,7 +342,13 @@ export async function run() {
     }
     catch (error) {
         writeActionFailureEvidence('post', error, postFailureContext);
-        core.setFailed(`boringcache/one save failed: ${actionErrorMessage(error)}`);
+        const message = `boringcache/one save failed: ${actionErrorMessage(error)}`;
+        if (strictPostFailure) {
+            core.setFailed(message);
+        }
+        else {
+            core.warning(`${message}. The build remains successful because fail-on-cache-error is false.`);
+        }
     }
     finally {
         process.chdir(originalCwd);
