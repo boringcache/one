@@ -11,11 +11,19 @@ Turbo, Nx, and Rust `sccache`.
 - uses: boringcache/one@b55458ec8a4165e3fd70b1a1645f518a2095ed02 # v1.13.99
   with:
     workspace: my-org/my-project
-    entries: deps:node_modules,build:dist
+    entries: |
+      deps:node_modules
+      build:dist
   env:
     BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name != 'pull_request' && secrets.BORINGCACHE_SAVE_TOKEN || '' }}
 ```
+
+Archive entries preserve regular files, directories, symlinks, hard links, and
+sparse files. Unsupported kernel objects or destination names and metadata that
+cannot be represented safely fail explicitly rather than being silently
+dropped. See [archive entries and cache inputs](docs/cache-inputs.md) for
+literal exclusions, cross-OS archives, and external-symlink policy.
 
 Docker mode:
 
