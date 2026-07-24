@@ -8,7 +8,7 @@ import { DEFAULT_OCI_HYDRATION_POLICY, detectNodePackageManager, normalizeVerify
 import { readSha256File, verifySha256 } from './core/integrity';
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:2f6ddc6319f598180955e89e3a846b259b216458d528912c1477700670c96869';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:edb388a8cfd12c51a3169d27a2bf361312d18ea1bf8c955c2ffc31b68eb5928e';
 const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
 const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
 const BUILDCTL_VERSION = 'v0.31.2';

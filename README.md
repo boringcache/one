@@ -8,7 +8,7 @@ Turbo, Nx, and Rust `sccache`.
 ## Quick start
 
 ```yaml
-- uses: boringcache/one@69148b23ecd21ae9fc86afb15b23a014c2609037 # v1.13.101
+- uses: boringcache/one@58df2c0d6884ecd5e430feeeaf7e477656864771 # v1.13.102
   with:
     workspace: my-org/my-project
     entries: |
@@ -30,7 +30,7 @@ platform scoping.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@69148b23ecd21ae9fc86afb15b23a014c2609037 # v1.13.101
+- uses: boringcache/one@58df2c0d6884ecd5e430feeeaf7e477656864771 # v1.13.102
   with:
     mode: docker
     workspace: my-org/my-project
@@ -53,7 +53,7 @@ The shipped input and output contract is in [`action.yml`](action.yml).
 
 ## Updates
 
-The examples pin the reviewed `v1.13.101` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.13.102` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
