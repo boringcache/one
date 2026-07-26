@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.103'
+    default: 'v1.13.104'
     required: false
   cli-platform:
     description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
@@ -160,7 +160,7 @@ inputs:
     required: false
   managed-buildkit-image:
     description: 'Managed BoringCache BuildKit image. Defaults to the signed release digest; pass an explicit digest for canaries.'
-    default: 'ghcr.io/boringcache/buildkit@sha256:edb388a8cfd12c51a3169d27a2bf361312d18ea1bf8c955c2ffc31b68eb5928e'
+    default: 'ghcr.io/boringcache/buildkit@sha256:9b44a5426d7e32db41584c8d7d9f5251b0ad8348427e15849b541418030e7dab'
     required: false
   cache-mode:
     description: 'Build cache mode for Docker or BuildKit. Must be min or max.'

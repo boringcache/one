@@ -98619,7 +98619,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.13.103',
+        cliVersion: getInput('cli-version') || 'v1.13.104',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -98649,7 +98649,7 @@ function getInputs() {
         proxyPort: getInput('proxy-port'),
         proxyNoGit: getBooleanInput('proxy-no-git'),
         proxyNoPlatform: getBooleanInput('proxy-no-platform'),
-        managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:edb388a8cfd12c51a3169d27a2bf361312d18ea1bf8c955c2ffc31b68eb5928e',
+        managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:9b44a5426d7e32db41584c8d7d9f5251b0ad8348427e15849b541418030e7dab',
         dockerToolCache: getInput('docker-tool-cache'),
         cacheProfiles: getInput('cache-profiles'),
         entries: getInput('entries', { trimWhitespace: false }),
@@ -101136,7 +101136,7 @@ async function integrity_verifySha256(filePath, expectedDigest, assetName) {
 
 const DOCKER_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'boringcache-one-docker-metadata.json');
 const BUILDKIT_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-metadata.json');
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:edb388a8cfd12c51a3169d27a2bf361312d18ea1bf8c955c2ffc31b68eb5928e';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:9b44a5426d7e32db41584c8d7d9f5251b0ad8348427e15849b541418030e7dab';
 const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
 const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
 const BUILDCTL_VERSION = 'v0.31.2';

@@ -40,7 +40,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.103',
+        cliVersion: core.getInput('cli-version') || 'v1.13.104',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -70,7 +70,7 @@ export function getInputs() {
         proxyPort: core.getInput('proxy-port'),
         proxyNoGit: core.getBooleanInput('proxy-no-git'),
         proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
-        managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:edb388a8cfd12c51a3169d27a2bf361312d18ea1bf8c955c2ffc31b68eb5928e',
+        managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:9b44a5426d7e32db41584c8d7d9f5251b0ad8348427e15849b541418030e7dab',
         dockerToolCache: core.getInput('docker-tool-cache'),
         cacheProfiles: core.getInput('cache-profiles'),
         entries: core.getInput('entries', { trimWhitespace: false }),
