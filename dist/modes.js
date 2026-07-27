@@ -19,6 +19,11 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Bazel remote cache proxy integration.',
     },
+    ccache: {
+        resolved: 'ccache',
+        implemented: true,
+        description: 'C and C++ ccache proxy integration.',
+    },
     go: {
         resolved: 'go',
         implemented: true,
@@ -49,6 +54,11 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Turbo remote cache proxy integration.',
     },
+    xcode: {
+        resolved: 'xcode',
+        implemented: true,
+        description: 'Xcode and Swift/Clang compilation cache integration on macOS.',
+    },
 };
 export function normalizeMode(value) {
     const normalized = (value || 'archive').trim().toLowerCase();
@@ -57,15 +67,17 @@ export function normalizeMode(value) {
         case 'docker':
         case 'buildkit':
         case 'bazel':
+        case 'ccache':
         case 'go':
         case 'gradle':
         case 'maven':
         case 'nx':
         case 'sccache':
         case 'turbo':
+        case 'xcode':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, go, gradle, maven, nx, sccache, or turbo.`);
+            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.`);
     }
 }
 export function resolveModeSpec(mode) {

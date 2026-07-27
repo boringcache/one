@@ -5,9 +5,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as timers from 'timers';
-import { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, hasRestoreToken, hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, readProjectMiseTools, readMiseTomlVersion, readToolVersionsValue, reshimMise, } from './core';
+import { activateMiseTool, ensureBoringCache, ensureXcodePlugin, exportMiseEnv, execBoringCache, hasRestoreToken, hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, readProjectMiseTools, readMiseTomlVersion, readToolVersionsValue, reshimMise, } from './core';
 import { assertImplementedMode, normalizeMode, resolveModeSpec, } from './modes';
-export { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, };
+export { activateMiseTool, ensureBoringCache, ensureXcodePlugin, exportMiseEnv, execBoringCache, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, };
 export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 export const CANDIDATE_RECEIPT_FILE_ENV = 'BORINGCACHE_CANDIDATE_RECEIPT_FILE';
 export function prepareCandidateReceiptFile() {
@@ -70,6 +70,7 @@ const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
     composer: 'Composer',
+    ccache: 'ccache',
     elixir: 'Elixir',
     erlang: 'Erlang',
     go: 'Go',
@@ -90,7 +91,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.106',
+        cliVersion: core.getInput('cli-version') || 'v1.14.0',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -1245,6 +1246,8 @@ async function detectModeTools(mode, workingDirectory) {
             return detectGradleTools(workingDirectory);
         case 'maven':
             return detectMavenTools(workingDirectory);
+        case 'ccache':
+            return [];
         case 'sccache':
             return detectRustTools(workingDirectory);
         default:

@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, missingStageTokenMessage, } from './auth';
+export const DEFAULT_PROXY_PORT = 22243;
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
@@ -309,7 +310,7 @@ export async function startRegistryProxy(options) {
         effectiveReadOnly = true;
         effectiveStage = false;
         authToken = restoreToken;
-        core.info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
+        core.info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
     if (!authToken) {
         if (effectiveReadOnly) {
@@ -368,6 +369,15 @@ export async function startRegistryProxy(options) {
     }
     for (const [key, value] of Object.entries(options.metadataHints || {})) {
         args.push('--metadata-hint', `${key}=${value}`);
+    }
+    if (options.xcodeSocket?.trim()) {
+        args.push('--xcode-socket', options.xcodeSocket.trim());
+    }
+    if (options.xcodeUpstreamPlugin?.trim()) {
+        args.push('--xcode-upstream-plugin', options.xcodeUpstreamPlugin.trim());
+    }
+    if (options.xcodeEvidenceJson?.trim()) {
+        args.push('--xcode-evidence-json', options.xcodeEvidenceJson.trim());
     }
     if (effectiveStage) {
         args.push('--stage');

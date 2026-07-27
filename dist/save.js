@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, } from './core';
-import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyTrustTokenPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
+import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, applyTrustTokenPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
@@ -56,6 +56,26 @@ function parseSavedTagList(raw) {
         .map((entry) => entry.trim())
         .filter(Boolean));
 }
+function readXcodeEvidence(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) {
+        return null;
+    }
+    try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile() || stat.size > 1024 * 1024) {
+            core.warning(`Ignoring invalid Xcode evidence file: ${filePath}`);
+            return null;
+        }
+        const value = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : null;
+    }
+    catch (error) {
+        core.warning(`Unable to read Xcode evidence from ${filePath}: ${error instanceof Error ? error.message : error}`);
+        return null;
+    }
+}
 function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDirectory, noPlatform) {
     if (!entriesString.trim()) {
         return verifySaveTags.map((tag) => ({
@@ -95,6 +115,8 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
     const proxyLogPath = core.getState('proxy-log-path') || core.getState('mode-proxy-log-path');
     const candidateReceiptFile = core.getState('candidate-receipt-file');
     const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
+    const xcodeEvidencePath = core.getState('mode-xcode-evidence-json');
+    const xcodeEvidence = readXcodeEvidence(xcodeEvidencePath);
     writeActionEvidence('post', {
         phase_status: 'completed',
         phase_summary: postPhaseSummary(saveStatus, trustState),
@@ -109,6 +131,8 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         save_status: saveStatus,
         proxy_log_path: proxyLogPath || '',
         staged_candidates: stagedCandidates,
+        xcode_evidence_path: xcodeEvidencePath || '',
+        xcode_evidence: xcodeEvidence || {},
     });
     await runDiagnosticsGroup(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
         core.info(`resolved-mode: ${resolvedMode || '(none)'}`);
@@ -119,6 +143,9 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         core.info(`verify-save-tags: ${verifySaveTags.join(',') || '(none)'}`);
         core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
         core.info(`staged-candidates: ${stagedCandidates.map((candidate) => candidate.id).join(',') || '(none)'}`);
+        if (xcodeEvidence) {
+            core.info(`xcode-evidence: ${JSON.stringify(xcodeEvidence)}`);
+        }
         if (diagnostics.includeLogs) {
             if (proxyLogPath) {
                 const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
@@ -187,6 +214,9 @@ export async function run() {
         };
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
+        }
+        if ((resolvedMode || inputs.mode).trim().toLowerCase() === 'xcode') {
+            await ensureXcodePlugin(cliVersion);
         }
         if (!cliCapabilityVersion) {
             cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);

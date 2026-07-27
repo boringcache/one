@@ -401,6 +401,10 @@ function getToolVersionProbes(toolName) {
             return [{ command: 'pnpm', args: ['--version'] }];
         case 'composer':
             return [{ command: 'composer', args: ['--version'], versionPattern: /Composer version\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
+        case 'ccache':
+            return [{ command: 'ccache', args: ['--version'], versionPattern: /ccache version\s+([0-9A-Za-z.+-]+)/i }];
+        case 'ccache-storage-http':
+            return [{ command: 'ccache-storage-http', args: ['--version'], versionPattern: /Version:\s*([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
         case 'php':
             return [{ command: 'php', args: ['--version'], versionPattern: /PHP\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
         case 'python':

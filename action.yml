@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.106'
+    default: 'v1.14.0'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -14,7 +14,7 @@ inputs:
     default: 'none'
     required: false
   mode:
-    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, go, gradle, maven, nx, sccache, or turbo.'
+    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.'
     default: 'archive'
     required: false
   working-directory:
@@ -58,7 +58,8 @@ inputs:
     description: 'Low-cardinality proxy session labels as KEY=VALUE pairs, comma-separated or newline-separated. Use this for grouping hints such as phase=seed, project=web, tool=bazel, or benchmark=grpc-bazel.'
     required: false
   proxy-port:
-    description: 'Proxy-backed modes: explicit TCP port from 1 to 65535. Leave blank to use the mode default or an automatically selected port.'
+    description: 'Runner-local cache port from 1 to 65535. Default: 22243. Change only for process coordination or a conflict.'
+    default: '22243'
     required: false
   context:
     description: 'Docker or BuildKit build context path.'
@@ -191,6 +192,10 @@ inputs:
   sccache-version:
     description: 'sccache version to install when the binary is not already available. Explicit versions require the matching publisher .sha256 release asset.'
     default: '0.16.0'
+    required: false
+  ccache-version:
+    description: 'ccache version to use. The action installs the audited default release and its HTTP storage helper when they are not already available.'
+    default: '4.13.6'
     required: false
   cache-profiles:
     description: 'Repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). Required for archive mode.'

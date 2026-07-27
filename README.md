@@ -3,7 +3,8 @@
 `boringcache/one` is GitHub lifecycle for the same CLI-owned BoringCache plan
 used locally and on any runner. It installs the CLI, restores and saves named
 archive profiles, and orchestrates Docker, BuildKit, Bazel, Go, Gradle, Maven,
-Turbo, Nx, and Rust `sccache` modes without inventing a second cache interface.
+Turbo, Nx, C/C++ `ccache`, Rust `sccache`, and Xcode compilation-cache modes
+without inventing a second cache interface.
 
 ## Quick start
 
@@ -24,7 +25,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@58df2c0d6884ecd5e430feeeaf7e477656864771 # v1.13.102
+- uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27 # v1.13.106
   with:
     trust-policy: auto
     setup: none
@@ -55,7 +56,7 @@ and sparse representation; BoringCache does not verify files a second time. See
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@58df2c0d6884ecd5e430feeeaf7e477656864771 # v1.13.102
+- uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27 # v1.13.106
   with:
     trust-policy: auto
     setup: none
@@ -73,6 +74,24 @@ the Action fails closed unless `BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER=1` is
 set; use that attestation only for a single-tenant runner that is destroyed
 after the job.
 
+Xcode mode on any macOS runner:
+
+```yaml
+- uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27 # v1.13.106
+  with:
+    trust-policy: auto
+    setup: none
+    mode: xcode
+
+- run: >-
+    xcodebuild -workspace App.xcworkspace -scheme App
+    -derivedDataPath "$BORINGCACHE_XCODE_DERIVED_DATA_PATH" build
+```
+
+The Action installs the signed, checksummed universal CAS adapter, starts the
+credential-free local bridge, and exports Xcode's cache settings. See
+[Xcode mode](docs/modes/xcode.md) for path-cohort semantics and evidence.
+
 ## Inputs
 
 Start with the [interface ownership guide](docs/interface.md). The exact
@@ -81,7 +100,7 @@ inventory is contract-checked against it.
 
 ## Updates
 
-The examples pin the reviewed `v1.13.102` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.13.106` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.

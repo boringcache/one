@@ -3,7 +3,7 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execBoringCache as execBoringCacheCore, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from './core';
+import { execBoringCache as execBoringCacheCore, DEFAULT_PROXY_PORT, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from './core';
 import { DEFAULT_OCI_HYDRATION_POLICY, detectNodePackageManager, normalizeVerifyTimeoutSeconds, } from './utils';
 import { readSha256File, verifySha256 } from './core/integrity';
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -50,6 +50,70 @@ const SCCACHE_DEFAULT_SHA256 = {
     'sccache-v0.16.0-x86_64-pc-windows-msvc.zip': 'b8514ed7552e148b0a032114f745118dcb801791adafafeaf9935e4bfb0edf1b',
     'sccache-v0.16.0-x86_64-unknown-linux-musl.tar.gz': 'aec995a83ad3dff3d14b6314e08858b7b73d35ca85a5bcf3d3a9ec07dee35588',
 };
+const CCACHE_DEFAULT_VERSION = '4.13.6';
+const CCACHE_STORAGE_HTTP_DEFAULT_VERSION = '0.8';
+const CCACHE_DEFAULT_RELEASES = {
+    'darwin-arm64': {
+        repository: 'ccache/ccache',
+        tag: 'v4.13.6',
+        archiveName: 'ccache-4.13.6-darwin.tar.gz',
+        archiveRoot: 'ccache-4.13.6-darwin',
+        sha256: '0274210ec9c9936ed5711d59b0de3167a51216a588ddde35f6bc828f366fe6d9',
+    },
+    'darwin-x64': {
+        repository: 'ccache/ccache',
+        tag: 'v4.13.6',
+        archiveName: 'ccache-4.13.6-darwin.tar.gz',
+        archiveRoot: 'ccache-4.13.6-darwin',
+        sha256: '0274210ec9c9936ed5711d59b0de3167a51216a588ddde35f6bc828f366fe6d9',
+    },
+    'linux-arm64': {
+        repository: 'ccache/ccache',
+        tag: 'v4.13.6',
+        archiveName: 'ccache-4.13.6-linux-aarch64-glibc.tar.gz',
+        archiveRoot: 'ccache-4.13.6-linux-aarch64-glibc',
+        sha256: 'fae67fb810e1f0d390409af6603355483572229e19183e68574cd0f851a6fb98',
+    },
+    'linux-x64': {
+        repository: 'ccache/ccache',
+        tag: 'v4.13.6',
+        archiveName: 'ccache-4.13.6-linux-x86_64-glibc.tar.gz',
+        archiveRoot: 'ccache-4.13.6-linux-x86_64-glibc',
+        sha256: '567b1b648411819590f918f045218c92da14418bdec3b30db94a3b4f5d77cf13',
+    },
+    'win32-arm64': {
+        repository: 'ccache/ccache',
+        tag: 'v4.13.6',
+        archiveName: 'ccache-4.13.6-windows-aarch64.zip',
+        archiveRoot: 'ccache-4.13.6-windows-aarch64',
+        sha256: 'bec01846b06d6d87bf35eda50544d7c8bf9b9a4859f218417a7081aa45d7fd47',
+    },
+    'win32-x64': {
+        repository: 'ccache/ccache',
+        tag: 'v4.13.6',
+        archiveName: 'ccache-4.13.6-windows-x86_64.zip',
+        archiveRoot: 'ccache-4.13.6-windows-x86_64',
+        sha256: '3d7cebb05850ad704e197b3f1d3f0f924ab6c9fdfc561578e146184fe9d89380',
+    },
+};
+const CCACHE_STORAGE_HTTP_DEFAULT_RELEASES = {
+    'darwin-arm64': ccacheStorageHttpRelease('darwin-arm64', '8da910d967ebabfb9bc489d59a5f8b35374300b67cc28a3fa17f4396249e6f68'),
+    'darwin-x64': ccacheStorageHttpRelease('darwin-amd64', '943c65bca642c9f7e3bebe09a01693ec29a06eda6733553e8b95625720952f1b'),
+    'linux-arm64': ccacheStorageHttpRelease('linux-arm64', '49587fb0534f5c6265fd1008267af795885f8297c6c51213708da74e4de9d475'),
+    'linux-x64': ccacheStorageHttpRelease('linux-amd64', '2c2cfafa39f5a4628201ccc11c81829197519159aa128fe00ea251f1f4f2461c'),
+    'win32-arm64': ccacheStorageHttpRelease('windows-arm64', 'f5807537fffacfc7c062fa8ca55fb33c0ce7227a4dd1ad4eb6c27cd268e439fe'),
+    'win32-x64': ccacheStorageHttpRelease('windows-amd64', '0889a03bd1fdc0c639574ed435b68c29c82b03d571ea37a7153373c4c398eee0'),
+};
+function ccacheStorageHttpRelease(platform, sha256) {
+    const archiveRoot = `ccache-storage-http-go-${CCACHE_STORAGE_HTTP_DEFAULT_VERSION}-${platform}`;
+    return {
+        repository: 'ccache/ccache-storage-http-go',
+        tag: `v${CCACHE_STORAGE_HTTP_DEFAULT_VERSION}`,
+        archiveName: `${archiveRoot}${platform.startsWith('windows-') ? '.zip' : '.tar.gz'}`,
+        archiveRoot,
+        sha256,
+    };
+}
 export class DockerBuildFailure extends Error {
     constructor(message) {
         super(message);
@@ -87,17 +151,6 @@ function adapterProxyVerificationSpec(tag, proxyPlan, pathHint) {
         saveExpected: !proxyPlan.read_only,
     };
 }
-function buildKitCacheVerificationSpecs(cacheTag, buildKitCache, noPlatform, noGit, saveExpected, pathHint) {
-    void buildKitCache;
-    const uniqueTags = Array.from(new Set([cacheTag].map((tag) => tag.trim()).filter(Boolean)));
-    return uniqueTags.map((tag) => ({
-        tag,
-        noPlatform,
-        noGit,
-        pathHint,
-        saveExpected,
-    }));
-}
 const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
 const SUPPORTED_CLI_SETUP_SCHEMA_VERSION = 1;
 function assertSupportedCliDryRunSchema(adapter, plan) {
@@ -113,6 +166,25 @@ function currentHomeDir() {
 function isPathInside(parent, candidate) {
     const relative = path.relative(path.resolve(parent), path.resolve(candidate));
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+function verifiedReleaseComponent(label, value) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+        throw new Error(`Invalid verified release ${label}: ${value}`);
+    }
+    return value;
+}
+export function verifiedReleasePaths(extractionDirectory, installDirectory, archiveRoot, executableName) {
+    const safeArchiveRoot = verifiedReleaseComponent('archive root', archiveRoot);
+    const safeExecutableName = verifiedReleaseComponent('executable name', executableName);
+    const sourcePath = path.resolve(extractionDirectory, safeArchiveRoot, safeExecutableName);
+    const destinationPath = path.resolve(installDirectory, safeExecutableName);
+    if (!isPathInside(extractionDirectory, sourcePath)) {
+        throw new Error(`Verified release source escapes its extraction directory: ${sourcePath}`);
+    }
+    if (!isPathInside(installDirectory, destinationPath)) {
+        throw new Error(`Verified release destination escapes its install directory: ${destinationPath}`);
+    }
+    return { sourcePath, destinationPath };
 }
 function secureCurlArgs(output, url) {
     return [
@@ -139,6 +211,8 @@ export async function runModeRestore(plan, inputs) {
             return runBuildkitRestore(plan, inputs);
         case 'bazel':
             return runBazelRestore(plan, inputs);
+        case 'ccache':
+            return runCcacheRestore(plan, inputs);
         case 'go':
             return runGoRestore(plan, inputs);
         case 'gradle':
@@ -151,6 +225,8 @@ export async function runModeRestore(plan, inputs) {
             return runTurboProxyRestore(plan, inputs);
         case 'nx':
             return runNxProxyRestore(plan, inputs);
+        case 'xcode':
+            return runXcodeRestore(plan, inputs);
         case 'archive':
             return {};
     }
@@ -167,6 +243,9 @@ export async function runModeSave(mode, options = {}) {
             await shutdownBazelServer();
             await stopProxyFromState();
             return;
+        case 'ccache':
+            await runCcacheSave(options);
+            return;
         case 'go':
             await stopProxyFromState();
             return;
@@ -174,6 +253,7 @@ export async function runModeSave(mode, options = {}) {
         case 'maven':
         case 'nx':
         case 'turbo':
+        case 'xcode':
             await stopProxyFromState();
             return;
         case 'sccache':
@@ -207,11 +287,11 @@ function parsePortInput(value, inputName) {
     }
     return port;
 }
-async function resolvePreferredPort(value, inputName, defaultPort) {
+async function resolvePreferredPort(value, inputName, defaultPort = DEFAULT_PROXY_PORT) {
     if (value.trim()) {
         return parsePortInput(value, inputName);
     }
-    return defaultPort ?? await findAvailablePort();
+    return defaultPort;
 }
 function parseList(input, separator = /[\n,]/) {
     return input
@@ -698,12 +778,6 @@ function recordBuildKitCachePlanState(buildKitPlan, cacheTag) {
     return {
         resolvedWorkspace: buildKitPlan.workspace,
         resolvedCacheTag: cacheTag,
-        buildKitVerification: {
-            noPlatform: buildKitPlan.proxy.no_platform,
-            noGit: buildKitPlan.proxy.no_git,
-            saveExpected: !buildKitPlan.proxy.read_only,
-        },
-        buildKitCacheState: buildKitPlan.buildkit_cache,
     };
 }
 function setBuildKitCacheOutputs(spec) {
@@ -1335,6 +1409,90 @@ export async function installSccache(versionInput = SCCACHE_DEFAULT_VERSION.slic
         await fs.promises.rm(tempDir, { recursive: true, force: true });
     }
 }
+async function installVerifiedReleaseBinary(release, binaryName) {
+    const safeBinaryName = verifiedReleaseComponent('binary name', binaryName);
+    const archiveName = verifiedReleaseComponent('archive name', release.archiveName);
+    const archiveRoot = verifiedReleaseComponent('archive root', release.archiveRoot);
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-release-'));
+    const archivePath = path.resolve(tempDir, archiveName);
+    const url = `https://github.com/${release.repository}/releases/download/${release.tag}/${archiveName}`;
+    let installDir = null;
+    let installed = false;
+    try {
+        const curlCode = await exec.exec('curl', secureCurlArgs(archivePath, url), {
+            ignoreReturnCode: true,
+        });
+        if (curlCode !== 0) {
+            throw new Error(`Failed to download ${binaryName} from ${url}`);
+        }
+        await verifySha256(archivePath, release.sha256, archiveName);
+        if (archiveName.endsWith('.zip')) {
+            await exec.exec('unzip', ['-q', archivePath, '-d', tempDir]);
+        }
+        else {
+            await exec.exec('tar', ['-xzf', archivePath, '-C', tempDir]);
+        }
+        installDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-tool-'));
+        const executableName = process.platform === 'win32' ? `${safeBinaryName}.exe` : safeBinaryName;
+        const { sourcePath, destinationPath } = verifiedReleasePaths(tempDir, installDir, archiveRoot, executableName);
+        const physicalSourcePath = await fs.promises.realpath(sourcePath);
+        if (!isPathInside(tempDir, physicalSourcePath)) {
+            throw new Error(`Verified release source resolves outside its extraction directory: ${sourcePath}`);
+        }
+        const sourceStat = await fs.promises.stat(physicalSourcePath);
+        if (!sourceStat.isFile()) {
+            throw new Error(`Verified release executable is not a regular file: ${sourcePath}`);
+        }
+        // The source archive is SHA-256 verified and both physical source and
+        // unique destination are bounded to Action-owned temporary directories.
+        // codeql[js/path-injection]
+        await fs.promises.copyFile(physicalSourcePath, destinationPath, fs.constants.COPYFILE_EXCL);
+        if (process.platform !== 'win32') {
+            // codeql[js/path-injection]
+            await fs.promises.chmod(destinationPath, 0o755);
+        }
+        core.addPath(installDir);
+        installed = true;
+    }
+    finally {
+        await fs.promises.rm(tempDir, { recursive: true, force: true });
+        if (installDir && !installed) {
+            await fs.promises.rm(installDir, { recursive: true, force: true });
+        }
+    }
+}
+export async function installCcache(versionInput = CCACHE_DEFAULT_VERSION) {
+    addLocalBinPaths();
+    const version = versionInput.trim().replace(/^v/, '');
+    if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) {
+        throw new Error(`Invalid ccache version: ${versionInput}`);
+    }
+    if (await hasToolVersionOnPath('ccache', version)) {
+        core.info(`Using existing ccache ${version} from PATH`);
+    }
+    else {
+        if (version !== CCACHE_DEFAULT_VERSION) {
+            throw new Error(`Automatic ccache installation supports the audited ${CCACHE_DEFAULT_VERSION} release. `
+                + `Install ccache ${version} on PATH before running boringcache/one.`);
+        }
+        const release = CCACHE_DEFAULT_RELEASES[`${process.platform}-${process.arch}`];
+        if (!release) {
+            throw new Error(`Unsupported ccache runner: ${process.platform}-${process.arch}`);
+        }
+        core.info(`Installing ccache ${version}...`);
+        await installVerifiedReleaseBinary(release, 'ccache');
+    }
+    if (await hasToolVersionOnPath('ccache-storage-http', CCACHE_STORAGE_HTTP_DEFAULT_VERSION)) {
+        core.info(`Using existing ccache-storage-http ${CCACHE_STORAGE_HTTP_DEFAULT_VERSION} from PATH`);
+        return;
+    }
+    const helperRelease = CCACHE_STORAGE_HTTP_DEFAULT_RELEASES[`${process.platform}-${process.arch}`];
+    if (!helperRelease) {
+        throw new Error(`Unsupported ccache-storage-http runner: ${process.platform}-${process.arch}`);
+    }
+    core.info(`Installing ccache-storage-http ${CCACHE_STORAGE_HTTP_DEFAULT_VERSION}...`);
+    await installVerifiedReleaseBinary(helperRelease, 'ccache-storage-http');
+}
 async function stopSccacheServer() {
     let output = '';
     try {
@@ -1405,7 +1563,91 @@ function summarizeSccacheStats(output) {
         rustHitRate: parseSccacheTextStat(output, 'Cache hits rate (Rust)'),
     };
 }
-function emptySccacheTagCheckStatus() {
+const CCACHE_NON_CACHEABLE_COUNTERS = [
+    'autoconf_test',
+    'bad_compiler_arguments',
+    'called_for_link',
+    'called_for_preprocessing',
+    'compile_failed',
+    'compiler_check_failed',
+    'compiler_produced_no_output',
+    'compiler_produced_stdout',
+    'could_not_find_compiler',
+    'could_not_use_modules',
+    'could_not_use_precompiled_header',
+    'disabled',
+    'error_hashing_extra_file',
+    'internal_error',
+    'missing_cache_file',
+    'missing_input_file',
+    'modified_input_file',
+    'multiple_source_files',
+    'no_input_file',
+    'output_to_stdout',
+    'preprocessor_error',
+    'recache',
+    'unsupported_code_directive',
+    'unsupported_compiler_option',
+    'unsupported_environment_variable',
+];
+function summarizeCcacheStats(output) {
+    if (!output.trim()) {
+        return null;
+    }
+    try {
+        const counters = JSON.parse(output);
+        const counter = (name) => {
+            const value = counters[name];
+            return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+        };
+        const cacheHits = counter('direct_cache_hit') + counter('preprocessed_cache_hit');
+        const cacheMisses = counter('cache_miss');
+        const nonCacheableCalls = CCACHE_NON_CACHEABLE_COUNTERS.reduce((total, name) => total + counter(name), 0);
+        return {
+            compileRequests: cacheHits + cacheMisses + nonCacheableCalls,
+            cacheHits,
+            cacheMisses,
+            remoteHits: counter('remote_storage_hit'),
+            remoteMisses: counter('remote_storage_miss'),
+        };
+    }
+    catch (error) {
+        core.warning(`Failed to parse ccache stats JSON: ${error.message}`);
+        return null;
+    }
+}
+async function stopCcacheStorageHelpers(statsLog, statsDirectory) {
+    let output = '';
+    const env = { ...process.env, CCACHE_STATSLOG: statsLog };
+    try {
+        await exec.exec('ccache', ['--print-log-stats', '--format=json'], {
+            env,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => {
+                    const text = data.toString();
+                    output += text;
+                    process.stdout.write(text);
+                },
+                stderr: (data) => {
+                    process.stderr.write(data.toString());
+                },
+            },
+        });
+    }
+    catch {
+    }
+    finally {
+        try {
+            await exec.exec('ccache', ['--stop-storage-helpers'], { env, ignoreReturnCode: true });
+        }
+        catch {
+        }
+        await fs.promises.rm(statsDirectory, { recursive: true, force: true });
+    }
+    return summarizeCcacheStats(output);
+}
+function emptyCompilerCacheTagCheckStatus() {
     return {
         hit: false,
         cacheEntryHit: false,
@@ -1430,7 +1672,7 @@ function checkResultHasCacheEntryHit(result) {
     }
     return result.cache_type !== 'kv';
 }
-async function checkSccacheTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
+async function checkCompilerCacheTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
     const args = ['check', workspace, tag, '--json'];
     if (requireServerSignature) {
         args.unshift('--require-server-signature');
@@ -1452,7 +1694,7 @@ async function checkSccacheTagStatus(workspace, tag, { noPlatform = false, noGit
         },
     });
     if (exitCode !== 0) {
-        return emptySccacheTagCheckStatus();
+        return emptyCompilerCacheTagCheckStatus();
     }
     try {
         const summary = JSON.parse(stdout);
@@ -1470,18 +1712,18 @@ async function checkSccacheTagStatus(workspace, tag, { noPlatform = false, noGit
     }
     catch (error) {
         core.warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
-        return emptySccacheTagCheckStatus();
+        return emptyCompilerCacheTagCheckStatus();
     }
 }
-async function checkSccacheProxyTagStatus(workspace, tag, options = {}) {
-    const strictStatus = await checkSccacheTagStatus(workspace, tag, {
+async function checkCompilerCacheProxyTagStatus(workspace, tag, options = {}) {
+    const strictStatus = await checkCompilerCacheTagStatus(workspace, tag, {
         ...options,
         requireServerSignature: true,
     });
     if (strictStatus.kvChecked || strictStatus.kvHit) {
         return strictStatus;
     }
-    const kvStatus = await checkSccacheTagStatus(workspace, tag, {
+    const kvStatus = await checkCompilerCacheTagStatus(workspace, tag, {
         ...options,
         requireServerSignature: false,
     });
@@ -1551,11 +1793,16 @@ async function ensureCorepackPackageManager(workingDirectory, packageManager, ru
         await exec.exec('corepack', ['prepare', `${packageManager.name}@${packageManager.version}`, '--activate'], { cwd: workingDirectory, ignoreReturnCode: true });
     }
 }
-function sccacheEnvForStartedProxy(plan, actualPort) {
+function compilerCacheEnvForStartedProxy(plan, actualPort) {
     const envVars = {};
     for (const [key, value] of Object.entries(plan.env_vars || {})) {
         envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
     }
+    envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
+    return envVars;
+}
+function sccacheEnvForStartedProxy(plan, actualPort) {
+    const envVars = compilerCacheEnvForStartedProxy(plan, actualPort);
     envVars.SCCACHE_IDLE_TIMEOUT = process.env.SCCACHE_IDLE_TIMEOUT
         || envVars.SCCACHE_IDLE_TIMEOUT
         || '0';
@@ -1599,8 +1846,6 @@ async function runDockerRestore(plan, inputs) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
     }
     const requestedCacheTag = '';
-    let buildKitVerification = null;
-    let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = '';
@@ -1634,10 +1879,9 @@ async function runDockerRestore(plan, inputs) {
                 refHost = await getContainerGateway(containerName);
             }
         }
-        // A full managed build owns the proxy for only this invocation, so choose
-        // a free runner port instead of assuming the conventional setup-only
-        // port is unused. Setup-only keeps 5000 for its externally consumed refs.
-        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', cliOwnsManagedBuild ? undefined : 5000);
+        // Every surface starts from the same port. An explicit proxy-port remains
+        // available when a workflow coordinates another process or has a conflict.
+        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', DEFAULT_PROXY_PORT);
         const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
@@ -1646,8 +1890,6 @@ async function runDockerRestore(plan, inputs) {
             const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
             resolvedWorkspace = planState.resolvedWorkspace;
             resolvedCacheTag = planState.resolvedCacheTag;
-            buildKitVerification = planState.buildKitVerification;
-            buildKitCacheState = planState.buildKitCacheState;
             const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, undefined);
             setBuildKitCacheOutputs({
                 ref: dockerPlan.buildkit_cache.cache_ref,
@@ -1704,8 +1946,6 @@ async function runDockerRestore(plan, inputs) {
             const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
             resolvedWorkspace = planState.resolvedWorkspace;
             resolvedCacheTag = planState.resolvedCacheTag;
-            buildKitVerification = planState.buildKitVerification;
-            buildKitCacheState = planState.buildKitCacheState;
             const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
             setBuildKitCacheOutputs({
                 ref: dockerPlan.buildkit_cache.cache_ref,
@@ -1746,13 +1986,12 @@ async function runDockerRestore(plan, inputs) {
     }
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = buildKitVerification?.saveExpected ?? !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         evidence: modeEvidence,
-        // docker-command=setup defers the build to later workflow steps, so treat
-        // write-capable registry refs as save-expected and verify after post-save.
-        verificationSpecs: buildKitCacheVerificationSpecs(resolvedCacheTag, buildKitCacheState, buildKitVerification?.noPlatform || false, buildKitVerification?.noGit || false, saveExpected, plan.workingDirectory),
+        // The CLI proxy owns OCI import and publication readiness. Generic
+        // verification is for archive and direct-tool tags, not registry refs.
+        verificationSpecs: [],
     };
 }
 async function runDockerSave(options = {}) {
@@ -1817,8 +2056,6 @@ async function runBuildkitRestore(plan, inputs) {
     const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBooleanInput(core.getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
     const requestedCacheTag = '';
-    let buildKitVerification = null;
-    let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = '';
@@ -1839,7 +2076,7 @@ async function runBuildkitRestore(plan, inputs) {
                 refHost = await getContainerGateway(containerName);
             }
         }
-        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
+        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
         const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, inputs.stage, inputs.cacheCandidates);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
@@ -1868,8 +2105,6 @@ async function runBuildkitRestore(plan, inputs) {
         const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
         resolvedWorkspace = planState.resolvedWorkspace;
         resolvedCacheTag = planState.resolvedCacheTag;
-        buildKitVerification = planState.buildKitVerification;
-        buildKitCacheState = planState.buildKitCacheState;
         const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
         setBuildKitCacheOutputs({
             ref: dockerPlan.buildkit_cache.cache_ref,
@@ -1904,11 +2139,11 @@ async function runBuildkitRestore(plan, inputs) {
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = buildKitVerification?.saveExpected ?? !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         evidence: modeEvidence,
-        verificationSpecs: buildKitCacheVerificationSpecs(resolvedCacheTag, buildKitCacheState, buildKitVerification?.noPlatform || false, buildKitVerification?.noGit || false, saveExpected, plan.workingDirectory),
+        // BuildKit uses the same CLI-owned OCI readiness boundary as Docker.
+        verificationSpecs: [],
     };
 }
 async function runBuildkitSave(options = {}) {
@@ -2103,8 +2338,58 @@ async function runMavenRestore(plan, inputs) {
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
     };
 }
+async function runXcodeRestore(plan, inputs) {
+    if (process.platform !== 'darwin') {
+        throw new Error('mode=xcode requires a macOS runner with Xcode installed.');
+    }
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+    const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const setup = requireAdapterSetupPlan('xcode', proxyPlan.setup);
+    const env = setup.env_vars || {};
+    const socketPath = env.BORINGCACHE_XCODE_PROXY_SOCKET?.trim() || '';
+    const upstreamPlugin = env.BORINGCACHE_XCODE_UPSTREAM_PLUGIN?.trim() || '';
+    const evidencePath = env.BORINGCACHE_XCODE_EVIDENCE_JSON?.trim() || '';
+    if (!socketPath || !upstreamPlugin) {
+        throw new Error('boringcache xcode setup plan did not include its Unix bridge paths');
+    }
+    applyAdapterSetupPlan(setup);
+    const proxy = await startRegistryProxy(actionProxyOptions({
+        command: 'cache-registry',
+        workspace: proxyPlan.workspace,
+        tag: proxyPlan.tag,
+        host: proxyPlan.proxy.host || '127.0.0.1',
+        port: proxyPlan.proxy.port,
+        noGit: proxyPlan.proxy.no_git,
+        noPlatform: proxyPlan.proxy.no_platform,
+        verbose: inputs.verbose,
+        readOnly: proxyPlan.proxy.read_only,
+        xcodeSocket: socketPath,
+        xcodeUpstreamPlugin: upstreamPlugin,
+        xcodeEvidenceJson: evidencePath,
+    }, proxyPlan.proxy, inputs.failOnCacheError));
+    saveModeState('proxy-pid', String(proxy.pid));
+    saveModeState('xcode-evidence-json', evidencePath);
+    saveProxyModeState(proxy.port);
+    core.setOutput('cache-tag', proxyPlan.tag);
+    core.setOutput('workspace', proxyPlan.workspace);
+    setProxyOutputs(proxy.port);
+    return {
+        cacheTag: proxyPlan.tag,
+        evidence: {
+            xcode: {
+                version: env.BORINGCACHE_XCODE_VERSION || '',
+                build: env.BORINGCACHE_XCODE_BUILD || '',
+                plugin_sha256: env.BORINGCACHE_XCODE_PLUGIN_SHA256 || '',
+                path_cohort: env.BORINGCACHE_XCODE_PATH_COHORT || '',
+                derived_data_path: env.BORINGCACHE_XCODE_DERIVED_DATA_PATH || '',
+                evidence_path: evidencePath,
+            },
+        },
+        verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, plan.workingDirectory)],
+    };
+}
 async function runTurboProxyRestore(plan, inputs) {
-    const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 4227);
+    const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
@@ -2135,7 +2420,7 @@ async function runTurboProxyRestore(plan, inputs) {
     };
 }
 async function runNxProxyRestore(plan, inputs) {
-    const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 4228);
+    const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
@@ -2159,13 +2444,10 @@ async function runNxProxyRestore(plan, inputs) {
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, nxPlan.proxy, plan.workingDirectory)],
     };
 }
-async function runSccacheRestore(plan, inputs) {
-    const workingDirectory = plan.workingDirectory;
+async function startCompilerCacheProxy(adapter, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
-    await installSccache(sccacheVersion);
-    const proxyPlan = await resolveAdapterCliPlan('sccache', plan.workspace, workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
-    const preflight = await checkSccacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
+    const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const preflight = await checkCompilerCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
     });
@@ -2180,89 +2462,143 @@ async function runSccacheRestore(plan, inputs) {
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy, inputs.failOnCacheError));
-    exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
-    await startSccacheServer();
     saveModeState('workspace', proxyPlan.workspace);
-    saveModeState('sccache-tag', proxyPlan.tag);
-    saveModeState('sccache-no-platform', String(proxyPlan.proxy.no_platform));
-    saveModeState('sccache-no-git', String(proxyPlan.proxy.no_git));
-    saveModeState('sccache-preflight-cache-entry-hit', String(preflight.cacheEntryHit));
-    saveModeState('sccache-preflight-kv-hit', String(preflight.kvHit));
-    saveModeState('sccache-preflight-kv-checked', String(preflight.kvChecked));
+    saveModeState(`${adapter}-tag`, proxyPlan.tag);
+    saveModeState(`${adapter}-no-platform`, String(proxyPlan.proxy.no_platform));
+    saveModeState(`${adapter}-no-git`, String(proxyPlan.proxy.no_git));
+    saveModeState(`${adapter}-preflight-cache-entry-hit`, String(preflight.cacheEntryHit));
+    saveModeState(`${adapter}-preflight-kv-hit`, String(preflight.kvHit));
+    saveModeState(`${adapter}-preflight-kv-checked`, String(preflight.kvChecked));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     core.setOutput('workspace', proxyPlan.workspace);
     core.setOutput('cache-tag', proxyPlan.tag);
-    core.setOutput('sccache-tag', proxyPlan.tag);
     core.setOutput('cache-hit', String(preflight.kvHit));
-    core.setOutput('sccache-hit', String(preflight.kvHit));
     setProxyOutputs(proxy.port);
+    return { proxyPlan, proxy, preflight };
+}
+function compilerCacheModeState(tool) {
     return {
-        cacheHit: preflight.kvHit,
-        cacheTag: proxyPlan.tag,
-        verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, workingDirectory)],
+        workspace: getModeState('workspace'),
+        tag: getModeState(`${tool}-tag`),
+        noPlatform: getModeState(`${tool}-no-platform`) === 'true',
+        noGit: getModeState(`${tool}-no-git`) === 'true',
+        hit: getModeState(`${tool}-preflight-kv-hit`) === 'true',
+        cacheEntryHit: getModeState(`${tool}-preflight-cache-entry-hit`) === 'true',
+        kvHit: getModeState(`${tool}-preflight-kv-hit`) === 'true',
+        kvChecked: getModeState(`${tool}-preflight-kv-checked`) === 'true',
     };
 }
-async function runSccacheSave(options = {}) {
-    const workspace = getModeState('workspace');
-    const sccacheTag = getModeState('sccache-tag');
-    const preflightCacheEntryHit = getModeState('sccache-preflight-cache-entry-hit') === 'true';
-    const preflightKvHit = getModeState('sccache-preflight-kv-hit') === 'true';
-    const preflightKvChecked = getModeState('sccache-preflight-kv-checked') === 'true';
-    const noPlatform = getModeState('sccache-no-platform') === 'true';
-    const noGit = getModeState('sccache-no-git') === 'true';
-    const sccacheStats = await stopSccacheServer();
-    await stopProxyFromState();
-    if (!workspace || !sccacheTag || options.allowSaves === false) {
+async function finishCompilerCacheSave(tool, state, stats, statsDetail, options) {
+    if (!state.workspace || !state.tag || options.allowSaves === false) {
         return;
     }
     if (!hasSaveToken()) {
         core.notice(`Save skipped: ${missingSaveTokenMessage()}`);
         return;
     }
-    if (!sccacheStats || sccacheStats.compileRequests === 0) {
-        markModeVerifyTagSkipped(sccacheTag);
-        if (preflightKvHit) {
-            core.info(`Skipping sccache post-save verification for ${sccacheTag}: no compile requests were observed.`);
+    if (!stats || stats.compileRequests === 0) {
+        markModeVerifyTagSkipped(state.tag);
+        if (state.kvHit) {
+            core.info(`Skipping ${tool} post-save verification for ${state.tag}: no compile requests were observed.`);
         }
-        else if (preflightCacheEntryHit) {
-            core.info(`Skipping sccache post-save verification for ${sccacheTag}: signed cache entry existed, but no compile requests were observed.`);
+        else if (state.cacheEntryHit) {
+            core.info(`Skipping ${tool} post-save verification for ${state.tag}: signed cache entry existed, but no compile requests were observed.`);
         }
         else {
-            core.info(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
+            core.info(`Skipping ${tool} save for ${state.tag}: no compile requests were observed.`);
         }
         return;
     }
-    const postShutdownStatus = await checkSccacheProxyTagStatus(workspace, sccacheTag, {
-        noPlatform,
-        noGit,
+    const postShutdownStatus = await checkCompilerCacheProxyTagStatus(state.workspace, state.tag, {
+        noPlatform: state.noPlatform,
+        noGit: state.noGit,
     });
-    const rustHitRate = sccacheStats.rustHitRate || 'unknown';
-    core.info(`sccache proxy stats for ${sccacheTag}: compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`);
-    if (sccacheStats.cacheHits > 0) {
+    core.info(`${tool} proxy stats for ${state.tag}: ${statsDetail}`);
+    if (stats.cacheHits > 0) {
         return;
     }
-    if (preflightKvHit) {
-        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests even though direct KV rows existed for '${sccacheTag}' before startup. Check sccache key churn, emitted tag semantics, and proxy read logs.`);
+    if (state.kvHit) {
+        core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests even though direct KV rows existed for '${state.tag}' before startup. Check ${tool} key churn, emitted tag semantics, and proxy read logs.`);
     }
-    else if (preflightCacheEntryHit && postShutdownStatus.kvHit) {
-        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
+    else if (state.cacheEntryHit && postShutdownStatus.kvHit) {
+        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
     }
-    else if (preflightCacheEntryHit && preflightKvChecked && postShutdownStatus.kvChecked) {
-        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`);
+    else if (state.cacheEntryHit && state.kvChecked && postShutdownStatus.kvChecked) {
+        core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`);
     }
-    else if (preflightCacheEntryHit) {
-        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`);
+    else if (state.cacheEntryHit) {
+        core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`);
     }
     else if (postShutdownStatus.kvHit) {
-        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests, but '${sccacheTag}' published successfully. This looks like a cold fill.`);
+        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests, but '${state.tag}' published successfully. This looks like a cold fill.`);
     }
     else if (postShutdownStatus.cacheEntryHit) {
-        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' had a signed cache entry after shutdown, but direct KV rows were not visible. Check boringcache/one cli-version alignment and proxy KV publish logs.`);
+        core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' had a signed cache entry after shutdown, but direct KV rows were not visible. Check boringcache/one cli-version alignment and proxy KV publish logs.`);
     }
     else {
-        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
+        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
     }
+}
+async function runCcacheRestore(plan, inputs) {
+    const ccacheVersion = core.getInput('ccache-version') || CCACHE_DEFAULT_VERSION;
+    await installCcache(ccacheVersion);
+    const statsDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-ccache-'));
+    const statsLog = path.join(statsDirectory, 'stats.log');
+    try {
+        const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('ccache', plan, inputs);
+        const envVars = compilerCacheEnvForStartedProxy(proxyPlan, proxy.port);
+        envVars.CCACHE_STATSLOG = statsLog;
+        exportEnvVars(envVars);
+        saveModeState('ccache-stats-directory', statsDirectory);
+        saveModeState('ccache-stats-log', statsLog);
+        return {
+            cacheHit: preflight.kvHit,
+            cacheTag: proxyPlan.tag,
+            verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, plan.workingDirectory)],
+        };
+    }
+    catch (error) {
+        await fs.promises.rm(statsDirectory, { recursive: true, force: true });
+        throw error;
+    }
+}
+async function runCcacheSave(options = {}) {
+    const state = compilerCacheModeState('ccache');
+    const statsLog = getModeState('ccache-stats-log');
+    const statsDirectory = getModeState('ccache-stats-directory');
+    const stats = statsLog && statsDirectory
+        ? await stopCcacheStorageHelpers(statsLog, statsDirectory)
+        : null;
+    await stopProxyFromState();
+    const statsDetail = stats
+        ? `compile_requests=${stats.compileRequests}, cache_hits=${stats.cacheHits}, cache_misses=${stats.cacheMisses}, remote_hits=${stats.remoteHits}, remote_misses=${stats.remoteMisses}`
+        : '';
+    await finishCompilerCacheSave('ccache', state, stats, statsDetail, options);
+}
+async function runSccacheRestore(plan, inputs) {
+    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
+    await installSccache(sccacheVersion);
+    const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('sccache', plan, inputs);
+    exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
+    await startSccacheServer();
+    core.setOutput('sccache-tag', proxyPlan.tag);
+    core.setOutput('sccache-hit', String(preflight.kvHit));
+    return {
+        cacheHit: preflight.kvHit,
+        cacheTag: proxyPlan.tag,
+        verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, plan.workingDirectory)],
+    };
+}
+async function runSccacheSave(options = {}) {
+    const state = compilerCacheModeState('sccache');
+    const sccacheStats = await stopSccacheServer();
+    await stopProxyFromState();
+    const rustHitRate = sccacheStats?.rustHitRate || 'unknown';
+    const statsDetail = sccacheStats
+        ? `compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`
+        : '';
+    await finishCompilerCacheSave('sccache', state, sccacheStats, statsDetail, options);
 }
 async function stopProxyFromState() {
     const proxyPid = getModeState('proxy-pid');
