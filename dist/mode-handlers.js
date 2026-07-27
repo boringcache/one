@@ -87,17 +87,6 @@ function adapterProxyVerificationSpec(tag, proxyPlan, pathHint) {
         saveExpected: !proxyPlan.read_only,
     };
 }
-function buildKitCacheVerificationSpecs(cacheTag, buildKitCache, noPlatform, noGit, saveExpected, pathHint) {
-    void buildKitCache;
-    const uniqueTags = Array.from(new Set([cacheTag].map((tag) => tag.trim()).filter(Boolean)));
-    return uniqueTags.map((tag) => ({
-        tag,
-        noPlatform,
-        noGit,
-        pathHint,
-        saveExpected,
-    }));
-}
 const SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION = 1;
 const SUPPORTED_CLI_SETUP_SCHEMA_VERSION = 1;
 function assertSupportedCliDryRunSchema(adapter, plan) {
@@ -513,7 +502,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     assertSupportedCliDryRunSchema(adapter, plan);
     return plan;
 }
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '') {
+async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
@@ -528,7 +517,15 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     if (endpointHost.trim()) {
         args.push('--endpoint-host', endpointHost.trim());
     }
-    appendCliPublicationPolicy(args, readOnly);
+    if (stage) {
+        args.push('--stage');
+    }
+    else {
+        appendCliPublicationPolicy(args, readOnly);
+    }
+    for (const candidate of parseList(cacheCandidatesInput)) {
+        args.push('--candidate', candidate);
+    }
     if (failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
@@ -582,11 +579,11 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     }
     return plan;
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '') {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput);
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
+    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput);
 }
-async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput);
+async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', stage = false, cacheCandidatesInput = '') {
+    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput);
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!hasSaveToken()) {
@@ -690,12 +687,6 @@ function recordBuildKitCachePlanState(buildKitPlan, cacheTag) {
     return {
         resolvedWorkspace: buildKitPlan.workspace,
         resolvedCacheTag: cacheTag,
-        buildKitVerification: {
-            noPlatform: buildKitPlan.proxy.no_platform,
-            noGit: buildKitPlan.proxy.no_git,
-            saveExpected: !buildKitPlan.proxy.read_only,
-        },
-        buildKitCacheState: buildKitPlan.buildkit_cache,
     };
 }
 function setBuildKitCacheOutputs(spec) {
@@ -976,7 +967,15 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port
     if (refHost.trim()) {
         args.push('--endpoint-host', refHost.trim());
     }
-    appendCliPublicationPolicy(args, inputs.readOnly);
+    if (inputs.stage) {
+        args.push('--stage');
+    }
+    else {
+        appendCliPublicationPolicy(args, inputs.readOnly);
+    }
+    for (const candidate of parseList(inputs.cacheCandidates)) {
+        args.push('--candidate', candidate);
+    }
     if (inputs.failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
@@ -1583,8 +1582,6 @@ async function runDockerRestore(plan, inputs) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
     }
     const requestedCacheTag = '';
-    let buildKitVerification = null;
-    let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = '';
@@ -1622,7 +1619,7 @@ async function runDockerRestore(plan, inputs) {
         // a free runner port instead of assuming the conventional setup-only
         // port is unused. Setup-only keeps 5000 for its externally consumed refs.
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', cliOwnsManagedBuild ? undefined : 5000);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const usesCliWrappedBuild = cliOwnsManagedBuild || dockerToolCaches.length > 0;
@@ -1630,8 +1627,6 @@ async function runDockerRestore(plan, inputs) {
             const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
             resolvedWorkspace = planState.resolvedWorkspace;
             resolvedCacheTag = planState.resolvedCacheTag;
-            buildKitVerification = planState.buildKitVerification;
-            buildKitCacheState = planState.buildKitCacheState;
             const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, undefined);
             setBuildKitCacheOutputs({
                 ref: dockerPlan.buildkit_cache.cache_ref,
@@ -1673,6 +1668,8 @@ async function runDockerRestore(plan, inputs) {
                 noPlatform: dockerPlan.proxy.no_platform,
                 verbose: inputs.verbose,
                 readOnly: dockerPlan.proxy.read_only,
+                stage: inputs.stage,
+                candidateDigests: dockerPlan.buildkit_cache?.cache_from_candidate_digests || [],
                 ociRequiredReadableRefs: requestedImportRefTags,
                 ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
             }, dockerPlan.proxy));
@@ -1686,8 +1683,6 @@ async function runDockerRestore(plan, inputs) {
             const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
             resolvedWorkspace = planState.resolvedWorkspace;
             resolvedCacheTag = planState.resolvedCacheTag;
-            buildKitVerification = planState.buildKitVerification;
-            buildKitCacheState = planState.buildKitCacheState;
             const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
             setBuildKitCacheOutputs({
                 ref: dockerPlan.buildkit_cache.cache_ref,
@@ -1728,13 +1723,12 @@ async function runDockerRestore(plan, inputs) {
     }
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = buildKitVerification?.saveExpected ?? !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         evidence: modeEvidence,
-        // docker-command=setup defers the build to later workflow steps, so treat
-        // write-capable registry refs as save-expected and verify after post-save.
-        verificationSpecs: buildKitCacheVerificationSpecs(resolvedCacheTag, buildKitCacheState, buildKitVerification?.noPlatform || false, buildKitVerification?.noGit || false, saveExpected, plan.workingDirectory),
+        // The CLI proxy owns OCI import and publication readiness. Generic
+        // verification is for archive and direct-tool tags, not registry refs.
+        verificationSpecs: [],
     };
 }
 async function runDockerSave(options = {}) {
@@ -1799,8 +1793,6 @@ async function runBuildkitRestore(plan, inputs) {
     const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBooleanInput(core.getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
     const requestedCacheTag = '';
-    let buildKitVerification = null;
-    let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
     let resolvedCacheTag = '';
@@ -1822,7 +1814,7 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
-        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints);
+        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, inputs.stage, inputs.cacheCandidates);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await startRegistryProxy(actionProxyOptions({
@@ -1835,6 +1827,8 @@ async function runBuildkitRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            stage: inputs.stage,
+            candidateDigests: dockerPlan.buildkit_cache?.cache_from_candidate_digests || [],
             ociRequiredReadableRefs: requestedImportRefTags,
             ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
         }, dockerPlan.proxy));
@@ -1848,8 +1842,6 @@ async function runBuildkitRestore(plan, inputs) {
         const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
         resolvedWorkspace = planState.resolvedWorkspace;
         resolvedCacheTag = planState.resolvedCacheTag;
-        buildKitVerification = planState.buildKitVerification;
-        buildKitCacheState = planState.buildKitCacheState;
         const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
         setBuildKitCacheOutputs({
             ref: dockerPlan.buildkit_cache.cache_ref,
@@ -1884,11 +1876,11 @@ async function runBuildkitRestore(plan, inputs) {
     core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
     core.setOutput('workspace', resolvedWorkspace);
     core.setOutput('cache-tag', resolvedCacheTag);
-    const saveExpected = buildKitVerification?.saveExpected ?? !inputs.readOnly;
     return {
         cacheTag: resolvedCacheTag,
         evidence: modeEvidence,
-        verificationSpecs: buildKitCacheVerificationSpecs(resolvedCacheTag, buildKitCacheState, buildKitVerification?.noPlatform || false, buildKitVerification?.noGit || false, saveExpected, plan.workingDirectory),
+        // BuildKit uses the same CLI-owned OCI readiness boundary as Docker.
+        verificationSpecs: [],
     };
 }
 async function runBuildkitSave(options = {}) {

@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
-import { hasSaveToken, missingSaveTokenMessage } from './core';
-import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyPullRequestSaveScopeEnv, isPullRequestEvent, loadDiagnosticsConfig, readLogTail, readSavedSaveAllowance, readSavedSaveConfiguration, resolveCliCapabilityVersion, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, saveSkippedByConfigurationMessage, saveSkippedByPolicyMessage, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, } from './core';
+import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyTrustTokenPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
@@ -93,6 +93,8 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
 async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, saveStatus) {
     const diagnostics = loadDiagnosticsConfig(inputs);
     const proxyLogPath = core.getState('proxy-log-path') || core.getState('mode-proxy-log-path');
+    const candidateReceiptFile = core.getState('candidate-receipt-file');
+    const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
     writeActionEvidence('post', {
         phase_status: 'completed',
         phase_summary: postPhaseSummary(saveStatus, trustState),
@@ -106,6 +108,7 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         diagnostics_level: diagnostics.level,
         save_status: saveStatus,
         proxy_log_path: proxyLogPath || '',
+        staged_candidates: stagedCandidates,
     });
     await runDiagnosticsGroup(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
         core.info(`resolved-mode: ${resolvedMode || '(none)'}`);
@@ -114,7 +117,8 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         core.info(`generic-entries: ${genericEntries || '(none)'}`);
         core.info(`verify-mode: ${verifyMode}`);
         core.info(`verify-save-tags: ${verifySaveTags.join(',') || '(none)'}`);
-        core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} save-policy=${trustState.save_policy} save-on-pull-request=${String(trustState.save_on_pull_request)}`);
+        core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
+        core.info(`staged-candidates: ${stagedCandidates.map((candidate) => candidate.id).join(',') || '(none)'}`);
         if (diagnostics.includeLogs) {
             if (proxyLogPath) {
                 const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
@@ -149,12 +153,23 @@ export async function run() {
         strictPostFailure ||= verifyMode === 'check';
         const verifyTimeoutSeconds = normalizeVerifyTimeoutSeconds(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
-        const saveConfigured = readSavedSaveConfiguration(inputs, core.getState('save-configured'));
-        const saveAllowed = readSavedSaveAllowance(inputs, core.getState('save-allowed'));
-        const trustState = buildActionTrustState(inputs, {
-            saveConfigured,
-            saveAllowed,
-        });
+        const requestedTrustPolicy = normalizeTrustPolicy(core.getState('trust-policy') || inputs.trustPolicy);
+        const savedResolvedPolicy = core.getState('resolved-trust-policy');
+        const savedTrustStatus = core.getState('trust-status');
+        const fallbackResolution = resolveTrustPolicy(requestedTrustPolicy);
+        const resolvedTrustPolicy = savedResolvedPolicy === 'restore'
+            || savedResolvedPolicy === 'stage'
+            || savedResolvedPolicy === 'publish'
+            ? savedResolvedPolicy
+            : fallbackResolution.resolved;
+        applyTrustTokenPolicy(resolvedTrustPolicy);
+        const trustState = buildActionTrustState(requestedTrustPolicy, resolvedTrustPolicy, (savedTrustStatus || fallbackResolution.status));
+        let candidateReceiptFile = core.getState('candidate-receipt-file');
+        if (resolvedTrustPolicy === 'stage' && !candidateReceiptFile) {
+            candidateReceiptFile = prepareCandidateReceiptFile();
+            core.saveState('candidate-receipt-file', candidateReceiptFile);
+        }
+        useCandidateReceiptFile(candidateReceiptFile);
         let verifySaveTags = core.getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())
@@ -170,9 +185,6 @@ export async function run() {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
             trust_state: trustState,
         };
-        if (saveAllowed && isPullRequestEvent() && inputs.saveOnPullRequest) {
-            applyPullRequestSaveScopeEnv();
-        }
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
         }
@@ -183,7 +195,8 @@ export async function run() {
             const plan = await buildPlan({
                 ...inputs,
                 cliVersion: cliCapabilityVersion,
-                readOnly: inputs.readOnly || !saveAllowed,
+                readOnly: resolvedTrustPolicy === 'restore',
+                stage: resolvedTrustPolicy === 'stage',
             });
             resolvedMode = plan.mode;
             if (!workingDirectory) {
@@ -211,34 +224,25 @@ export async function run() {
         if (workingDirectory) {
             process.chdir(workingDirectory);
         }
-        if (!saveConfigured) {
+        if (resolvedTrustPolicy === 'restore') {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                core.info(saveSkippedByConfigurationMessage());
+                core.info(`Save skipped: trust-policy ${requestedTrustPolicy} resolved to restore.`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_skipped_configuration' : 'skipped_configuration');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
             return;
         }
-        if (!saveAllowed) {
+        const requiredTokenPresent = resolvedTrustPolicy === 'stage' ? hasStageToken() : hasSaveToken();
+        if (!requiredTokenPresent) {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                core.notice(saveSkippedByPolicyMessage());
+                core.notice(`Save skipped: ${resolvedTrustPolicy === 'stage' ? missingStageTokenMessage() : missingSaveTokenMessage()}`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_skipped_policy' : 'skipped_policy');
-            return;
-        }
-        if (!hasSaveToken()) {
-            if (resolvedMode && resolvedMode !== 'archive') {
-                await runModeSave(resolvedMode, { allowSaves: false });
-            }
-            if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                core.notice(`Save skipped: ${missingSaveTokenMessage()}`);
-            }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_save_token' : 'skipped_missing_save_token');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_token' : 'skipped_missing_token');
             return;
         }
         if (resolvedMode && resolvedMode !== 'archive') {
@@ -259,7 +263,11 @@ export async function run() {
                     acceptPendingSaveExpected: true,
                 });
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_no_generic_save' : 'no_generic_save');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage' && resolvedMode && resolvedMode !== 'archive'
+                ? 'mode_post_staged'
+                : resolvedMode && resolvedMode !== 'archive'
+                    ? 'mode_post_no_generic_save'
+                    : 'no_generic_save');
             return;
         }
         const saveEntries = parseEntries(genericEntries, 'save', {
@@ -272,6 +280,9 @@ export async function run() {
         }
         if (force) {
             args.push('--force');
+        }
+        if (resolvedTrustPolicy === 'stage') {
+            args.push('--stage');
         }
         if (verbose) {
             args.push('--verbose');
@@ -290,7 +301,13 @@ export async function run() {
                 acceptPendingSaveExpected: true,
             });
         }
-        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_and_generic_save' : 'saved');
+        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage'
+            ? resolvedMode && resolvedMode !== 'archive'
+                ? 'mode_post_and_generic_stage'
+                : 'staged'
+            : resolvedMode && resolvedMode !== 'archive'
+                ? 'mode_post_and_generic_save'
+                : 'saved');
     }
     catch (error) {
         writeActionFailureEvidence('post', error, postFailureContext);

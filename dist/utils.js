@@ -5,10 +5,62 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as timers from 'timers';
-import { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, readProjectMiseTools, readMiseTomlVersion, readToolVersionsValue, reshimMise, } from './core';
+import { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, hasRestoreToken, hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, readProjectMiseTools, readMiseTomlVersion, readToolVersionsValue, reshimMise, } from './core';
 import { assertImplementedMode, normalizeMode, resolveModeSpec, } from './modes';
 export { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, };
 export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+export const CANDIDATE_RECEIPT_FILE_ENV = 'BORINGCACHE_CANDIDATE_RECEIPT_FILE';
+export function prepareCandidateReceiptFile() {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'boringcache-one-candidates-'));
+    const receiptFile = path.join(directory, 'receipts.jsonl');
+    fs.writeFileSync(receiptFile, '', { mode: 0o600 });
+    process.env[CANDIDATE_RECEIPT_FILE_ENV] = receiptFile;
+    return receiptFile;
+}
+export function useCandidateReceiptFile(receiptFile) {
+    if (receiptFile.trim()) {
+        process.env[CANDIDATE_RECEIPT_FILE_ENV] = receiptFile;
+    }
+}
+export function readCandidateReceipts(receiptFile) {
+    if (!receiptFile.trim() || !fs.existsSync(receiptFile)) {
+        return [];
+    }
+    const receipts = new Map();
+    for (const line of fs.readFileSync(receiptFile, 'utf8').split('\n')) {
+        if (!line.trim()) {
+            continue;
+        }
+        try {
+            const parsed = JSON.parse(line);
+            const id = parsed.id?.trim() || '';
+            const digest = parsed.manifest_root_digest?.trim().toLowerCase() || '';
+            if (!id || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+                core.warning('Ignoring malformed BoringCache candidate receipt.');
+                continue;
+            }
+            receipts.set(id, {
+                id,
+                tag: parsed.tag?.trim() || '',
+                manifest_root_digest: digest,
+                storage_mode: parsed.storage_mode?.trim() || '',
+            });
+        }
+        catch {
+            core.warning('Ignoring invalid JSON in the BoringCache candidate receipt file.');
+        }
+    }
+    return [...receipts.values()];
+}
+export function publishCandidateOutputs(receiptFile) {
+    const receipts = readCandidateReceipts(receiptFile);
+    if (receipts.length === 0) {
+        return receipts;
+    }
+    core.setOutput('cache-candidates', receipts.map((receipt) => receipt.id).join('\n'));
+    core.setOutput('cache-candidate-digests', receipts.map((receipt) => receipt.manifest_root_digest).join('\n'));
+    return receipts;
+}
 export const MAX_DIAGNOSTICS_LOG_LINES = 500;
 export const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
 export const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
@@ -38,7 +90,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.13.105',
+        cliVersion: core.getInput('cli-version') || 'v1.13.106',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -46,9 +98,10 @@ export function getInputs() {
         tools: core.getInput('tools'),
         mavenVersion: core.getInput('maven-version') || '3.9.9',
         mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
-        readOnly: core.getBooleanInput('read-only'),
-        savePolicy: normalizeSavePolicy(core.getInput('save-policy') || 'auto'),
-        saveOnPullRequest: core.getBooleanInput('save-on-pull-request'),
+        trustPolicy: normalizeTrustPolicy(core.getInput('trust-policy') || 'auto'),
+        cacheCandidates: core.getInput('cache-candidates', { trimWhitespace: false }),
+        readOnly: false,
+        stage: false,
         saveAlways: core.getBooleanInput('save-always'),
         verify: normalizeVerifyMode(core.getInput('verify')),
         verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(core.getInput('verify-timeout-seconds')),
@@ -69,93 +122,59 @@ export function getInputs() {
     };
 }
 export function isPullRequestEvent() {
-    return (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'pull_request';
-}
-export function saveConfigured(inputs) {
-    return inputs.savePolicy !== 'off';
-}
-export function saveAllowedForEvent(inputs) {
-    return !isPullRequestEvent() || inputs.saveOnPullRequest;
-}
-export function saveSkippedByConfigurationMessage() {
-    return 'Save skipped: save-policy is off; this step is restore-only by configuration.';
-}
-export function saveSkippedByPolicyMessage() {
-    return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
-}
-export function applyPullRequestSaveScopeEnv() {
-    process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
-    process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
-    core.exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
-    core.exportVariable('BORINGCACHE_RESTORE_PR_CACHE', '1');
+    return ['pull_request', 'pull_request_target'].includes((process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase());
 }
 export function applyRestoreOnlyTokenPolicy() {
     const restoreFallback = process.env.BORINGCACHE_RESTORE_TOKEN ||
+        process.env.BORINGCACHE_STAGE_TOKEN ||
         process.env.BORINGCACHE_SAVE_TOKEN;
-    const hadSaveCapableToken = Boolean(process.env.BORINGCACHE_SAVE_TOKEN);
+    const hadWriteCapableToken = Boolean(process.env.BORINGCACHE_STAGE_TOKEN || process.env.BORINGCACHE_SAVE_TOKEN);
     if (restoreFallback) {
         process.env.BORINGCACHE_RESTORE_TOKEN = restoreFallback;
     }
+    delete process.env.BORINGCACHE_STAGE_TOKEN;
     delete process.env.BORINGCACHE_SAVE_TOKEN;
-    return hadSaveCapableToken;
+    delete process.env.BORINGCACHE_ADMIN_TOKEN;
+    delete process.env.BORINGCACHE_API_TOKEN;
+    return hadWriteCapableToken;
 }
-export function applySaveTokenPolicy(inputs) {
+export function resolveTrustPolicy(requested) {
+    const intended = requested === 'auto'
+        ? (isPullRequestEvent() ? 'restore' : 'publish')
+        : requested;
+    if (intended === 'stage' && !hasStageToken()) {
+        return { resolved: 'restore', status: 'restore_only_missing_stage_token' };
+    }
+    if (intended === 'publish' && !hasSaveToken()) {
+        return { resolved: 'restore', status: 'restore_only_missing_save_token' };
+    }
+    if (intended === 'restore') {
+        return {
+            resolved: 'restore',
+            status: requested === 'auto' && isPullRequestEvent()
+                ? 'restore_only_by_event_policy'
+                : 'restore_only',
+        };
+    }
+    return { resolved: intended, status: intended };
+}
+export function applyTrustTokenPolicy(resolved) {
     delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
-    if (isPullRequestEvent() && inputs.saveOnPullRequest) {
-        applyPullRequestSaveScopeEnv();
+    delete process.env.BORINGCACHE_RESTORE_PR_CACHE;
+    if (resolved === 'restore') {
+        applyRestoreOnlyTokenPolicy();
     }
-    const saveAllowed = saveAllowedForEvent(inputs);
-    if (saveAllowed) {
-        return true;
-    }
-    if (applyRestoreOnlyTokenPolicy()) {
-        core.notice('pull_request detected: treating save-capable BoringCache tokens as restore-only. Set save-on-pull-request: true to allow writes.');
-    }
-    return false;
 }
-export function readSavedSaveAllowance(inputs, savedValue) {
-    if (!saveConfigured(inputs)) {
-        return false;
-    }
-    if (savedValue === 'true') {
-        return true;
-    }
-    if (savedValue === 'false') {
-        return false;
-    }
-    return saveAllowedForEvent(inputs);
-}
-export function readSavedSaveConfiguration(inputs, savedValue) {
-    if (savedValue === 'true') {
-        return true;
-    }
-    if (savedValue === 'false') {
-        return false;
-    }
-    return saveConfigured(inputs);
-}
-export function buildActionTrustState(inputs, options) {
-    const saveCapable = options.saveCapable ?? hasSaveToken();
-    let status = 'read_write';
-    if (!options.saveConfigured) {
-        status = 'restore_only_by_configuration';
-    }
-    else if (!options.saveAllowed) {
-        status = 'restore_only_by_event_policy';
-    }
-    else if (!saveCapable) {
-        status = 'restore_only_missing_save_token';
-    }
+export function buildActionTrustState(requestedPolicy, resolvedPolicy, status) {
     return {
-        status,
+        status: status || (resolvedPolicy === 'restore' ? 'restore_only' : resolvedPolicy),
         event_name: (process.env.GITHUB_EVENT_NAME || '').trim(),
-        save_policy: inputs.savePolicy,
-        save_on_pull_request: inputs.saveOnPullRequest,
-        save_configured: options.saveConfigured,
-        save_allowed: options.saveAllowed,
-        save_capable: saveCapable,
+        requested_policy: requestedPolicy,
+        resolved_policy: resolvedPolicy,
+        write_allowed: resolvedPolicy !== 'restore',
         token_capabilities: {
             restore: hasRestoreToken(),
+            stage: hasStageToken(),
             save: hasSaveToken(),
         },
     };
@@ -195,6 +214,27 @@ export function restorePhaseSummary(options) {
 }
 export function postPhaseSummary(saveStatus, trustState) {
     switch (saveStatus) {
+        case 'staged':
+            return {
+                status: 'staged',
+                headline: 'Cache candidate staged',
+                detail: 'BoringCache staged immutable archive entries without moving published tags.',
+                next_step: 'Select the exact candidate in a trusted solve or promote the exact archive snapshot.',
+            };
+        case 'mode_post_and_generic_stage':
+            return {
+                status: 'staged',
+                headline: 'Cache candidates staged',
+                detail: 'BoringCache completed mode-specific candidate publication and staged immutable archive entries without moving published tags.',
+                next_step: 'Select exact candidates in a trusted solve or promote an exact archive snapshot.',
+            };
+        case 'mode_post_staged':
+            return {
+                status: 'staged',
+                headline: 'Cache candidate staged',
+                detail: 'BoringCache completed mode-specific immutable candidate publication without moving the published tag.',
+                next_step: 'Select the exact candidate in a trusted Docker or BuildKit solve.',
+            };
         case 'saved':
             return {
                 status: 'saved',
@@ -223,29 +263,21 @@ export function postPhaseSummary(saveStatus, trustState) {
                 detail: 'BoringCache completed mode-specific post work; there were no archive entries to save.',
                 next_step: 'No action is needed unless archive entries were expected.',
             };
-        case 'skipped_configuration':
-        case 'mode_post_skipped_configuration':
+        case 'restore_only':
+        case 'mode_post_restore_only':
             return {
-                status: 'skipped_configuration',
-                headline: 'Save skipped by configuration',
-                detail: saveSkippedByConfigurationMessage(),
-                next_step: 'Use save-policy: auto when trusted jobs should populate cache entries.',
+                status: 'restore_only',
+                headline: 'Restore-only run completed',
+                detail: `BoringCache did not publish cache changes: ${trustStateDetail(trustState)}`,
+                next_step: restoreOnlyNextStep(trustState),
             };
-        case 'skipped_policy':
-        case 'mode_post_skipped_policy':
+        case 'skipped_missing_token':
+        case 'mode_post_missing_token':
             return {
-                status: 'skipped_policy',
-                headline: 'Save skipped by event policy',
-                detail: saveSkippedByPolicyMessage(),
-                next_step: 'Seed caches from a trusted branch, or set save-on-pull-request: true only for trusted pull request workflows.',
-            };
-        case 'skipped_missing_save_token':
-        case 'mode_post_missing_save_token':
-            return {
-                status: 'skipped_missing_save_token',
-                headline: 'Save skipped: missing save token',
-                detail: `Save skipped: ${missingSaveTokenMessage()}`,
-                next_step: 'Set BORINGCACHE_SAVE_TOKEN for trusted jobs that should write cache entries.',
+                status: 'skipped_missing_token',
+                headline: 'Publication skipped: missing token capability',
+                detail: `BoringCache could not apply trust-policy ${trustState.requested_policy}: ${trustStateDetail(trustState)}`,
+                next_step: restoreOnlyNextStep(trustState),
             };
         default:
             return {
@@ -267,10 +299,12 @@ function failurePhaseSummary(phase, error) {
 }
 function trustStateDetail(trustState) {
     switch (trustState.status) {
-        case 'restore_only_by_configuration':
-            return 'save-policy is off.';
+        case 'restore_only':
+            return 'trust-policy is restore.';
         case 'restore_only_by_event_policy':
-            return 'pull request jobs stay restore-only by default.';
+            return 'trust-policy auto resolves pull requests to restore.';
+        case 'restore_only_missing_stage_token':
+            return missingStageTokenMessage();
         case 'restore_only_missing_save_token':
             return missingSaveTokenMessage();
         default:
@@ -279,23 +313,27 @@ function trustStateDetail(trustState) {
 }
 function restoreOnlyNextStep(trustState) {
     switch (trustState.status) {
-        case 'restore_only_by_configuration':
-            return 'Use save-policy: auto when trusted jobs should populate cache entries.';
+        case 'restore_only':
+            return 'Use trust-policy: stage or publish only when this job is trusted for that operation.';
         case 'restore_only_by_event_policy':
-            return 'Seed caches from a trusted branch, or set save-on-pull-request: true only for trusted pull request workflows.';
+            return 'Use trust-policy: stage for an immutable candidate, or publish only when this pull-request job is explicitly trusted.';
+        case 'restore_only_missing_stage_token':
+            return 'Set BORINGCACHE_STAGE_TOKEN for jobs that should stage immutable candidates.';
         case 'restore_only_missing_save_token':
             return 'Set BORINGCACHE_SAVE_TOKEN for trusted jobs that should write cache entries.';
         default:
             return 'No action is needed unless this workflow should refresh cache entries.';
     }
 }
-export function normalizeSavePolicy(value) {
+export function normalizeTrustPolicy(value) {
     switch ((value || 'auto').trim().toLowerCase()) {
         case 'auto':
-        case 'off':
+        case 'restore':
+        case 'stage':
+        case 'publish':
             return (value || 'auto').trim().toLowerCase();
         default:
-            throw new Error(`Unsupported save-policy "${value}". Expected auto or off.`);
+            throw new Error(`Unsupported trust-policy "${value}". Expected auto, restore, stage, or publish.`);
     }
 }
 export function normalizeDiagnosticsMode(value) {
@@ -882,9 +920,9 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
         });
     }
 }
-export function buildGenericVerificationSpecs(plan) {
+export function buildGenericVerificationSpecs(plan, noGit = false) {
     const specs = [];
-    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, false);
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit);
     return specs;
 }
 function envWithOverrides(overrides) {
@@ -1586,11 +1624,14 @@ function appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
 }
 async function runDryRunPlan(workingDirectory, options) {
-    const { profileNames = [], readOnly = false, } = options;
+    const { profileNames = [], readOnly = false, noGit = false, } = options;
     const executePlan = async () => {
         const args = ['run'];
         for (const profileName of profileNames) {
             args.push('--profile', profileName);
+        }
+        if (noGit) {
+            args.push('--no-git');
         }
         appendCliPublicationPolicy(args, readOnly);
         args.push('--dry-run', '--json');
@@ -1638,6 +1679,7 @@ export async function buildArchiveEntries(inputs) {
     const plan = await runDryRunPlan(inputs.workingDirectory, {
         profileNames: cacheProfiles,
         readOnly: inputs.readOnly,
+        noGit: inputs.stage,
     });
     const firstEntry = plan.archive_entries?.[0];
     const firstPair = plan.tag_path_pairs[0];

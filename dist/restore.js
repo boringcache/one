@@ -1,6 +1,5 @@
 import * as core from '@actions/core';
-import { hasSaveToken } from './core';
-import { applySaveTokenPolicy, applyRestoreOnlyTokenPolicy, applyCliPlanEnv, applyMiseSetup, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getInputs, isPullRequestEvent, saveConfigured, loadDiagnosticsConfig, parseEntries, readLogTail, resolveCliCapabilityVersion, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applyTrustTokenPolicy, applyCliPlanEnv, applyMiseSetup, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 function appendRestoreDiagnostic(current, data) {
@@ -31,8 +30,8 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
         core.info(`resolved-tags: ${resolvedTags.join(',') || '(none)'}`);
         core.info(`cache-hit: ${String(overallHit)}`);
         core.info(`verify-mode: ${inputs.verify}`);
-        core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} save-policy=${trustState.save_policy} save-on-pull-request=${String(trustState.save_on_pull_request)}`);
-        core.info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} save=${String(trustState.token_capabilities.save)}`);
+        core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
+        core.info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} stage=${String(trustState.token_capabilities.stage)} save=${String(trustState.token_capabilities.save)}`);
         if (diagnostics.includeLogs) {
             const proxyLogPath = core.getState('proxy-log-path');
             if (proxyLogPath) {
@@ -170,19 +169,16 @@ export async function run() {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
             verify_mode: inputs.verify,
         };
-        const saveEnabled = saveConfigured(inputs);
-        delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
-        const saveAllowed = saveEnabled ? applySaveTokenPolicy(inputs) : false;
-        if (!saveEnabled) {
-            applyRestoreOnlyTokenPolicy();
-        }
-        const trustState = buildActionTrustState(inputs, {
-            saveConfigured: saveEnabled,
-            saveAllowed,
-        });
-        const effectiveInputs = saveEnabled && saveAllowed
-            ? inputs
-            : { ...inputs, readOnly: true };
+        const trustResolution = resolveTrustPolicy(inputs.trustPolicy);
+        applyTrustTokenPolicy(trustResolution.resolved);
+        const trustState = buildActionTrustState(inputs.trustPolicy, trustResolution.resolved, trustResolution.status);
+        const effectiveInputs = {
+            ...inputs,
+            readOnly: trustResolution.resolved === 'restore',
+            stage: trustResolution.resolved === 'stage',
+        };
+        const candidateReceiptFile = effectiveInputs.stage ? prepareCandidateReceiptFile() : '';
+        core.saveState('candidate-receipt-file', candidateReceiptFile);
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
@@ -190,6 +186,19 @@ export async function run() {
         const cliCapabilityVersion = await resolveCliCapabilityVersion(inputs.cliVersion);
         const capabilityInputs = { ...effectiveInputs, cliVersion: cliCapabilityVersion };
         const plan = await buildPlan(capabilityInputs);
+        const hasCandidateImports = inputs.cacheCandidates.trim().length > 0;
+        if (effectiveInputs.stage && hasCandidateImports) {
+            throw new Error('trust-policy stage cannot import cache-candidates; stage one immutable output, then select it in a separate restore or publish run.');
+        }
+        if (effectiveInputs.stage && !['archive', 'docker', 'buildkit'].includes(plan.mode)) {
+            throw new Error(`trust-policy stage is not available for ${plan.mode}; direct tool caches do not yet have an immutable candidate boundary.`);
+        }
+        if (hasCandidateImports && !['docker', 'buildkit'].includes(plan.mode)) {
+            throw new Error('cache-candidates are supported only for Docker and BuildKit cache manifests. Archives promote one exact complete snapshot, and direct tool caches retain authoritative tool keys.');
+        }
+        if (effectiveInputs.stage && inputs.dockerToolCache.trim()) {
+            throw new Error('trust-policy stage cannot be combined with docker-tool-cache until direct tool caches have an immutable candidate boundary.');
+        }
         restoreFailureContext = {
             ...restoreFailureContext,
             workspace: plan.workspace,
@@ -206,15 +215,16 @@ export async function run() {
             await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
         }
         const modeRestore = await runModeRestore(plan, effectiveInputs);
+        const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
         const genericSaveEntries = archiveRestore.saveEntries;
         const verificationSpecs = [
-            ...buildGenericVerificationSpecs(plan),
+            ...buildGenericVerificationSpecs(plan, effectiveInputs.stage),
             ...(modeRestore.verificationSpecs || []),
         ];
         const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
-        const saveCapable = saveEnabled && hasSaveToken();
+        const saveCapable = trustResolution.resolved !== 'restore';
         const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
-        const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
+        const deferredVerifySpecs = trustResolution.resolved === 'publish' ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
         const overallHit = modeRestore.cacheHit ?? archiveRestore.hit;
@@ -245,14 +255,13 @@ export async function run() {
             mode_evidence: modeRestore.evidence || {},
             diagnostics_level: diagnostics.level,
             trust_state: trustState,
-            save_configured: saveEnabled,
-            save_allowed: saveAllowed,
-            save_capable: saveCapable,
+            trust_policy: trustResolution.resolved,
             verify_mode: inputs.verify,
             verify_save_tags: deferredVerifyTags,
             token_capabilities: {
                 ...trustState.token_capabilities,
             },
+            staged_candidates: stagedCandidates,
         });
         restoreFailureContext = {
             ...restoreFailureContext,
@@ -262,9 +271,7 @@ export async function run() {
             cache_hit: overallHit,
             mode_evidence: modeRestore.evidence || {},
             trust_state: trustState,
-            save_configured: saveEnabled,
-            save_allowed: saveAllowed,
-            save_capable: saveCapable,
+            trust_policy: trustResolution.resolved,
             verify_save_tags: deferredVerifyTags,
         };
         core.saveState('resolved-mode', plan.mode);
@@ -284,8 +291,9 @@ export async function run() {
         core.saveState('verify-mode', inputs.verify);
         core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
         core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
-        core.saveState('save-configured', String(saveEnabled));
-        core.saveState('save-allowed', String(saveAllowed));
+        core.saveState('trust-policy', inputs.trustPolicy);
+        core.saveState('resolved-trust-policy', trustResolution.resolved);
+        core.saveState('trust-status', trustResolution.status);
         if (!saveCapable && inputs.verify !== 'none' && saveExpectedSpecs.length > 0) {
             core.info('Skipping save-expected tag verification in restore step: no save-capable token is available.');
         }
@@ -298,11 +306,8 @@ export async function run() {
             });
         }
         await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState);
-        if (!saveEnabled) {
-            core.info('Post step save is disabled by save-policy: off.');
-        }
-        if (saveEnabled && isPullRequestEvent() && !saveAllowed) {
-            core.info('Post step will stay restore-only unless save-on-pull-request: true is set.');
+        if (trustResolution.resolved === 'restore') {
+            core.info(`Post step is restore-only (trust-policy: ${inputs.trustPolicy}).`);
         }
     }
     catch (error) {
