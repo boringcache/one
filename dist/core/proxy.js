@@ -5,7 +5,7 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, warnIfUsingLegacyApiToken, } from './auth';
+import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, } from './auth';
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
@@ -293,7 +293,6 @@ export function assertOciImportReady(readiness) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 export async function startRegistryProxy(options) {
-    warnIfUsingLegacyApiToken();
     const { restoreToken, saveToken } = getAuthTokens();
     let effectiveReadOnly = options.readOnly === true;
     let authToken = effectiveReadOnly ? restoreToken : saveToken;
@@ -372,7 +371,6 @@ export async function startRegistryProxy(options) {
         stdio: ['ignore', logFd, logFd],
         env: {
             ...process.env,
-            BORINGCACHE_API_TOKEN: authToken,
         }
     });
     child.unref();
