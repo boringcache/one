@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.13.105'
+    default: 'v1.13.106'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -24,17 +24,12 @@ inputs:
   tools:
     description: 'Explicit mise tools to install, one per line (for example ruby@3.3, node@22). Overrides auto-detected project tools for the same names.'
     required: false
-  read-only:
-    description: 'Proxy-backed modes: run without writes when supported.'
-    default: 'false'
-    required: false
-  save-policy:
-    description: 'Whether boringcache/one should publish cache updates in the post step: auto (default) saves when event policy and tokens allow it, off keeps the step restore-only by configuration.'
+  trust-policy:
+    description: 'Cache lifecycle: auto restores on pull requests and publishes on trusted events; restore never writes; stage creates an immutable archive or Docker/BuildKit candidate without moving the published tag; publish updates the published tag. Token capability remains authoritative.'
     default: 'auto'
     required: false
-  save-on-pull-request:
-    description: 'Allow save-capable tokens to publish cache updates on pull_request events. Defaults to false so pull requests stay restore-only; missing PR-scoped Docker cache refs should fall back to CLI-planned base/default imports, not require PR writes.'
-    default: 'false'
+  cache-candidates:
+    description: 'Exact staged candidate IDs or manifest-root digests to import for Docker or BuildKit, comma-separated or newline-separated. Candidates are restore-only inputs; publication still targets only the CLI-planned tag.'
     required: false
   verify:
     description: 'Optional internal verification for resolved tags: none, check, wait, or warn. check is one-shot; wait and warn poll explicitly. Save-capable tags verify in the post step after save completes.'
@@ -244,6 +239,10 @@ outputs:
     description: 'Resolved archive cache entries from the CLI plan'
   resolved-tags:
     description: 'Resolved exact cache tags used by boringcache/one for verification and follow-up checks'
+  cache-candidates:
+    description: 'Exact staged candidate IDs created by this Action invocation, newline-separated. Pass Docker/BuildKit candidates to a later trusted cache-candidates input; promote exact archive candidates explicitly.'
+  cache-candidate-digests:
+    description: 'Exact manifest-root digests for candidates staged by this Action invocation, newline-separated.'
   proxy-port:
     description: 'Resolved proxy port for proxy-backed modes'
   proxy-log-path:
@@ -251,9 +250,9 @@ outputs:
   cache-ref:
     description: 'Resolved managed Docker or BuildKit cache ref.'
   cache-from:
-    description: 'Resolved Docker --cache-from or BuildKit --import-cache values for Docker or BuildKit modes, newline-separated when the CLI plan includes multiple import refs. PR-scoped refs may be absent on restore-only PR runs.'
+    description: 'Resolved Docker --cache-from or BuildKit --import-cache values, newline-separated. Exact candidates are additional restore-only imports beside the current published tag.'
   cache-to:
-    description: 'Resolved Docker --cache-to or BuildKit --export-cache value for Docker or BuildKit modes'
+    description: 'Resolved Docker --cache-to or BuildKit --export-cache value. Candidate imports never become export targets.'
   docker-cache-run-ref:
     description: 'Provider-neutral immutable Docker or BuildKit cache run ref tag when CI run-ref derivation is active'
   docker-cache-from-refs:

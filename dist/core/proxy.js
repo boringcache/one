@@ -5,7 +5,7 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, } from './auth';
+import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, missingStageTokenMessage, } from './auth';
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
@@ -293,19 +293,29 @@ export function assertOciImportReady(readiness) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 export async function startRegistryProxy(options) {
-    const { restoreToken, saveToken } = getAuthTokens();
+    const { restoreToken, stageToken, saveToken } = getAuthTokens();
+    if (options.readOnly && options.stage) {
+        throw new Error('Proxy stage cannot be combined with read-only mode.');
+    }
     let effectiveReadOnly = options.readOnly === true;
-    let authToken = effectiveReadOnly ? restoreToken : saveToken;
+    const requestedStage = options.stage === true;
+    let effectiveStage = requestedStage;
+    let authToken = effectiveReadOnly
+        ? restoreToken
+        : effectiveStage
+            ? stageToken
+            : saveToken;
     if (!authToken && !effectiveReadOnly && restoreToken) {
         effectiveReadOnly = true;
+        effectiveStage = false;
         authToken = restoreToken;
-        core.info('No save-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN');
+        core.info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
     if (!authToken) {
         if (effectiveReadOnly) {
             throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
         }
-        throw new Error(`${missingSaveTokenMessage()} This is required for proxy mode.`);
+        throw new Error(`${effectiveStage ? missingStageTokenMessage() : missingSaveTokenMessage()} This is required for proxy mode.`);
     }
     const host = options.host || '127.0.0.1';
     const cliCommand = 'cache-registry';
@@ -346,6 +356,12 @@ export async function startRegistryProxy(options) {
             args.push('--oci-alias-promotion-ref', trimmed);
         }
     }
+    for (const digest of options.candidateDigests || []) {
+        const trimmed = digest.trim();
+        if (trimmed) {
+            args.push('--candidate-digest', trimmed);
+        }
+    }
     const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
     if (ociHydration) {
         args.push('--oci-hydration', ociHydration);
@@ -353,7 +369,10 @@ export async function startRegistryProxy(options) {
     for (const [key, value] of Object.entries(options.metadataHints || {})) {
         args.push('--metadata-hint', `${key}=${value}`);
     }
-    if (effectiveReadOnly) {
+    if (effectiveStage) {
+        args.push('--stage');
+    }
+    else if (effectiveReadOnly) {
         args.push('--read-only');
     }
     const strictCacheErrors = options.failOnCacheError ?? !effectiveReadOnly;
