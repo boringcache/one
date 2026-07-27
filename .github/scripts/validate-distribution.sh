@@ -32,7 +32,7 @@ test -s dist/utils.js
 
 for source_path in docs examples scripts lib tests package.json package-lock.json tsconfig.json jest.config.js node_modules; do
   if [[ -e "$source_path" ]]; then
-    echo "$source_path belongs in the private monorepo gha source, not the public distribution repo." >&2
+    echo "$source_path is not part of the published Action distribution." >&2
     exit 1
   fi
 done
