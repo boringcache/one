@@ -26,6 +26,7 @@ Commit `.boringcache.toml`, then refer to the same profile in CI:
 ```yaml
 - uses: boringcache/one@58df2c0d6884ecd5e430feeeaf7e477656864771 # v1.13.102
   with:
+    trust-policy: auto
     setup: none
     mode: archive
     cache-profiles: ci
@@ -37,6 +38,12 @@ Commit `.boringcache.toml`, then refer to the same profile in CI:
 The matching local command is `boringcache run --profile ci -- npm ci`. The
 Action accepts only the profile selector; workspace, entries, tags, paths,
 exclusions, and scope stay in the committed plan.
+
+`trust-policy` is the one lifecycle control. `auto` restores on pull requests
+and publishes from trusted jobs when `BORINGCACHE_SAVE_TOKEN` is available.
+An isolated trusted candidate job uses `trust-policy: stage` with
+`BORINGCACHE_STAGE_TOKEN`; a later trusted Docker or BuildKit build imports its
+exact `cache-candidates` output without adding another export.
 
 Archive entries are opaque tar round trips. GNU tar creates a canonical stream
 whose SHA-256 is the cache identity; zstd is only its transport encoding. On
@@ -50,6 +57,7 @@ Docker mode:
 ```yaml
 - uses: boringcache/one@58df2c0d6884ecd5e430feeeaf7e477656864771 # v1.13.102
   with:
+    trust-policy: auto
     setup: none
     mode: docker
     image: ghcr.io/${{ github.repository }}

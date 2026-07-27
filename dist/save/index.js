@@ -93530,9 +93530,11 @@ async function execBoringCache(args, options = {}) {
 ;// CONCATENATED MODULE: ./dist/core/auth.js
 function getAuthTokens() {
     const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || undefined;
-    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || saveToken;
+    const stageToken = process.env.BORINGCACHE_STAGE_TOKEN || saveToken;
+    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || stageToken;
     return {
         restoreToken,
+        stageToken,
         saveToken,
     };
 }
@@ -93542,11 +93544,17 @@ function auth_hasRestoreToken() {
 function auth_hasSaveToken() {
     return Boolean(getAuthTokens().saveToken);
 }
-function missingRestoreTokenMessage() {
-    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN.';
+function hasStageToken() {
+    return Boolean(getAuthTokens().stageToken);
 }
-function auth_missingSaveTokenMessage() {
+function missingRestoreTokenMessage() {
+    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
+}
+function missingSaveTokenMessage() {
     return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN.';
+}
+function missingStageTokenMessage() {
+    return 'A stage-capable token is required. Set BORINGCACHE_STAGE_TOKEN or BORINGCACHE_SAVE_TOKEN.';
 }
 
 ;// CONCATENATED MODULE: ./dist/core/inputs.js
@@ -93895,19 +93903,29 @@ function assertOciImportReady(readiness) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function proxy_startRegistryProxy(options) {
-    const { restoreToken, saveToken } = getAuthTokens();
+    const { restoreToken, stageToken, saveToken } = getAuthTokens();
+    if (options.readOnly && options.stage) {
+        throw new Error('Proxy stage cannot be combined with read-only mode.');
+    }
     let effectiveReadOnly = options.readOnly === true;
-    let authToken = effectiveReadOnly ? restoreToken : saveToken;
+    const requestedStage = options.stage === true;
+    let effectiveStage = requestedStage;
+    let authToken = effectiveReadOnly
+        ? restoreToken
+        : effectiveStage
+            ? stageToken
+            : saveToken;
     if (!authToken && !effectiveReadOnly && restoreToken) {
         effectiveReadOnly = true;
+        effectiveStage = false;
         authToken = restoreToken;
-        info('No save-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN');
+        info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
     if (!authToken) {
         if (effectiveReadOnly) {
             throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
         }
-        throw new Error(`${auth_missingSaveTokenMessage()} This is required for proxy mode.`);
+        throw new Error(`${effectiveStage ? missingStageTokenMessage() : missingSaveTokenMessage()} This is required for proxy mode.`);
     }
     const host = options.host || '127.0.0.1';
     const cliCommand = 'cache-registry';
@@ -93948,6 +93966,12 @@ async function proxy_startRegistryProxy(options) {
             args.push('--oci-alias-promotion-ref', trimmed);
         }
     }
+    for (const digest of options.candidateDigests || []) {
+        const trimmed = digest.trim();
+        if (trimmed) {
+            args.push('--candidate-digest', trimmed);
+        }
+    }
     const ociHydration = (options.ociHydration || proxy_DEFAULT_OCI_HYDRATION_POLICY).trim();
     if (ociHydration) {
         args.push('--oci-hydration', ociHydration);
@@ -93955,7 +93979,10 @@ async function proxy_startRegistryProxy(options) {
     for (const [key, value] of Object.entries(options.metadataHints || {})) {
         args.push('--metadata-hint', `${key}=${value}`);
     }
-    if (effectiveReadOnly) {
+    if (effectiveStage) {
+        args.push('--stage');
+    }
+    else if (effectiveReadOnly) {
         args.push('--read-only');
     }
     const strictCacheErrors = options.failOnCacheError ?? !effectiveReadOnly;
@@ -94903,6 +94930,58 @@ function assertImplementedMode(modeSpec) {
 
 
 const utils_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+const CANDIDATE_RECEIPT_FILE_ENV = 'BORINGCACHE_CANDIDATE_RECEIPT_FILE';
+function prepareCandidateReceiptFile() {
+    const directory = external_fs_namespaceObject.mkdtempSync(external_path_.join(external_os_.tmpdir(), 'boringcache-one-candidates-'));
+    const receiptFile = external_path_.join(directory, 'receipts.jsonl');
+    external_fs_namespaceObject.writeFileSync(receiptFile, '', { mode: 0o600 });
+    process.env[CANDIDATE_RECEIPT_FILE_ENV] = receiptFile;
+    return receiptFile;
+}
+function useCandidateReceiptFile(receiptFile) {
+    if (receiptFile.trim()) {
+        process.env[CANDIDATE_RECEIPT_FILE_ENV] = receiptFile;
+    }
+}
+function readCandidateReceipts(receiptFile) {
+    if (!receiptFile.trim() || !external_fs_namespaceObject.existsSync(receiptFile)) {
+        return [];
+    }
+    const receipts = new Map();
+    for (const line of external_fs_namespaceObject.readFileSync(receiptFile, 'utf8').split('\n')) {
+        if (!line.trim()) {
+            continue;
+        }
+        try {
+            const parsed = JSON.parse(line);
+            const id = parsed.id?.trim() || '';
+            const digest = parsed.manifest_root_digest?.trim().toLowerCase() || '';
+            if (!id || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+                warning('Ignoring malformed BoringCache candidate receipt.');
+                continue;
+            }
+            receipts.set(id, {
+                id,
+                tag: parsed.tag?.trim() || '',
+                manifest_root_digest: digest,
+                storage_mode: parsed.storage_mode?.trim() || '',
+            });
+        }
+        catch {
+            warning('Ignoring invalid JSON in the BoringCache candidate receipt file.');
+        }
+    }
+    return [...receipts.values()];
+}
+function publishCandidateOutputs(receiptFile) {
+    const receipts = readCandidateReceipts(receiptFile);
+    if (receipts.length === 0) {
+        return receipts;
+    }
+    setOutput('cache-candidates', receipts.map((receipt) => receipt.id).join('\n'));
+    setOutput('cache-candidate-digests', receipts.map((receipt) => receipt.manifest_root_digest).join('\n'));
+    return receipts;
+}
 const MAX_DIAGNOSTICS_LOG_LINES = 500;
 const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
 const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
@@ -94940,9 +95019,10 @@ function getInputs() {
         tools: getInput('tools'),
         mavenVersion: getInput('maven-version') || '3.9.9',
         mavenLocalRepo: getInput('maven-local-repo') || '~/.m2/repository',
-        readOnly: getBooleanInput('read-only'),
-        savePolicy: normalizeSavePolicy(getInput('save-policy') || 'auto'),
-        saveOnPullRequest: getBooleanInput('save-on-pull-request'),
+        trustPolicy: normalizeTrustPolicy(getInput('trust-policy') || 'auto'),
+        cacheCandidates: getInput('cache-candidates', { trimWhitespace: false }),
+        readOnly: false,
+        stage: false,
         saveAlways: getBooleanInput('save-always'),
         verify: normalizeVerifyMode(getInput('verify')),
         verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(getInput('verify-timeout-seconds')),
@@ -94963,93 +95043,59 @@ function getInputs() {
     };
 }
 function isPullRequestEvent() {
-    return (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'pull_request';
-}
-function saveConfigured(inputs) {
-    return inputs.savePolicy !== 'off';
-}
-function saveAllowedForEvent(inputs) {
-    return !isPullRequestEvent() || inputs.saveOnPullRequest;
-}
-function saveSkippedByConfigurationMessage() {
-    return 'Save skipped: save-policy is off; this step is restore-only by configuration.';
-}
-function saveSkippedByPolicyMessage() {
-    return 'Save skipped: pull_request jobs stay restore-only by default. Set save-on-pull-request: true to allow writes.';
-}
-function applyPullRequestSaveScopeEnv() {
-    process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST = '1';
-    process.env.BORINGCACHE_RESTORE_PR_CACHE = '1';
-    exportVariable('BORINGCACHE_SAVE_ON_PULL_REQUEST', '1');
-    exportVariable('BORINGCACHE_RESTORE_PR_CACHE', '1');
+    return ['pull_request', 'pull_request_target'].includes((process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase());
 }
 function applyRestoreOnlyTokenPolicy() {
     const restoreFallback = process.env.BORINGCACHE_RESTORE_TOKEN ||
+        process.env.BORINGCACHE_STAGE_TOKEN ||
         process.env.BORINGCACHE_SAVE_TOKEN;
-    const hadSaveCapableToken = Boolean(process.env.BORINGCACHE_SAVE_TOKEN);
+    const hadWriteCapableToken = Boolean(process.env.BORINGCACHE_STAGE_TOKEN || process.env.BORINGCACHE_SAVE_TOKEN);
     if (restoreFallback) {
         process.env.BORINGCACHE_RESTORE_TOKEN = restoreFallback;
     }
+    delete process.env.BORINGCACHE_STAGE_TOKEN;
     delete process.env.BORINGCACHE_SAVE_TOKEN;
-    return hadSaveCapableToken;
+    delete process.env.BORINGCACHE_ADMIN_TOKEN;
+    delete process.env.BORINGCACHE_API_TOKEN;
+    return hadWriteCapableToken;
 }
-function applySaveTokenPolicy(inputs) {
+function resolveTrustPolicy(requested) {
+    const intended = requested === 'auto'
+        ? (isPullRequestEvent() ? 'restore' : 'publish')
+        : requested;
+    if (intended === 'stage' && !hasStageToken()) {
+        return { resolved: 'restore', status: 'restore_only_missing_stage_token' };
+    }
+    if (intended === 'publish' && !auth_hasSaveToken()) {
+        return { resolved: 'restore', status: 'restore_only_missing_save_token' };
+    }
+    if (intended === 'restore') {
+        return {
+            resolved: 'restore',
+            status: requested === 'auto' && isPullRequestEvent()
+                ? 'restore_only_by_event_policy'
+                : 'restore_only',
+        };
+    }
+    return { resolved: intended, status: intended };
+}
+function applyTrustTokenPolicy(resolved) {
     delete process.env.BORINGCACHE_SAVE_ON_PULL_REQUEST;
-    if (isPullRequestEvent() && inputs.saveOnPullRequest) {
-        applyPullRequestSaveScopeEnv();
+    delete process.env.BORINGCACHE_RESTORE_PR_CACHE;
+    if (resolved === 'restore') {
+        applyRestoreOnlyTokenPolicy();
     }
-    const saveAllowed = saveAllowedForEvent(inputs);
-    if (saveAllowed) {
-        return true;
-    }
-    if (applyRestoreOnlyTokenPolicy()) {
-        core.notice('pull_request detected: treating save-capable BoringCache tokens as restore-only. Set save-on-pull-request: true to allow writes.');
-    }
-    return false;
 }
-function readSavedSaveAllowance(inputs, savedValue) {
-    if (!saveConfigured(inputs)) {
-        return false;
-    }
-    if (savedValue === 'true') {
-        return true;
-    }
-    if (savedValue === 'false') {
-        return false;
-    }
-    return saveAllowedForEvent(inputs);
-}
-function readSavedSaveConfiguration(inputs, savedValue) {
-    if (savedValue === 'true') {
-        return true;
-    }
-    if (savedValue === 'false') {
-        return false;
-    }
-    return saveConfigured(inputs);
-}
-function buildActionTrustState(inputs, options) {
-    const saveCapable = options.saveCapable ?? auth_hasSaveToken();
-    let status = 'read_write';
-    if (!options.saveConfigured) {
-        status = 'restore_only_by_configuration';
-    }
-    else if (!options.saveAllowed) {
-        status = 'restore_only_by_event_policy';
-    }
-    else if (!saveCapable) {
-        status = 'restore_only_missing_save_token';
-    }
+function buildActionTrustState(requestedPolicy, resolvedPolicy, status) {
     return {
-        status,
+        status: status || (resolvedPolicy === 'restore' ? 'restore_only' : resolvedPolicy),
         event_name: (process.env.GITHUB_EVENT_NAME || '').trim(),
-        save_policy: inputs.savePolicy,
-        save_on_pull_request: inputs.saveOnPullRequest,
-        save_configured: options.saveConfigured,
-        save_allowed: options.saveAllowed,
-        save_capable: saveCapable,
+        requested_policy: requestedPolicy,
+        resolved_policy: resolvedPolicy,
+        write_allowed: resolvedPolicy !== 'restore',
         token_capabilities: {
             restore: auth_hasRestoreToken(),
+            stage: hasStageToken(),
             save: auth_hasSaveToken(),
         },
     };
@@ -95089,6 +95135,27 @@ function restorePhaseSummary(options) {
 }
 function postPhaseSummary(saveStatus, trustState) {
     switch (saveStatus) {
+        case 'staged':
+            return {
+                status: 'staged',
+                headline: 'Cache candidate staged',
+                detail: 'BoringCache staged immutable archive entries without moving published tags.',
+                next_step: 'Select the exact candidate in a trusted solve or promote the exact archive snapshot.',
+            };
+        case 'mode_post_and_generic_stage':
+            return {
+                status: 'staged',
+                headline: 'Cache candidates staged',
+                detail: 'BoringCache completed mode-specific candidate publication and staged immutable archive entries without moving published tags.',
+                next_step: 'Select exact candidates in a trusted solve or promote an exact archive snapshot.',
+            };
+        case 'mode_post_staged':
+            return {
+                status: 'staged',
+                headline: 'Cache candidate staged',
+                detail: 'BoringCache completed mode-specific immutable candidate publication without moving the published tag.',
+                next_step: 'Select the exact candidate in a trusted Docker or BuildKit solve.',
+            };
         case 'saved':
             return {
                 status: 'saved',
@@ -95117,29 +95184,21 @@ function postPhaseSummary(saveStatus, trustState) {
                 detail: 'BoringCache completed mode-specific post work; there were no archive entries to save.',
                 next_step: 'No action is needed unless archive entries were expected.',
             };
-        case 'skipped_configuration':
-        case 'mode_post_skipped_configuration':
+        case 'restore_only':
+        case 'mode_post_restore_only':
             return {
-                status: 'skipped_configuration',
-                headline: 'Save skipped by configuration',
-                detail: saveSkippedByConfigurationMessage(),
-                next_step: 'Use save-policy: auto when trusted jobs should populate cache entries.',
+                status: 'restore_only',
+                headline: 'Restore-only run completed',
+                detail: `BoringCache did not publish cache changes: ${trustStateDetail(trustState)}`,
+                next_step: restoreOnlyNextStep(trustState),
             };
-        case 'skipped_policy':
-        case 'mode_post_skipped_policy':
+        case 'skipped_missing_token':
+        case 'mode_post_missing_token':
             return {
-                status: 'skipped_policy',
-                headline: 'Save skipped by event policy',
-                detail: saveSkippedByPolicyMessage(),
-                next_step: 'Seed caches from a trusted branch, or set save-on-pull-request: true only for trusted pull request workflows.',
-            };
-        case 'skipped_missing_save_token':
-        case 'mode_post_missing_save_token':
-            return {
-                status: 'skipped_missing_save_token',
-                headline: 'Save skipped: missing save token',
-                detail: `Save skipped: ${auth_missingSaveTokenMessage()}`,
-                next_step: 'Set BORINGCACHE_SAVE_TOKEN for trusted jobs that should write cache entries.',
+                status: 'skipped_missing_token',
+                headline: 'Publication skipped: missing token capability',
+                detail: `BoringCache could not apply trust-policy ${trustState.requested_policy}: ${trustStateDetail(trustState)}`,
+                next_step: restoreOnlyNextStep(trustState),
             };
         default:
             return {
@@ -95161,10 +95220,12 @@ function failurePhaseSummary(phase, error) {
 }
 function trustStateDetail(trustState) {
     switch (trustState.status) {
-        case 'restore_only_by_configuration':
-            return 'save-policy is off.';
+        case 'restore_only':
+            return 'trust-policy is restore.';
         case 'restore_only_by_event_policy':
-            return 'pull request jobs stay restore-only by default.';
+            return 'trust-policy auto resolves pull requests to restore.';
+        case 'restore_only_missing_stage_token':
+            return missingStageTokenMessage();
         case 'restore_only_missing_save_token':
             return missingSaveTokenMessage();
         default:
@@ -95173,23 +95234,27 @@ function trustStateDetail(trustState) {
 }
 function restoreOnlyNextStep(trustState) {
     switch (trustState.status) {
-        case 'restore_only_by_configuration':
-            return 'Use save-policy: auto when trusted jobs should populate cache entries.';
+        case 'restore_only':
+            return 'Use trust-policy: stage or publish only when this job is trusted for that operation.';
         case 'restore_only_by_event_policy':
-            return 'Seed caches from a trusted branch, or set save-on-pull-request: true only for trusted pull request workflows.';
+            return 'Use trust-policy: stage for an immutable candidate, or publish only when this pull-request job is explicitly trusted.';
+        case 'restore_only_missing_stage_token':
+            return 'Set BORINGCACHE_STAGE_TOKEN for jobs that should stage immutable candidates.';
         case 'restore_only_missing_save_token':
             return 'Set BORINGCACHE_SAVE_TOKEN for trusted jobs that should write cache entries.';
         default:
             return 'No action is needed unless this workflow should refresh cache entries.';
     }
 }
-function normalizeSavePolicy(value) {
+function normalizeTrustPolicy(value) {
     switch ((value || 'auto').trim().toLowerCase()) {
         case 'auto':
-        case 'off':
+        case 'restore':
+        case 'stage':
+        case 'publish':
             return (value || 'auto').trim().toLowerCase();
         default:
-            throw new Error(`Unsupported save-policy "${value}". Expected auto or off.`);
+            throw new Error(`Unsupported trust-policy "${value}". Expected auto, restore, stage, or publish.`);
     }
 }
 function normalizeDiagnosticsMode(value) {
@@ -95776,9 +95841,9 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
         });
     }
 }
-function buildGenericVerificationSpecs(plan) {
+function buildGenericVerificationSpecs(plan, noGit = false) {
     const specs = [];
-    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, false);
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit);
     return specs;
 }
 function envWithOverrides(overrides) {
@@ -96480,11 +96545,14 @@ function appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
 }
 async function runDryRunPlan(workingDirectory, options) {
-    const { profileNames = [], readOnly = false, } = options;
+    const { profileNames = [], readOnly = false, noGit = false, } = options;
     const executePlan = async () => {
         const args = ['run'];
         for (const profileName of profileNames) {
             args.push('--profile', profileName);
+        }
+        if (noGit) {
+            args.push('--no-git');
         }
         appendCliPublicationPolicy(args, readOnly);
         args.push('--dry-run', '--json');
@@ -96532,6 +96600,7 @@ async function buildArchiveEntries(inputs) {
     const plan = await runDryRunPlan(inputs.workingDirectory, {
         profileNames: cacheProfiles,
         readOnly: inputs.readOnly,
+        noGit: inputs.stage,
     });
     const firstEntry = plan.archive_entries?.[0];
     const firstPair = plan.tag_path_pairs[0];
@@ -97200,7 +97269,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     assertSupportedCliDryRunSchema(adapter, plan);
     return plan;
 }
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '') {
+async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
@@ -97215,7 +97284,15 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     if (endpointHost.trim()) {
         args.push('--endpoint-host', endpointHost.trim());
     }
-    mode_handlers_appendCliPublicationPolicy(args, readOnly);
+    if (stage) {
+        args.push('--stage');
+    }
+    else {
+        mode_handlers_appendCliPublicationPolicy(args, readOnly);
+    }
+    for (const candidate of parseList(cacheCandidatesInput)) {
+        args.push('--candidate', candidate);
+    }
     if (failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
@@ -97269,15 +97346,15 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     }
     return plan;
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '') {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput);
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
+    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput);
 }
-async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput);
+async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', stage = false, cacheCandidatesInput = '') {
+    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput);
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!auth_hasSaveToken()) {
-        notice(`Skipping cache save (${auth_missingSaveTokenMessage()})`);
+        notice(`Skipping cache save (${missingSaveTokenMessage()})`);
         return;
     }
     if (!external_fs_namespaceObject.existsSync(cacheDir) || external_fs_namespaceObject.readdirSync(cacheDir).length === 0) {
@@ -97663,7 +97740,15 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port
     if (refHost.trim()) {
         args.push('--endpoint-host', refHost.trim());
     }
-    mode_handlers_appendCliPublicationPolicy(args, inputs.readOnly);
+    if (inputs.stage) {
+        args.push('--stage');
+    }
+    else {
+        mode_handlers_appendCliPublicationPolicy(args, inputs.readOnly);
+    }
+    for (const candidate of parseList(inputs.cacheCandidates)) {
+        args.push('--candidate', candidate);
+    }
     if (inputs.failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
@@ -98309,7 +98394,7 @@ async function runDockerRestore(plan, inputs) {
         // a free runner port instead of assuming the conventional setup-only
         // port is unused. Setup-only keeps 5000 for its externally consumed refs.
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', cliOwnsManagedBuild ? undefined : 5000);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const usesCliWrappedBuild = cliOwnsManagedBuild || dockerToolCaches.length > 0;
@@ -98360,6 +98445,8 @@ async function runDockerRestore(plan, inputs) {
                 noPlatform: dockerPlan.proxy.no_platform,
                 verbose: inputs.verbose,
                 readOnly: dockerPlan.proxy.read_only,
+                stage: inputs.stage,
+                candidateDigests: dockerPlan.buildkit_cache?.cache_from_candidate_digests || [],
                 ociRequiredReadableRefs: requestedImportRefTags,
                 ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
             }, dockerPlan.proxy));
@@ -98509,7 +98596,7 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
-        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints);
+        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, inputs.stage, inputs.cacheCandidates);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await startRegistryProxy(actionProxyOptions({
@@ -98522,6 +98609,8 @@ async function runBuildkitRestore(plan, inputs) {
             noPlatform: dockerPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
+            stage: inputs.stage,
+            candidateDigests: dockerPlan.buildkit_cache?.cache_from_candidate_digests || [],
             ociRequiredReadableRefs: requestedImportRefTags,
             ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
         }, dockerPlan.proxy));
@@ -98884,7 +98973,7 @@ async function runSccacheSave(options = {}) {
         return;
     }
     if (!auth_hasSaveToken()) {
-        notice(`Save skipped: ${auth_missingSaveTokenMessage()}`);
+        notice(`Save skipped: ${missingSaveTokenMessage()}`);
         return;
     }
     if (!sccacheStats || sccacheStats.compileRequests === 0) {
@@ -99035,6 +99124,8 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
 async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, saveStatus) {
     const diagnostics = loadDiagnosticsConfig(inputs);
     const proxyLogPath = getState('proxy-log-path') || getState('mode-proxy-log-path');
+    const candidateReceiptFile = getState('candidate-receipt-file');
+    const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
     writeActionEvidence('post', {
         phase_status: 'completed',
         phase_summary: postPhaseSummary(saveStatus, trustState),
@@ -99048,6 +99139,7 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         diagnostics_level: diagnostics.level,
         save_status: saveStatus,
         proxy_log_path: proxyLogPath || '',
+        staged_candidates: stagedCandidates,
     });
     await runDiagnosticsGroup(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
         info(`resolved-mode: ${resolvedMode || '(none)'}`);
@@ -99056,7 +99148,8 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         info(`generic-entries: ${genericEntries || '(none)'}`);
         info(`verify-mode: ${verifyMode}`);
         info(`verify-save-tags: ${verifySaveTags.join(',') || '(none)'}`);
-        info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} save-policy=${trustState.save_policy} save-on-pull-request=${String(trustState.save_on_pull_request)}`);
+        info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
+        info(`staged-candidates: ${stagedCandidates.map((candidate) => candidate.id).join(',') || '(none)'}`);
         if (diagnostics.includeLogs) {
             if (proxyLogPath) {
                 const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
@@ -99091,12 +99184,23 @@ async function run() {
         strictPostFailure ||= verifyMode === 'check';
         const verifyTimeoutSeconds = normalizeVerifyTimeoutSeconds(getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
         const verifyRequireServerSignature = getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
-        const saveConfigured = readSavedSaveConfiguration(inputs, getState('save-configured'));
-        const saveAllowed = readSavedSaveAllowance(inputs, getState('save-allowed'));
-        const trustState = buildActionTrustState(inputs, {
-            saveConfigured,
-            saveAllowed,
-        });
+        const requestedTrustPolicy = normalizeTrustPolicy(getState('trust-policy') || inputs.trustPolicy);
+        const savedResolvedPolicy = getState('resolved-trust-policy');
+        const savedTrustStatus = getState('trust-status');
+        const fallbackResolution = resolveTrustPolicy(requestedTrustPolicy);
+        const resolvedTrustPolicy = savedResolvedPolicy === 'restore'
+            || savedResolvedPolicy === 'stage'
+            || savedResolvedPolicy === 'publish'
+            ? savedResolvedPolicy
+            : fallbackResolution.resolved;
+        applyTrustTokenPolicy(resolvedTrustPolicy);
+        const trustState = buildActionTrustState(requestedTrustPolicy, resolvedTrustPolicy, (savedTrustStatus || fallbackResolution.status));
+        let candidateReceiptFile = getState('candidate-receipt-file');
+        if (resolvedTrustPolicy === 'stage' && !candidateReceiptFile) {
+            candidateReceiptFile = prepareCandidateReceiptFile();
+            saveState('candidate-receipt-file', candidateReceiptFile);
+        }
+        useCandidateReceiptFile(candidateReceiptFile);
         let verifySaveTags = getState('verify-save-tags')
             .split(',')
             .map((tag) => tag.trim())
@@ -99112,9 +99216,6 @@ async function run() {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
             trust_state: trustState,
         };
-        if (saveAllowed && isPullRequestEvent() && inputs.saveOnPullRequest) {
-            applyPullRequestSaveScopeEnv();
-        }
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
         }
@@ -99125,7 +99226,8 @@ async function run() {
             const plan = await buildPlan({
                 ...inputs,
                 cliVersion: cliCapabilityVersion,
-                readOnly: inputs.readOnly || !saveAllowed,
+                readOnly: resolvedTrustPolicy === 'restore',
+                stage: resolvedTrustPolicy === 'stage',
             });
             resolvedMode = plan.mode;
             if (!workingDirectory) {
@@ -99153,34 +99255,25 @@ async function run() {
         if (workingDirectory) {
             process.chdir(workingDirectory);
         }
-        if (!saveConfigured) {
+        if (resolvedTrustPolicy === 'restore') {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                info(saveSkippedByConfigurationMessage());
+                info(`Save skipped: trust-policy ${requestedTrustPolicy} resolved to restore.`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_skipped_configuration' : 'skipped_configuration');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
             return;
         }
-        if (!saveAllowed) {
+        const requiredTokenPresent = resolvedTrustPolicy === 'stage' ? hasStageToken() : auth_hasSaveToken();
+        if (!requiredTokenPresent) {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                notice(saveSkippedByPolicyMessage());
+                notice(`Save skipped: ${resolvedTrustPolicy === 'stage' ? missingStageTokenMessage() : missingSaveTokenMessage()}`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_skipped_policy' : 'skipped_policy');
-            return;
-        }
-        if (!auth_hasSaveToken()) {
-            if (resolvedMode && resolvedMode !== 'archive') {
-                await runModeSave(resolvedMode, { allowSaves: false });
-            }
-            if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                notice(`Save skipped: ${auth_missingSaveTokenMessage()}`);
-            }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_save_token' : 'skipped_missing_save_token');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_token' : 'skipped_missing_token');
             return;
         }
         if (resolvedMode && resolvedMode !== 'archive') {
@@ -99201,7 +99294,11 @@ async function run() {
                     acceptPendingSaveExpected: true,
                 });
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_no_generic_save' : 'no_generic_save');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage' && resolvedMode && resolvedMode !== 'archive'
+                ? 'mode_post_staged'
+                : resolvedMode && resolvedMode !== 'archive'
+                    ? 'mode_post_no_generic_save'
+                    : 'no_generic_save');
             return;
         }
         const saveEntries = inputs_parseEntries(genericEntries, 'save', {
@@ -99214,6 +99311,9 @@ async function run() {
         }
         if (force) {
             args.push('--force');
+        }
+        if (resolvedTrustPolicy === 'stage') {
+            args.push('--stage');
         }
         if (verbose) {
             args.push('--verbose');
@@ -99232,7 +99332,13 @@ async function run() {
                 acceptPendingSaveExpected: true,
             });
         }
-        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_and_generic_save' : 'saved');
+        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage'
+            ? resolvedMode && resolvedMode !== 'archive'
+                ? 'mode_post_and_generic_stage'
+                : 'staged'
+            : resolvedMode && resolvedMode !== 'archive'
+                ? 'mode_post_and_generic_save'
+                : 'saved');
     }
     catch (error) {
         writeActionFailureEvidence('post', error, postFailureContext);
