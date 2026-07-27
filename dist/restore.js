@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import { hasSaveToken } from './core';
-import { applySaveTokenPolicy, applyRestoreOnlyTokenPolicy, applyPresetCacheEnv, applyMiseSetup, actionErrorMessage, assertLegacyArchiveEntriesAreLossless, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getInputs, isPullRequestEvent, saveConfigured, loadDiagnosticsConfig, parseEntries, readLogTail, resolveCliCapabilityVersion, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, supportsPortableArchiveArgs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applySaveTokenPolicy, applyRestoreOnlyTokenPolicy, applyCliPlanEnv, applyMiseSetup, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getInputs, isPullRequestEvent, saveConfigured, loadDiagnosticsConfig, parseEntries, readLogTail, resolveCliCapabilityVersion, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 function appendRestoreDiagnostic(current, data) {
@@ -9,22 +9,6 @@ function appendRestoreDiagnostic(current, data) {
 function restoreFailureDetail(stdout, stderr, entries) {
     const cliDetail = stderr.trim() || stdout.trim();
     return actionErrorMessage(cliDetail || `Cache restore failed for ${entries.join(', ')}`);
-}
-function buildRuntimeRestoreFlagArgs(inputs) {
-    const flagArgs = [];
-    if (inputs.enableCrossOsArchive || inputs.noPlatform) {
-        flagArgs.push('--no-platform');
-    }
-    if (inputs.verbose) {
-        flagArgs.push('--verbose');
-    }
-    if (inputs.failOnCacheError) {
-        flagArgs.push('--fail-on-cache-error');
-    }
-    if (inputs.allowExternalSymlinks) {
-        flagArgs.push('--allow-external-symlinks');
-    }
-    return flagArgs;
 }
 function buildCliSetupOptions(inputs, cliPlatform) {
     return {
@@ -35,23 +19,20 @@ function buildCliSetupOptions(inputs, cliPlatform) {
             : {}),
     };
 }
-async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit, trustState) {
+async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState) {
     const diagnostics = loadDiagnosticsConfig(inputs);
     await runDiagnosticsGroup(diagnostics, 'BoringCache Diagnostics', async () => {
         core.info(`workspace: ${plan.workspace}`);
         core.info(`setup: ${plan.setup}`);
         core.info(`mode: ${plan.mode}`);
-        core.info(`preset: ${plan.preset}`);
         core.info(`working-directory: ${plan.workingDirectory}`);
         core.info(`cache-tag: ${plan.cacheTagPrefix || '(none)'}`);
-        core.info(`runtime-cache-tag: ${plan.runtimeTag || '(none)'}`);
         core.info(`resolved-entries: ${plan.archiveEntries || '(none)'}`);
         core.info(`resolved-tags: ${resolvedTags.join(',') || '(none)'}`);
         core.info(`cache-hit: ${String(overallHit)}`);
-        core.info(`runtime-cache-hit: ${String(runtimeHit)}`);
         core.info(`verify-mode: ${inputs.verify}`);
         core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} save-policy=${trustState.save_policy} save-on-pull-request=${String(trustState.save_on_pull_request)}`);
-        core.info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} save=${String(trustState.token_capabilities.save)} legacy-api-only=${String(trustState.token_capabilities.legacy_api_only)}`);
+        core.info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} save=${String(trustState.token_capabilities.save)}`);
         if (diagnostics.includeLogs) {
             const proxyLogPath = core.getState('proxy-log-path');
             if (proxyLogPath) {
@@ -67,12 +48,11 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs, restoreCandidates = [], portableArchiveArgs = true) {
+async function restoreEntries(workspace, entriesString, flagArgs) {
     if (!entriesString.trim()) {
         return { hit: false, saveEntries: '' };
     }
     const parsedEntries = parseEntries(entriesString, 'restore', {
-        resolvePaths: false,
         separatorMode: 'newline',
     });
     if (parsedEntries.length === 0) {
@@ -87,22 +67,6 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
             entries: primaryRestoreEntries,
             tags: parsedEntries.map((entry) => entry.tag),
         }];
-    for (const candidate of restoreCandidates) {
-        if (!candidate.entries.trim()) {
-            continue;
-        }
-        const candidateEntries = parseEntries(candidate.entries, 'restore', {
-            resolvePaths: false,
-            separatorMode: 'newline',
-        });
-        if (candidateEntries.length > 0) {
-            attempts.push({
-                entries: candidateEntries.map((entry) => `${entry.tag}:${entry.restorePath}`),
-                tags: candidateEntries.map((entry) => entry.tag),
-                tagPrefix: candidate.tagPrefix,
-            });
-        }
-    }
     const failedAttempts = [];
     for (const attempt of attempts) {
         const remotelyPresent = await checkEntries(workspace, attempt.tags, flagArgs);
@@ -115,18 +79,11 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
         const restoreFlagArgs = flagArgs.includes('--fail-on-cache-error')
             ? [...flagArgs]
             : [...flagArgs, '--fail-on-cache-error'];
-        let restoreArgs;
-        if (portableArchiveArgs) {
-            restoreArgs = [
-                'restore', workspace,
-                ...attempt.entries.flatMap((entry) => ['--entry', entry]),
-                ...restoreFlagArgs,
-            ];
-        }
-        else {
-            assertLegacyArchiveEntriesAreLossless(attempt.entries, 'restore');
-            restoreArgs = ['restore', workspace, attempt.entries.join(','), ...restoreFlagArgs];
-        }
+        const restoreArgs = [
+            'restore', workspace,
+            ...attempt.entries.flatMap((entry) => ['--entry', entry]),
+            ...restoreFlagArgs,
+        ];
         let stdout = '';
         let stderr = '';
         const restoreExitCode = await execBoringCache(restoreArgs, {
@@ -141,17 +98,11 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
             },
         });
         if (restoreExitCode === 0) {
-            if (attempt.tagPrefix) {
-                core.info(`Cache hit with restore key ${attempt.tagPrefix}`);
-            }
             return { hit: true, saveEntries };
         }
         const detail = restoreFailureDetail(stdout, stderr, attempt.entries);
         failedAttempts.push(detail);
-        const candidateLabel = attempt.tagPrefix
-            ? `restore key ${attempt.tagPrefix}`
-            : 'primary key';
-        core.warning(`Cache ${candidateLabel} was found but could not be restored: ${detail}`);
+        core.warning(`Cache entry was found but could not be restored: ${detail}`);
     }
     if (failedAttempts.length > 0) {
         const detail = failedAttempts[failedAttempts.length - 1];
@@ -239,32 +190,25 @@ export async function run() {
         const cliCapabilityVersion = await resolveCliCapabilityVersion(inputs.cliVersion);
         const capabilityInputs = { ...effectiveInputs, cliVersion: cliCapabilityVersion };
         const plan = await buildPlan(capabilityInputs);
-        const portableArchiveArgs = supportsPortableArchiveArgs(cliCapabilityVersion);
         restoreFailureContext = {
             ...restoreFailureContext,
             workspace: plan.workspace,
             setup: plan.setup,
             mode: plan.mode,
-            preset: plan.preset,
             working_directory: plan.workingDirectory,
             cache_tag: plan.cacheTagPrefix || '',
-            runtime_cache_tag: plan.runtimeTag || '',
             trust_state: trustState,
         };
         process.chdir(plan.workingDirectory);
-        await applyPresetCacheEnv(plan);
-        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs), [], portableArchiveArgs);
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), plan.archiveRestoreCandidates, portableArchiveArgs);
-        let usedMiseRuntime = false;
+        await applyCliPlanEnv(plan);
+        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs));
         if (plan.setup === 'mise') {
-            usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
+            await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
         }
         const modeRestore = await runModeRestore(plan, effectiveInputs);
-        const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
-            .filter(Boolean)
-            .join('\n');
+        const genericSaveEntries = archiveRestore.saveEntries;
         const verificationSpecs = [
-            ...buildGenericVerificationSpecs(plan, inputs, usedMiseRuntime),
+            ...buildGenericVerificationSpecs(plan),
             ...(modeRestore.verificationSpecs || []),
         ];
         const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
@@ -273,37 +217,31 @@ export async function run() {
         const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
-        const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
+        const overallHit = modeRestore.cacheHit ?? archiveRestore.hit;
         const diagnostics = loadDiagnosticsConfig(inputs);
         core.setOutput('cache-hit', String(overallHit));
-        core.setOutput('runtime-cache-hit', String(runtimeRestore.hit));
         core.setOutput('diagnostics-level', diagnostics.level);
         core.setOutput('resolved-mode', plan.mode);
         core.setOutput('resolved-tools', serializeTools(plan.runtimeTools));
         core.setOutput('workspace', plan.workspace);
         core.setOutput('cache-tag', modeRestore.cacheTag || plan.cacheTagPrefix);
-        core.setOutput('runtime-cache-tag', plan.runtimeTag || '');
         core.setOutput('resolved-entries', plan.archiveEntries);
         core.setOutput('resolved-tags', resolvedTags.join(','));
         writeActionEvidence('restore', {
             phase_status: 'completed',
             phase_summary: restorePhaseSummary({
                 cacheHit: overallHit,
-                runtimeCacheHit: runtimeRestore.hit,
                 trustState,
                 saveCapable,
             }),
             workspace: plan.workspace,
             setup: plan.setup,
             mode: plan.mode,
-            preset: plan.preset,
             working_directory: plan.workingDirectory,
             cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
-            runtime_cache_tag: plan.runtimeTag || '',
             resolved_entries: plan.archiveEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
-            runtime_cache_hit: runtimeRestore.hit,
             mode_evidence: modeRestore.evidence || {},
             diagnostics_level: diagnostics.level,
             trust_state: trustState,
@@ -322,7 +260,6 @@ export async function run() {
             resolved_entries: plan.archiveEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
-            runtime_cache_hit: runtimeRestore.hit,
             mode_evidence: modeRestore.evidence || {},
             trust_state: trustState,
             save_configured: saveEnabled,
@@ -337,10 +274,6 @@ export async function run() {
         core.saveState('working-directory', plan.workingDirectory);
         core.saveState('generic-cache-entries', genericSaveEntries);
         core.saveState('generic-cache-workspace', plan.workspace);
-        core.saveState('runtime-mise-used', String(usedMiseRuntime));
-        core.saveState('generic-cache-excludes', JSON.stringify(plan.archiveExcludes));
-        core.saveState('no-platform', String(inputs.noPlatform));
-        core.saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));
         core.saveState('force', String(inputs.force));
         core.saveState('verbose', String(inputs.verbose));
         core.saveState('diagnostics-level', diagnostics.level);
@@ -364,7 +297,7 @@ export async function run() {
                 verbose: inputs.verbose,
             });
         }
-        await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeRestore.hit, trustState);
+        await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState);
         if (!saveEnabled) {
             core.info('Post step save is disabled by save-policy: off.');
         }

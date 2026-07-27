@@ -26,9 +26,6 @@ export function getMiseDataDir() {
     }
     return path.join(runnerHomeDir(), '.local', 'share', 'mise');
 }
-export function getMiseInstallsDir() {
-    return process.env.MISE_INSTALLS_DIR || path.join(getMiseDataDir(), 'installs');
-}
 export function getMiseShimsDir() {
     return path.join(getMiseDataDir(), 'shims');
 }
@@ -41,34 +38,6 @@ export function slugMiseTagPart(value) {
         .replace(/-+/g, '-')
         .replace(/^[.-]+|[.-]+$/g, '');
     return normalized || 'unknown';
-}
-export function scopeMiseToolVersion(version, scope = 'patch') {
-    const normalized = version.trim().replace(/^v(?=\d)/, '');
-    const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
-    if (!match) {
-        return slugMiseTagPart(normalized);
-    }
-    const [, major, minor, patch] = match;
-    if (scope === 'major' || !minor) {
-        return major;
-    }
-    if (scope === 'minor' || !patch) {
-        return `${major}.${minor}`;
-    }
-    return `${major}.${minor}.${patch}`;
-}
-export function buildMiseToolTag(tools, scope = 'patch') {
-    return tools
-        .map((tool) => `${slugMiseTagPart(tool.name)}-${slugMiseTagPart(scopeMiseToolVersion(tool.version, scope))}`)
-        .sort()
-        .join('-');
-}
-export function buildMiseRuntimeTag(prefix, tools, scope = 'patch') {
-    const toolTag = buildMiseToolTag(tools, scope);
-    if (!toolTag) {
-        return slugMiseTagPart(prefix);
-    }
-    return `${slugMiseTagPart(prefix)}-mise-${toolTag}`;
 }
 export async function hasMiseToolVersion(toolName, version) {
     const normalizedTool = normalizeToolName(toolName);

@@ -1,79 +1,10 @@
-import * as core from '@actions/core';
-import * as os from 'os';
-import * as path from 'path';
-export async function getCacheConfig(key, enableCrossOsArchive, noPlatform = false) {
-    let workspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE ||
-        'default/default';
-    if (!workspace.includes('/')) {
-        workspace = `default/${workspace}`;
-    }
-    let platformSuffix = '';
-    if (!noPlatform && !enableCrossOsArchive) {
-        const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
-        const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-        platformSuffix = `-${platform}-${arch}`;
-    }
-    const fullKey = key + platformSuffix;
-    return { workspace, fullKey, platformSuffix };
-}
-export function validateInputs(inputs) {
-    const hasCliFormat = inputs.workspace || inputs.entries;
-    const hasCacheFormat = inputs.path || inputs.key;
-    if (!hasCliFormat && !hasCacheFormat) {
-        throw new Error('Either (workspace + entries) or (path + key) inputs are required');
-    }
-    if (hasCliFormat && hasCacheFormat) {
-        core.warning('Both CLI format (workspace/entries) and actions/cache format (path/key) provided. Using CLI format.');
-    }
-    if (hasCliFormat && !inputs.entries) {
-        throw new Error('Input "entries" is required when using CLI format');
-    }
-    if (hasCacheFormat && !hasCliFormat) {
-        if (!inputs.path) {
-            throw new Error('Input "path" is required when using actions/cache format');
-        }
-        if (!inputs.key) {
-            throw new Error('Input "key" is required when using actions/cache format');
-        }
-    }
-    if (inputs.workspace && typeof inputs.workspace === 'string' && !inputs.workspace.includes('/')) {
-        throw new Error('Workspace must be in format "namespace/workspace" (e.g., "my-org/my-project")');
-    }
-}
-export function resolvePath(pathInput, baseDir) {
-    const trimmedPath = pathInput.trim();
-    if (path.isAbsolute(trimmedPath)) {
-        return trimmedPath;
-    }
-    if (trimmedPath.startsWith('~/')) {
-        return path.join(os.homedir(), trimmedPath.slice(2));
-    }
-    return path.resolve(baseDir || process.cwd(), trimmedPath);
-}
-export function resolvePaths(pathInput, baseDir) {
-    return pathInput
-        .split('\n')
-        .map(p => p.trim())
-        .filter(p => p)
-        .map(p => resolvePath(p, baseDir))
-        .join('\n');
-}
 export function parseEntries(entriesInput, _action, options = {}) {
-    const shouldResolve = options.resolvePaths ?? true;
-    const baseDir = options.baseDir;
-    const separatorMode = options.separatorMode ?? 'legacy';
+    const separatorMode = options.separatorMode ?? 'newline';
     const entrySpecs = [];
     let current = '';
     for (let index = 0; index < entriesInput.length; index += 1) {
         const character = entriesInput[index];
-        if (separatorMode === 'legacy'
-            && character === '\\'
-            && entriesInput[index + 1] === ',') {
-            current += ',';
-            index += 1;
-        }
-        else if ((character === ',' && separatorMode === 'legacy')
-            || (character === '\n' && separatorMode !== 'single')) {
+        if (character === '\n' && separatorMode !== 'single') {
             entrySpecs.push(current);
             current = '';
         }
@@ -91,7 +22,7 @@ export function parseEntries(entriesInput, _action, options = {}) {
         }
         const tag = entry.substring(0, colonIndex).trim();
         const rawPathSpec = entry.substring(colonIndex + 1);
-        const pathSpec = shouldResolve ? rawPathSpec.trim() : rawPathSpec;
+        const pathSpec = rawPathSpec;
         if (!tag) {
             throw new Error(`Invalid entry format: ${entry}. Tag cannot be empty`);
         }
@@ -104,56 +35,12 @@ export function parseEntries(entriesInput, _action, options = {}) {
         if (redirectIndex !== -1) {
             const rawRestorePath = pathSpec.substring(0, redirectIndex);
             const rawSavePath = pathSpec.substring(redirectIndex + 2);
-            restorePathInput = shouldResolve ? rawRestorePath.trim() : rawRestorePath;
-            savePathInput = shouldResolve ? rawSavePath.trim() : rawSavePath;
+            restorePathInput = rawRestorePath;
+            savePathInput = rawSavePath;
             if (!restorePathInput.trim() || !savePathInput.trim()) {
                 throw new Error(`Invalid entry format: ${entry}. Expected restore and save paths when using => syntax`);
             }
         }
-        const restorePath = shouldResolve ? resolvePath(restorePathInput, baseDir) : restorePathInput;
-        const savePath = shouldResolve ? resolvePath(savePathInput, baseDir) : savePathInput;
-        return { tag, restorePath, savePath };
+        return { tag, restorePath: restorePathInput, savePath: savePathInput };
     });
-}
-export function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
-    if (noPlatform || enableCrossOsArchive) {
-        return '';
-    }
-    const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
-    const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-    return `-${platform}-${arch}`;
-}
-/**
- * Get workspace from action inputs (Record-based).
- * Used by the generic action/save/restore actions.
- * NOTE: This is different from workspace.ts getWorkspace which takes a string.
- */
-export function getInputsWorkspace(inputs) {
-    if (inputs.workspace && typeof inputs.workspace === 'string') {
-        return inputs.workspace;
-    }
-    const defaultWorkspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE;
-    if (defaultWorkspace) {
-        return defaultWorkspace.includes('/') ? defaultWorkspace : `default/${defaultWorkspace}`;
-    }
-    return 'default/default';
-}
-export function convertCacheFormatToEntries(inputs, _action) {
-    if (!inputs.path || !inputs.key) {
-        throw new Error('actions/cache format requires both path and key inputs');
-    }
-    const pathInput = inputs.path;
-    const keyInput = inputs.key;
-    const noPlatformInput = inputs.noPlatform;
-    const enableCrossOsArchiveInput = inputs.enableCrossOsArchive;
-    const workingDirectoryInput = inputs.workingDirectory;
-    const baseDir = workingDirectoryInput?.trim() || undefined;
-    const paths = pathInput
-        .split('\n')
-        .map(p => p.trim())
-        .filter(p => p);
-    const shouldDisablePlatform = noPlatformInput || enableCrossOsArchiveInput || false;
-    const platformSuffix = getPlatformSuffix(shouldDisablePlatform, enableCrossOsArchiveInput || false);
-    const fullKey = keyInput + platformSuffix;
-    return paths.map(p => `${fullKey}:${resolvePath(p, baseDir)}`).join(',');
 }

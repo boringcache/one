@@ -93143,44 +93143,6 @@ function saveCacheV2(paths_1, key_1, options_1) {
     });
 }
 //# sourceMappingURL=cache.js.map
-;// CONCATENATED MODULE: ./dist/core/auth.js
-
-let warnedAboutLegacyApiToken = false;
-function getAuthTokens() {
-    const apiToken = process.env.BORINGCACHE_API_TOKEN || undefined;
-    const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || apiToken;
-    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || saveToken;
-    return {
-        restoreToken,
-        saveToken,
-        apiToken,
-    };
-}
-function hasRestoreToken() {
-    return Boolean(getAuthTokens().restoreToken);
-}
-function auth_hasSaveToken() {
-    return Boolean(getAuthTokens().saveToken);
-}
-function isUsingLegacyApiTokenOnly() {
-    return Boolean(process.env.BORINGCACHE_API_TOKEN &&
-        !process.env.BORINGCACHE_RESTORE_TOKEN &&
-        !process.env.BORINGCACHE_SAVE_TOKEN);
-}
-function warnIfUsingLegacyApiToken() {
-    if (warnedAboutLegacyApiToken || !isUsingLegacyApiTokenOnly()) {
-        return;
-    }
-    warnedAboutLegacyApiToken = true;
-    notice('Using BORINGCACHE_API_TOKEN as a legacy compatibility fallback. Prefer BORINGCACHE_RESTORE_TOKEN and BORINGCACHE_SAVE_TOKEN for new workflows.');
-}
-function missingRestoreTokenMessage() {
-    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_SAVE_TOKEN, or BORINGCACHE_API_TOKEN.';
-}
-function auth_missingSaveTokenMessage() {
-    return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN or BORINGCACHE_API_TOKEN.';
-}
-
 ;// CONCATENATED MODULE: ./dist/core/action-cache.js
 
 
@@ -93200,7 +93162,6 @@ async function saveImmutableToolCache(paths, key, label) {
 }
 
 ;// CONCATENATED MODULE: ./dist/core/setup.js
-
 
 
 
@@ -93270,42 +93231,29 @@ async function exposeBoringCacheCli(toolPath, binaryName = process.platform === 
 function getPlatformInfo(platformOverride) {
     if (platformOverride) {
         const normalizedPlatform = platformOverride.trim().toLowerCase();
-        const isWindows = normalizedPlatform.includes('windows');
-        const arch = normalizedPlatform.includes('arm64') ? 'arm64' : 'amd64';
-        const legacyAssetName = `boringcache-${normalizedPlatform}${isWindows && !normalizedPlatform.endsWith('.exe') ? '.exe' : ''}`;
-        if (isWindows) {
-            const assetName = `boringcache-windows-${arch}.exe`;
+        const match = normalizedPlatform.match(/^(linux(?:-musl)?|windows)-(amd64|arm64)$/);
+        if (match) {
+            const [, platformOs, arch] = match;
+            const isWindows = platformOs === 'windows';
+            const usesMusl = platformOs === 'linux-musl';
             return {
-                os: 'windows',
+                os: isWindows ? 'windows' : 'linux',
                 arch,
-                assetName,
-                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
-                isWindows: true,
-                cacheKey: arch,
+                assetName: `boringcache-${normalizedPlatform}${isWindows ? '.exe' : ''}`,
+                isWindows,
+                cacheKey: usesMusl ? `musl-${arch}` : arch,
             };
         }
-        if (normalizedPlatform.includes('macos') || normalizedPlatform.includes('darwin')) {
-            const assetName = 'boringcache-macos-universal';
+        if (normalizedPlatform === 'macos-universal') {
             return {
                 os: 'macos',
-                arch,
-                assetName,
-                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+                arch: 'universal',
+                assetName: 'boringcache-macos-universal',
                 isWindows: false,
                 cacheKey: 'universal',
             };
         }
-        const usesMusl = normalizedPlatform.includes('alpine') || normalizedPlatform.includes('musl');
-        const genericPlatform = `linux${usesMusl ? '-musl' : ''}-${arch}`;
-        const assetName = `boringcache-${genericPlatform}`;
-        return {
-            os: 'linux',
-            arch,
-            assetName,
-            fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
-            isWindows: false,
-            cacheKey: usesMusl ? `musl-${arch}` : arch,
-        };
+        throw new Error(`Unsupported cli-platform "${platformOverride}". Expected linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.`);
     }
     const runnerOS = process.env.RUNNER_OS || external_os_.platform();
     const runnerArch = process.env.RUNNER_ARCH || external_os_.arch();
@@ -93424,8 +93372,8 @@ async function verifyChecksum(filePath, expectedChecksum, assetName) {
     info(`Checksum verified for ${assetName}`);
 }
 async function downloadAndInstall(version, platform, verify) {
-    let resolvedAssetName = platform.assetName;
-    let downloadUrl = getDownloadUrl(version, resolvedAssetName);
+    const resolvedAssetName = platform.assetName;
+    const downloadUrl = getDownloadUrl(version, resolvedAssetName);
     info(`Downloading BoringCache CLI from: ${downloadUrl}`);
     let downloadedPath;
     try {
@@ -93433,23 +93381,7 @@ async function downloadAndInstall(version, platform, verify) {
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        if (platform.fallbackAssetName) {
-            resolvedAssetName = platform.fallbackAssetName;
-            downloadUrl = getDownloadUrl(version, resolvedAssetName);
-            info(`Primary CLI asset ${platform.assetName} unavailable (${msg}); trying legacy fallback: ${resolvedAssetName}`);
-            try {
-                downloadedPath = await downloadTool(downloadUrl);
-            }
-            catch (fallbackError) {
-                const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-                if (fallbackMsg.includes('404')) {
-                    throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ` +
-                        'release asset not found. The requested cli-version may not be published yet.');
-                }
-                throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ${fallbackMsg}`);
-            }
-        }
-        else if (msg.includes('404')) {
+        if (msg.includes('404')) {
             throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ` +
                 'release asset not found. The requested cli-version may not be published yet.');
         }
@@ -93494,12 +93426,10 @@ async function isCliAvailable() {
     }
 }
 async function ensureBoringCache(options) {
-    warnIfUsingLegacyApiToken();
     const secrets = new Set([
         options.token,
         process.env.BORINGCACHE_RESTORE_TOKEN,
         process.env.BORINGCACHE_SAVE_TOKEN,
-        process.env.BORINGCACHE_API_TOKEN,
     ].filter((value) => Boolean(value)));
     for (const secret of secrets) {
         core_setSecret(secret);
@@ -93597,123 +93527,36 @@ async function execBoringCache(args, options = {}) {
     }
 }
 
-;// CONCATENATED MODULE: ./dist/core/workspace.js
-
-
-/**
- * Resolve workspace from input or environment.
- * Used by docker, buildkit, nodejs, rust, ruby actions.
- */
-function getWorkspace(inputWorkspace) {
-    let workspace = inputWorkspace || process.env.BORINGCACHE_DEFAULT_WORKSPACE || '';
-    if (!workspace) {
-        core.setFailed('Workspace is required. Set workspace input or BORINGCACHE_DEFAULT_WORKSPACE env var.');
-        throw new Error('Workspace required');
-    }
-    if (!workspace.includes('/')) {
-        workspace = `default/${workspace}`;
-    }
-    return workspace;
+;// CONCATENATED MODULE: ./dist/core/auth.js
+function getAuthTokens() {
+    const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || undefined;
+    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || saveToken;
+    return {
+        restoreToken,
+        saveToken,
+    };
 }
-/**
- * Resolve cache tag prefix from input or the provided default.
- */
-function getCacheTagPrefix(inputCacheTag, defaultPrefix) {
-    if (inputCacheTag) {
-        return inputCacheTag;
-    }
-    return defaultPrefix;
+function hasRestoreToken() {
+    return Boolean(getAuthTokens().restoreToken);
 }
-/**
- * Async file/directory existence check.
- */
-async function pathExists(p) {
-    try {
-        await fs.promises.access(p);
-        return true;
-    }
-    catch {
-        return false;
-    }
+function auth_hasSaveToken() {
+    return Boolean(getAuthTokens().saveToken);
+}
+function missingRestoreTokenMessage() {
+    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN or BORINGCACHE_SAVE_TOKEN.';
+}
+function auth_missingSaveTokenMessage() {
+    return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN.';
 }
 
 ;// CONCATENATED MODULE: ./dist/core/inputs.js
-
-
-
-async function getCacheConfig(key, enableCrossOsArchive, noPlatform = false) {
-    let workspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE ||
-        'default/default';
-    if (!workspace.includes('/')) {
-        workspace = `default/${workspace}`;
-    }
-    let platformSuffix = '';
-    if (!noPlatform && !enableCrossOsArchive) {
-        const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
-        const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-        platformSuffix = `-${platform}-${arch}`;
-    }
-    const fullKey = key + platformSuffix;
-    return { workspace, fullKey, platformSuffix };
-}
-function validateInputs(inputs) {
-    const hasCliFormat = inputs.workspace || inputs.entries;
-    const hasCacheFormat = inputs.path || inputs.key;
-    if (!hasCliFormat && !hasCacheFormat) {
-        throw new Error('Either (workspace + entries) or (path + key) inputs are required');
-    }
-    if (hasCliFormat && hasCacheFormat) {
-        core.warning('Both CLI format (workspace/entries) and actions/cache format (path/key) provided. Using CLI format.');
-    }
-    if (hasCliFormat && !inputs.entries) {
-        throw new Error('Input "entries" is required when using CLI format');
-    }
-    if (hasCacheFormat && !hasCliFormat) {
-        if (!inputs.path) {
-            throw new Error('Input "path" is required when using actions/cache format');
-        }
-        if (!inputs.key) {
-            throw new Error('Input "key" is required when using actions/cache format');
-        }
-    }
-    if (inputs.workspace && typeof inputs.workspace === 'string' && !inputs.workspace.includes('/')) {
-        throw new Error('Workspace must be in format "namespace/workspace" (e.g., "my-org/my-project")');
-    }
-}
-function resolvePath(pathInput, baseDir) {
-    const trimmedPath = pathInput.trim();
-    if (external_path_.isAbsolute(trimmedPath)) {
-        return trimmedPath;
-    }
-    if (trimmedPath.startsWith('~/')) {
-        return external_path_.join(external_os_.homedir(), trimmedPath.slice(2));
-    }
-    return external_path_.resolve(baseDir || process.cwd(), trimmedPath);
-}
-function inputs_resolvePaths(pathInput, baseDir) {
-    return pathInput
-        .split('\n')
-        .map(p => p.trim())
-        .filter(p => p)
-        .map(p => resolvePath(p, baseDir))
-        .join('\n');
-}
 function parseEntries(entriesInput, _action, options = {}) {
-    const shouldResolve = options.resolvePaths ?? true;
-    const baseDir = options.baseDir;
-    const separatorMode = options.separatorMode ?? 'legacy';
+    const separatorMode = options.separatorMode ?? 'newline';
     const entrySpecs = [];
     let current = '';
     for (let index = 0; index < entriesInput.length; index += 1) {
         const character = entriesInput[index];
-        if (separatorMode === 'legacy'
-            && character === '\\'
-            && entriesInput[index + 1] === ',') {
-            current += ',';
-            index += 1;
-        }
-        else if ((character === ',' && separatorMode === 'legacy')
-            || (character === '\n' && separatorMode !== 'single')) {
+        if (character === '\n' && separatorMode !== 'single') {
             entrySpecs.push(current);
             current = '';
         }
@@ -93731,7 +93574,7 @@ function parseEntries(entriesInput, _action, options = {}) {
         }
         const tag = entry.substring(0, colonIndex).trim();
         const rawPathSpec = entry.substring(colonIndex + 1);
-        const pathSpec = shouldResolve ? rawPathSpec.trim() : rawPathSpec;
+        const pathSpec = rawPathSpec;
         if (!tag) {
             throw new Error(`Invalid entry format: ${entry}. Tag cannot be empty`);
         }
@@ -93744,58 +93587,14 @@ function parseEntries(entriesInput, _action, options = {}) {
         if (redirectIndex !== -1) {
             const rawRestorePath = pathSpec.substring(0, redirectIndex);
             const rawSavePath = pathSpec.substring(redirectIndex + 2);
-            restorePathInput = shouldResolve ? rawRestorePath.trim() : rawRestorePath;
-            savePathInput = shouldResolve ? rawSavePath.trim() : rawSavePath;
+            restorePathInput = rawRestorePath;
+            savePathInput = rawSavePath;
             if (!restorePathInput.trim() || !savePathInput.trim()) {
                 throw new Error(`Invalid entry format: ${entry}. Expected restore and save paths when using => syntax`);
             }
         }
-        const restorePath = shouldResolve ? resolvePath(restorePathInput, baseDir) : restorePathInput;
-        const savePath = shouldResolve ? resolvePath(savePathInput, baseDir) : savePathInput;
-        return { tag, restorePath, savePath };
+        return { tag, restorePath: restorePathInput, savePath: savePathInput };
     });
-}
-function getPlatformSuffix(noPlatform, enableCrossOsArchive) {
-    if (noPlatform || enableCrossOsArchive) {
-        return '';
-    }
-    const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'windows' : 'linux';
-    const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-    return `-${platform}-${arch}`;
-}
-/**
- * Get workspace from action inputs (Record-based).
- * Used by the generic action/save/restore actions.
- * NOTE: This is different from workspace.ts getWorkspace which takes a string.
- */
-function getInputsWorkspace(inputs) {
-    if (inputs.workspace && typeof inputs.workspace === 'string') {
-        return inputs.workspace;
-    }
-    const defaultWorkspace = process.env.BORINGCACHE_DEFAULT_WORKSPACE;
-    if (defaultWorkspace) {
-        return defaultWorkspace.includes('/') ? defaultWorkspace : `default/${defaultWorkspace}`;
-    }
-    return 'default/default';
-}
-function convertCacheFormatToEntries(inputs, _action) {
-    if (!inputs.path || !inputs.key) {
-        throw new Error('actions/cache format requires both path and key inputs');
-    }
-    const pathInput = inputs.path;
-    const keyInput = inputs.key;
-    const noPlatformInput = inputs.noPlatform;
-    const enableCrossOsArchiveInput = inputs.enableCrossOsArchive;
-    const workingDirectoryInput = inputs.workingDirectory;
-    const baseDir = workingDirectoryInput?.trim() || undefined;
-    const paths = pathInput
-        .split('\n')
-        .map(p => p.trim())
-        .filter(p => p);
-    const shouldDisablePlatform = noPlatformInput || enableCrossOsArchiveInput || false;
-    const platformSuffix = getPlatformSuffix(shouldDisablePlatform, enableCrossOsArchiveInput || false);
-    const fullKey = keyInput + platformSuffix;
-    return paths.map(p => `${fullKey}:${resolvePath(p, baseDir)}`).join(',');
 }
 
 // EXTERNAL MODULE: external "net"
@@ -94096,7 +93895,6 @@ function assertOciImportReady(readiness) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function proxy_startRegistryProxy(options) {
-    warnIfUsingLegacyApiToken();
     const { restoreToken, saveToken } = getAuthTokens();
     let effectiveReadOnly = options.readOnly === true;
     let authToken = effectiveReadOnly ? restoreToken : saveToken;
@@ -94175,7 +93973,6 @@ async function proxy_startRegistryProxy(options) {
         stdio: ['ignore', logFd, logFd],
         env: {
             ...process.env,
-            BORINGCACHE_API_TOKEN: authToken,
         }
     });
     child.unref();
@@ -94314,9 +94111,6 @@ function getMiseDataDir() {
     }
     return external_path_.join(runnerHomeDir(), '.local', 'share', 'mise');
 }
-function getMiseInstallsDir() {
-    return process.env.MISE_INSTALLS_DIR || external_path_.join(getMiseDataDir(), 'installs');
-}
 function getMiseShimsDir() {
     return external_path_.join(getMiseDataDir(), 'shims');
 }
@@ -94329,34 +94123,6 @@ function slugMiseTagPart(value) {
         .replace(/-+/g, '-')
         .replace(/^[.-]+|[.-]+$/g, '');
     return normalized || 'unknown';
-}
-function scopeMiseToolVersion(version, scope = 'patch') {
-    const normalized = version.trim().replace(/^v(?=\d)/, '');
-    const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
-    if (!match) {
-        return slugMiseTagPart(normalized);
-    }
-    const [, major, minor, patch] = match;
-    if (scope === 'major' || !minor) {
-        return major;
-    }
-    if (scope === 'minor' || !patch) {
-        return `${major}.${minor}`;
-    }
-    return `${major}.${minor}.${patch}`;
-}
-function buildMiseToolTag(tools, scope = 'patch') {
-    return tools
-        .map((tool) => `${slugMiseTagPart(tool.name)}-${slugMiseTagPart(scopeMiseToolVersion(tool.version, scope))}`)
-        .sort()
-        .join('-');
-}
-function buildMiseRuntimeTag(prefix, tools, scope = 'patch') {
-    const toolTag = buildMiseToolTag(tools, scope);
-    if (!toolTag) {
-        return slugMiseTagPart(prefix);
-    }
-    return `${slugMiseTagPart(prefix)}-mise-${toolTag}`;
 }
 async function hasMiseToolVersion(toolName, version) {
     const normalizedTool = normalizeToolName(toolName);
@@ -95039,3461 +94805,12 @@ function normalizeToolName(value) {
 
 
 
-
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-glob-options-helper.js
-
-/**
- * Returns a copy with defaults filled in.
- */
-function internal_glob_options_helper_getOptions(copy) {
-    const result = {
-        followSymbolicLinks: true,
-        implicitDescendants: true,
-        matchDirectories: true,
-        omitBrokenSymbolicLinks: true,
-        excludeHiddenFiles: false
-    };
-    if (copy) {
-        if (typeof copy.followSymbolicLinks === 'boolean') {
-            result.followSymbolicLinks = copy.followSymbolicLinks;
-            core_debug(`followSymbolicLinks '${result.followSymbolicLinks}'`);
-        }
-        if (typeof copy.implicitDescendants === 'boolean') {
-            result.implicitDescendants = copy.implicitDescendants;
-            core_debug(`implicitDescendants '${result.implicitDescendants}'`);
-        }
-        if (typeof copy.matchDirectories === 'boolean') {
-            result.matchDirectories = copy.matchDirectories;
-            core_debug(`matchDirectories '${result.matchDirectories}'`);
-        }
-        if (typeof copy.omitBrokenSymbolicLinks === 'boolean') {
-            result.omitBrokenSymbolicLinks = copy.omitBrokenSymbolicLinks;
-            core_debug(`omitBrokenSymbolicLinks '${result.omitBrokenSymbolicLinks}'`);
-        }
-        if (typeof copy.excludeHiddenFiles === 'boolean') {
-            result.excludeHiddenFiles = copy.excludeHiddenFiles;
-            core_debug(`excludeHiddenFiles '${result.excludeHiddenFiles}'`);
-        }
-    }
-    return result;
-}
-//# sourceMappingURL=internal-glob-options-helper.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-path-helper.js
-
-
-const lib_internal_path_helper_IS_WINDOWS = process.platform === 'win32';
-/**
- * Similar to path.dirname except normalizes the path separators and slightly better handling for Windows UNC paths.
- *
- * For example, on Linux/macOS:
- * - `/               => /`
- * - `/hello          => /`
- *
- * For example, on Windows:
- * - `C:\             => C:\`
- * - `C:\hello        => C:\`
- * - `C:              => C:`
- * - `C:hello         => C:`
- * - `\               => \`
- * - `\hello          => \`
- * - `\\hello         => \\hello`
- * - `\\hello\world   => \\hello\world`
- */
-function internal_path_helper_dirname(p) {
-    // Normalize slashes and trim unnecessary trailing slash
-    p = internal_path_helper_safeTrimTrailingSeparator(p);
-    // Windows UNC root, e.g. \\hello or \\hello\world
-    if (lib_internal_path_helper_IS_WINDOWS && /^\\\\[^\\]+(\\[^\\]+)?$/.test(p)) {
-        return p;
-    }
-    // Get dirname
-    let result = external_path_.dirname(p);
-    // Trim trailing slash for Windows UNC root, e.g. \\hello\world\
-    if (lib_internal_path_helper_IS_WINDOWS && /^\\\\[^\\]+\\[^\\]+\\$/.test(result)) {
-        result = internal_path_helper_safeTrimTrailingSeparator(result);
-    }
-    return result;
-}
-/**
- * Roots the path if not already rooted. On Windows, relative roots like `\`
- * or `C:` are expanded based on the current working directory.
- */
-function internal_path_helper_ensureAbsoluteRoot(root, itemPath) {
-    external_assert_(root, `ensureAbsoluteRoot parameter 'root' must not be empty`);
-    external_assert_(itemPath, `ensureAbsoluteRoot parameter 'itemPath' must not be empty`);
-    // Already rooted
-    if (internal_path_helper_hasAbsoluteRoot(itemPath)) {
-        return itemPath;
-    }
-    // Windows
-    if (lib_internal_path_helper_IS_WINDOWS) {
-        // Check for itemPath like C: or C:foo
-        if (itemPath.match(/^[A-Z]:[^\\/]|^[A-Z]:$/i)) {
-            let cwd = process.cwd();
-            external_assert_(cwd.match(/^[A-Z]:\\/i), `Expected current directory to start with an absolute drive root. Actual '${cwd}'`);
-            // Drive letter matches cwd? Expand to cwd
-            if (itemPath[0].toUpperCase() === cwd[0].toUpperCase()) {
-                // Drive only, e.g. C:
-                if (itemPath.length === 2) {
-                    // Preserve specified drive letter case (upper or lower)
-                    return `${itemPath[0]}:\\${cwd.substr(3)}`;
-                }
-                // Drive + path, e.g. C:foo
-                else {
-                    if (!cwd.endsWith('\\')) {
-                        cwd += '\\';
-                    }
-                    // Preserve specified drive letter case (upper or lower)
-                    return `${itemPath[0]}:\\${cwd.substr(3)}${itemPath.substr(2)}`;
-                }
-            }
-            // Different drive
-            else {
-                return `${itemPath[0]}:\\${itemPath.substr(2)}`;
-            }
-        }
-        // Check for itemPath like \ or \foo
-        else if (lib_internal_path_helper_normalizeSeparators(itemPath).match(/^\\$|^\\[^\\]/)) {
-            const cwd = process.cwd();
-            external_assert_(cwd.match(/^[A-Z]:\\/i), `Expected current directory to start with an absolute drive root. Actual '${cwd}'`);
-            return `${cwd[0]}:\\${itemPath.substr(1)}`;
-        }
-    }
-    external_assert_(internal_path_helper_hasAbsoluteRoot(root), `ensureAbsoluteRoot parameter 'root' must have an absolute root`);
-    // Otherwise ensure root ends with a separator
-    if (root.endsWith('/') || (lib_internal_path_helper_IS_WINDOWS && root.endsWith('\\'))) {
-        // Intentionally empty
-    }
-    else {
-        // Append separator
-        root += external_path_.sep;
-    }
-    return root + itemPath;
-}
-/**
- * On Linux/macOS, true if path starts with `/`. On Windows, true for paths like:
- * `\\hello\share` and `C:\hello` (and using alternate separator).
- */
-function internal_path_helper_hasAbsoluteRoot(itemPath) {
-    external_assert_(itemPath, `hasAbsoluteRoot parameter 'itemPath' must not be empty`);
-    // Normalize separators
-    itemPath = lib_internal_path_helper_normalizeSeparators(itemPath);
-    // Windows
-    if (lib_internal_path_helper_IS_WINDOWS) {
-        // E.g. \\hello\share or C:\hello
-        return itemPath.startsWith('\\\\') || /^[A-Z]:\\/i.test(itemPath);
-    }
-    // E.g. /hello
-    return itemPath.startsWith('/');
-}
-/**
- * On Linux/macOS, true if path starts with `/`. On Windows, true for paths like:
- * `\`, `\hello`, `\\hello\share`, `C:`, and `C:\hello` (and using alternate separator).
- */
-function internal_path_helper_hasRoot(itemPath) {
-    external_assert_(itemPath, `isRooted parameter 'itemPath' must not be empty`);
-    // Normalize separators
-    itemPath = lib_internal_path_helper_normalizeSeparators(itemPath);
-    // Windows
-    if (lib_internal_path_helper_IS_WINDOWS) {
-        // E.g. \ or \hello or \\hello
-        // E.g. C: or C:\hello
-        return itemPath.startsWith('\\') || /^[A-Z]:/i.test(itemPath);
-    }
-    // E.g. /hello
-    return itemPath.startsWith('/');
-}
-/**
- * Removes redundant slashes and converts `/` to `\` on Windows
- */
-function lib_internal_path_helper_normalizeSeparators(p) {
-    p = p || '';
-    // Windows
-    if (lib_internal_path_helper_IS_WINDOWS) {
-        // Convert slashes on Windows
-        p = p.replace(/\//g, '\\');
-        // Remove redundant slashes
-        const isUnc = /^\\\\+[^\\]/.test(p); // e.g. \\hello
-        return (isUnc ? '\\' : '') + p.replace(/\\\\+/g, '\\'); // preserve leading \\ for UNC
-    }
-    // Remove redundant slashes
-    return p.replace(/\/\/+/g, '/');
-}
-/**
- * Normalizes the path separators and trims the trailing separator (when safe).
- * For example, `/foo/ => /foo` but `/ => /`
- */
-function internal_path_helper_safeTrimTrailingSeparator(p) {
-    // Short-circuit if empty
-    if (!p) {
-        return '';
-    }
-    // Normalize separators
-    p = lib_internal_path_helper_normalizeSeparators(p);
-    // No trailing slash
-    if (!p.endsWith(external_path_.sep)) {
-        return p;
-    }
-    // Check '/' on Linux/macOS and '\' on Windows
-    if (p === external_path_.sep) {
-        return p;
-    }
-    // On Windows check if drive root. E.g. C:\
-    if (lib_internal_path_helper_IS_WINDOWS && /^[A-Z]:\\$/i.test(p)) {
-        return p;
-    }
-    // Otherwise trim trailing slash
-    return p.substr(0, p.length - 1);
-}
-//# sourceMappingURL=internal-path-helper.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-match-kind.js
-/**
- * Indicates whether a pattern matches a path
- */
-var internal_match_kind_MatchKind;
-(function (MatchKind) {
-    /** Not matched */
-    MatchKind[MatchKind["None"] = 0] = "None";
-    /** Matched if the path is a directory */
-    MatchKind[MatchKind["Directory"] = 1] = "Directory";
-    /** Matched if the path is a regular file */
-    MatchKind[MatchKind["File"] = 2] = "File";
-    /** Matched */
-    MatchKind[MatchKind["All"] = 3] = "All";
-})(internal_match_kind_MatchKind || (internal_match_kind_MatchKind = {}));
-//# sourceMappingURL=internal-match-kind.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-pattern-helper.js
-
-
-const lib_internal_pattern_helper_IS_WINDOWS = process.platform === 'win32';
-/**
- * Given an array of patterns, returns an array of paths to search.
- * Duplicates and paths under other included paths are filtered out.
- */
-function internal_pattern_helper_getSearchPaths(patterns) {
-    // Ignore negate patterns
-    patterns = patterns.filter(x => !x.negate);
-    // Create a map of all search paths
-    const searchPathMap = {};
-    for (const pattern of patterns) {
-        const key = lib_internal_pattern_helper_IS_WINDOWS
-            ? pattern.searchPath.toUpperCase()
-            : pattern.searchPath;
-        searchPathMap[key] = 'candidate';
-    }
-    const result = [];
-    for (const pattern of patterns) {
-        // Check if already included
-        const key = lib_internal_pattern_helper_IS_WINDOWS
-            ? pattern.searchPath.toUpperCase()
-            : pattern.searchPath;
-        if (searchPathMap[key] === 'included') {
-            continue;
-        }
-        // Check for an ancestor search path
-        let foundAncestor = false;
-        let tempKey = key;
-        let parent = internal_path_helper_dirname(tempKey);
-        while (parent !== tempKey) {
-            if (searchPathMap[parent]) {
-                foundAncestor = true;
-                break;
-            }
-            tempKey = parent;
-            parent = internal_path_helper_dirname(tempKey);
-        }
-        // Include the search pattern in the result
-        if (!foundAncestor) {
-            result.push(pattern.searchPath);
-            searchPathMap[key] = 'included';
-        }
-    }
-    return result;
-}
-/**
- * Matches the patterns against the path
- */
-function lib_internal_pattern_helper_match(patterns, itemPath) {
-    let result = internal_match_kind_MatchKind.None;
-    for (const pattern of patterns) {
-        if (pattern.negate) {
-            result &= ~pattern.match(itemPath);
-        }
-        else {
-            result |= pattern.match(itemPath);
-        }
-    }
-    return result;
-}
-/**
- * Checks whether to descend further into the directory
- */
-function lib_internal_pattern_helper_partialMatch(patterns, itemPath) {
-    return patterns.some(x => !x.negate && x.partialMatch(itemPath));
-}
-//# sourceMappingURL=internal-pattern-helper.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/balanced-match/dist/esm/index.js
-const balanced = (a, b, str) => {
-    const ma = a instanceof RegExp ? maybeMatch(a, str) : a;
-    const mb = b instanceof RegExp ? maybeMatch(b, str) : b;
-    const r = ma !== null && mb != null && esm_range(ma, mb, str);
-    return (r && {
-        start: r[0],
-        end: r[1],
-        pre: str.slice(0, r[0]),
-        body: str.slice(r[0] + ma.length, r[1]),
-        post: str.slice(r[1] + mb.length),
-    });
-};
-const maybeMatch = (reg, str) => {
-    const m = str.match(reg);
-    return m ? m[0] : null;
-};
-const esm_range = (a, b, str) => {
-    let begs, beg, left, right = undefined, result;
-    let ai = str.indexOf(a);
-    let bi = str.indexOf(b, ai + 1);
-    let i = ai;
-    if (ai >= 0 && bi > 0) {
-        if (a === b) {
-            return [ai, bi];
-        }
-        begs = [];
-        left = str.length;
-        while (i >= 0 && !result) {
-            if (i === ai) {
-                begs.push(i);
-                ai = str.indexOf(a, i + 1);
-            }
-            else if (begs.length === 1) {
-                const r = begs.pop();
-                if (r !== undefined)
-                    result = [r, bi];
-            }
-            else {
-                beg = begs.pop();
-                if (beg !== undefined && beg < left) {
-                    left = beg;
-                    right = bi;
-                }
-                bi = str.indexOf(b, i + 1);
-            }
-            i = ai < bi && ai >= 0 ? ai : bi;
-        }
-        if (begs.length && right !== undefined) {
-            result = [left, right];
-        }
-    }
-    return result;
-};
-//# sourceMappingURL=index.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/brace-expansion/dist/esm/index.js
-
-const escSlash = '\0SLASH' + Math.random() + '\0';
-const escOpen = '\0OPEN' + Math.random() + '\0';
-const escClose = '\0CLOSE' + Math.random() + '\0';
-const escComma = '\0COMMA' + Math.random() + '\0';
-const escPeriod = '\0PERIOD' + Math.random() + '\0';
-const escSlashPattern = new RegExp(escSlash, 'g');
-const escOpenPattern = new RegExp(escOpen, 'g');
-const escClosePattern = new RegExp(escClose, 'g');
-const escCommaPattern = new RegExp(escComma, 'g');
-const escPeriodPattern = new RegExp(escPeriod, 'g');
-const slashPattern = /\\\\/g;
-const openPattern = /\\{/g;
-const closePattern = /\\}/g;
-const commaPattern = /\\,/g;
-const periodPattern = /\\\./g;
-const EXPANSION_MAX = 100_000;
-// `EXPANSION_MAX` caps the *number* of expansions, but not their length. An
-// input like `'{a,b}'.repeat(1500)` stays under that count - its output is
-// truncated to 100k results - while making every result ~1500 characters
-// long. The result set, and the intermediate arrays built while combining
-// brace sets, then grow large enough to exhaust memory and crash the process
-// (CVE-2026-14257). `EXPANSION_MAX_LENGTH` bounds the total number of
-// characters the accumulator may hold at any point, so memory stays flat no
-// matter how many brace groups are chained. The limit sits well above any
-// realistic expansion (100k results hitting `EXPANSION_MAX` measure ~1M
-// characters) so legitimate input is unaffected.
-const EXPANSION_MAX_LENGTH = 4_000_000;
-function numeric(str) {
-    return !isNaN(str) ? parseInt(str, 10) : str.charCodeAt(0);
-}
-function escapeBraces(str) {
-    return str
-        .replace(slashPattern, escSlash)
-        .replace(openPattern, escOpen)
-        .replace(closePattern, escClose)
-        .replace(commaPattern, escComma)
-        .replace(periodPattern, escPeriod);
-}
-function unescapeBraces(str) {
-    return str
-        .replace(escSlashPattern, '\\')
-        .replace(escOpenPattern, '{')
-        .replace(escClosePattern, '}')
-        .replace(escCommaPattern, ',')
-        .replace(escPeriodPattern, '.');
-}
-/**
- * Basically just str.split(","), but handling cases
- * where we have nested braced sections, which should be
- * treated as individual members, like {a,{b,c},d}
- */
-function parseCommaParts(str) {
-    if (!str) {
-        return [''];
-    }
-    const parts = [];
-    const m = balanced('{', '}', str);
-    if (!m) {
-        return str.split(',');
-    }
-    const { pre, body, post } = m;
-    const p = pre.split(',');
-    p[p.length - 1] += '{' + body + '}';
-    const postParts = parseCommaParts(post);
-    if (post.length) {
-        ;
-        p[p.length - 1] += postParts.shift();
-        p.push.apply(p, postParts);
-    }
-    parts.push.apply(parts, p);
-    return parts;
-}
-function expand(str, options = {}) {
-    if (!str) {
-        return [];
-    }
-    const { max = EXPANSION_MAX, maxLength = EXPANSION_MAX_LENGTH } = options;
-    // I don't know why Bash 4.3 does this, but it does.
-    // Anything starting with {} will have the first two bytes preserved
-    // but *only* at the top level, so {},a}b will not expand to anything,
-    // but a{},b}c will be expanded to [a}c,abc].
-    // One could argue that this is a bug in Bash, but since the goal of
-    // this module is to match Bash's rules, we escape a leading {}
-    if (str.slice(0, 2) === '{}') {
-        str = '\\{\\}' + str.slice(2);
-    }
-    return expand_(escapeBraces(str), max, maxLength, true).map(unescapeBraces);
-}
-function embrace(str) {
-    return '{' + str + '}';
-}
-function isPadded(el) {
-    return /^-?0\d/.test(el);
-}
-function lte(i, y) {
-    return i <= y;
-}
-function gte(i, y) {
-    return i >= y;
-}
-// Build `{ acc[a] + pre + values[v] }` for every combination, capping the
-// number of results at `max` and the total number of characters at `maxLength`.
-// This is the one place output grows, so bounding it here keeps the single
-// accumulator - and therefore memory - flat regardless of how many brace groups
-// are combined (CVE-2026-14257).
-function combine(acc, pre, values, max, maxLength, dropEmpties) {
-    const out = [];
-    let length = 0;
-    for (let a = 0; a < acc.length; a++) {
-        for (let v = 0; v < values.length; v++) {
-            if (out.length >= max)
-                return out;
-            const expansion = acc[a] + pre + values[v];
-            // Bash drops empty results at the top level. Skip them before they count
-            // against `max`, so `max` bounds the number of *kept* results.
-            if (dropEmpties && !expansion)
-                continue;
-            if (length + expansion.length > maxLength)
-                return out;
-            out.push(expansion);
-            length += expansion.length;
-        }
-    }
-    return out;
-}
-// The expansion values of a single numeric (`1..5`) or alphabetic (`a..e..2`)
-// sequence body.
-function expandSequence(body, isAlphaSequence, max) {
-    const n = body.split(/\.\./);
-    const N = [];
-    // A sequence body always splits into two or three parts, but the compiler
-    // can't know that.
-    /* c8 ignore start */
-    if (n[0] === undefined || n[1] === undefined) {
-        return N;
-    }
-    /* c8 ignore stop */
-    const x = numeric(n[0]);
-    const y = numeric(n[1]);
-    const width = Math.max(n[0].length, n[1].length);
-    let incr = n.length === 3 && n[2] !== undefined ?
-        Math.max(Math.abs(numeric(n[2])), 1)
-        : 1;
-    let test = lte;
-    const reverse = y < x;
-    if (reverse) {
-        incr *= -1;
-        test = gte;
-    }
-    const pad = n.some(isPadded);
-    for (let i = x; test(i, y) && N.length < max; i += incr) {
-        let c;
-        if (isAlphaSequence) {
-            c = String.fromCharCode(i);
-            if (c === '\\') {
-                c = '';
-            }
-        }
-        else {
-            c = String(i);
-            if (pad) {
-                const need = width - c.length;
-                if (need > 0) {
-                    const z = new Array(need + 1).join('0');
-                    if (i < 0) {
-                        c = '-' + z + c.slice(1);
-                    }
-                    else {
-                        c = z + c;
-                    }
-                }
-            }
-        }
-        N.push(c);
-    }
-    return N;
-}
-function expand_(str, max, maxLength, isTop) {
-    // Consume the string's top-level brace groups left to right, threading a
-    // running set of combined prefixes (`acc`). Expanding the tail iteratively -
-    // rather than recursing on `m.post` once per group - keeps the native stack
-    // depth constant, so deeply chained input (`'{a,b}'.repeat(3000)`) can no
-    // longer overflow the stack, and leaves a single accumulator whose size
-    // `maxLength` bounds directly (CVE-2026-14257).
-    let acc = [''];
-    // Bash drops empty results, but only when the *first* top-level group is a
-    // comma set - a sequence like `{a..\}` may legitimately yield ''. The drop
-    // is on the final strings, so it is applied to whichever `combine` produces
-    // them (the one with no brace set left in the tail).
-    let dropEmpties = false;
-    let firstGroup = true;
-    for (;;) {
-        const m = balanced('{', '}', str);
-        // No brace set left: the rest of the string is literal.
-        if (!m) {
-            return combine(acc, str, [''], max, maxLength, dropEmpties);
-        }
-        // no need to expand pre, since it is guaranteed to be free of brace-sets
-        const pre = m.pre;
-        if (/\$$/.test(pre)) {
-            acc = combine(acc, pre + '{' + m.body + '}', [''], max, maxLength, dropEmpties && !m.post.length);
-            firstGroup = false;
-            if (!m.post.length)
-                break;
-            str = m.post;
-            continue;
-        }
-        const isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
-        const isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
-        const isSequence = isNumericSequence || isAlphaSequence;
-        const isOptions = m.body.indexOf(',') >= 0;
-        if (!isSequence && !isOptions) {
-            // {a},b}
-            if (m.post.match(/,(?!,).*\}/)) {
-                str = m.pre + '{' + m.body + escClose + m.post;
-                isTop = true;
-                continue;
-            }
-            // Nothing here expands, so the whole remaining string is literal.
-            return combine(acc, pre + '{' + m.body + '}' + m.post, [''], max, maxLength, dropEmpties);
-        }
-        if (firstGroup) {
-            dropEmpties = isTop && !isSequence;
-            firstGroup = false;
-        }
-        let values;
-        if (isSequence) {
-            values = expandSequence(m.body, isAlphaSequence, max);
-        }
-        else {
-            let n = parseCommaParts(m.body);
-            if (n.length === 1 && n[0] !== undefined) {
-                // x{{a,b}}y ==> x{a}y x{b}y
-                n = expand_(n[0], max, maxLength, false).map(embrace);
-                //XXX is this necessary? Can't seem to hit it in tests.
-                /* c8 ignore start */
-                if (n.length === 1) {
-                    acc = combine(acc, pre + n[0], [''], max, maxLength, dropEmpties && !m.post.length);
-                    if (!m.post.length)
-                        break;
-                    str = m.post;
-                    continue;
-                }
-                /* c8 ignore stop */
-            }
-            values = [];
-            for (let j = 0; j < n.length; j++) {
-                values.push.apply(values, expand_(n[j], max, maxLength, false));
-            }
-        }
-        acc = combine(acc, pre, values, max, maxLength, dropEmpties && !m.post.length);
-        if (!m.post.length)
-            break;
-        str = m.post;
-    }
-    return acc;
-}
-//# sourceMappingURL=index.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/minimatch/dist/esm/assert-valid-pattern.js
-const MAX_PATTERN_LENGTH = 1024 * 64;
-const assertValidPattern = (pattern) => {
-    if (typeof pattern !== 'string') {
-        throw new TypeError('invalid pattern');
-    }
-    if (pattern.length > MAX_PATTERN_LENGTH) {
-        throw new TypeError('pattern is too long');
-    }
-};
-//# sourceMappingURL=assert-valid-pattern.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/minimatch/dist/esm/brace-expressions.js
-// translate the various posix character classes into unicode properties
-// this works across all unicode locales
-// { <posix class>: [<translation>, /u flag required, negated]
-const posixClasses = {
-    '[:alnum:]': ['\\p{L}\\p{Nl}\\p{Nd}', true],
-    '[:alpha:]': ['\\p{L}\\p{Nl}', true],
-    '[:ascii:]': ['\\x' + '00-\\x' + '7f', false],
-    '[:blank:]': ['\\p{Zs}\\t', true],
-    '[:cntrl:]': ['\\p{Cc}', true],
-    '[:digit:]': ['\\p{Nd}', true],
-    '[:graph:]': ['\\p{Z}\\p{C}', true, true],
-    '[:lower:]': ['\\p{Ll}', true],
-    '[:print:]': ['\\p{C}', true],
-    '[:punct:]': ['\\p{P}', true],
-    '[:space:]': ['\\p{Z}\\t\\r\\n\\v\\f', true],
-    '[:upper:]': ['\\p{Lu}', true],
-    '[:word:]': ['\\p{L}\\p{Nl}\\p{Nd}\\p{Pc}', true],
-    '[:xdigit:]': ['A-Fa-f0-9', false],
-};
-// only need to escape a few things inside of brace expressions
-// escapes: [ \ ] -
-const braceEscape = (s) => s.replace(/[[\]\\-]/g, '\\$&');
-// escape all regexp magic characters
-const regexpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
-// everything has already been escaped, we just have to join
-const rangesToString = (ranges) => ranges.join('');
-// takes a glob string at a posix brace expression, and returns
-// an equivalent regular expression source, and boolean indicating
-// whether the /u flag needs to be applied, and the number of chars
-// consumed to parse the character class.
-// This also removes out of order ranges, and returns ($.) if the
-// entire class just no good.
-const parseClass = (glob, position) => {
-    const pos = position;
-    /* c8 ignore start */
-    if (glob.charAt(pos) !== '[') {
-        throw new Error('not in a brace expression');
-    }
-    /* c8 ignore stop */
-    const ranges = [];
-    const negs = [];
-    let i = pos + 1;
-    let sawStart = false;
-    let uflag = false;
-    let escaping = false;
-    let negate = false;
-    let endPos = pos;
-    let rangeStart = '';
-    WHILE: while (i < glob.length) {
-        const c = glob.charAt(i);
-        if ((c === '!' || c === '^') && i === pos + 1) {
-            negate = true;
-            i++;
-            continue;
-        }
-        if (c === ']' && sawStart && !escaping) {
-            endPos = i + 1;
-            break;
-        }
-        sawStart = true;
-        if (c === '\\') {
-            if (!escaping) {
-                escaping = true;
-                i++;
-                continue;
-            }
-            // escaped \ char, fall through and treat like normal char
-        }
-        if (c === '[' && !escaping) {
-            // either a posix class, a collation equivalent, or just a [
-            for (const [cls, [unip, u, neg]] of Object.entries(posixClasses)) {
-                if (glob.startsWith(cls, i)) {
-                    // invalid, [a-[] is fine, but not [a-[:alpha]]
-                    if (rangeStart) {
-                        return ['$.', false, glob.length - pos, true];
-                    }
-                    i += cls.length;
-                    if (neg)
-                        negs.push(unip);
-                    else
-                        ranges.push(unip);
-                    uflag = uflag || u;
-                    continue WHILE;
-                }
-            }
-        }
-        // now it's just a normal character, effectively
-        escaping = false;
-        if (rangeStart) {
-            // throw this range away if it's not valid, but others
-            // can still match.
-            if (c > rangeStart) {
-                ranges.push(braceEscape(rangeStart) + '-' + braceEscape(c));
-            }
-            else if (c === rangeStart) {
-                ranges.push(braceEscape(c));
-            }
-            rangeStart = '';
-            i++;
-            continue;
-        }
-        // now might be the start of a range.
-        // can be either c-d or c-] or c<more...>] or c] at this point
-        if (glob.startsWith('-]', i + 1)) {
-            ranges.push(braceEscape(c + '-'));
-            i += 2;
-            continue;
-        }
-        if (glob.startsWith('-', i + 1)) {
-            rangeStart = c;
-            i += 2;
-            continue;
-        }
-        // not the start of a range, just a single character
-        ranges.push(braceEscape(c));
-        i++;
-    }
-    if (endPos < i) {
-        // didn't see the end of the class, not a valid class,
-        // but might still be valid as a literal match.
-        return ['', false, 0, false];
-    }
-    // if we got no ranges and no negates, then we have a range that
-    // cannot possibly match anything, and that poisons the whole glob
-    if (!ranges.length && !negs.length) {
-        return ['$.', false, glob.length - pos, true];
-    }
-    // if we got one positive range, and it's a single character, then that's
-    // not actually a magic pattern, it's just that one literal character.
-    // we should not treat that as "magic", we should just return the literal
-    // character. [_] is a perfectly valid way to escape glob magic chars.
-    if (negs.length === 0 &&
-        ranges.length === 1 &&
-        /^\\?.$/.test(ranges[0]) &&
-        !negate) {
-        const r = ranges[0].length === 2 ? ranges[0].slice(-1) : ranges[0];
-        return [regexpEscape(r), false, endPos - pos, false];
-    }
-    const sranges = '[' + (negate ? '^' : '') + rangesToString(ranges) + ']';
-    const snegs = '[' + (negate ? '' : '^') + rangesToString(negs) + ']';
-    const comb = ranges.length && negs.length ? '(' + sranges + '|' + snegs + ')'
-        : ranges.length ? sranges
-            : snegs;
-    return [comb, uflag, endPos - pos, true];
-};
-//# sourceMappingURL=brace-expressions.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/minimatch/dist/esm/unescape.js
-/**
- * Un-escape a string that has been escaped with {@link escape}.
- *
- * If the {@link MinimatchOptions.windowsPathsNoEscape} option is used, then
- * square-bracket escapes are removed, but not backslash escapes.
- *
- * For example, it will turn the string `'[*]'` into `*`, but it will not
- * turn `'\\*'` into `'*'`, because `\` is a path separator in
- * `windowsPathsNoEscape` mode.
- *
- * When `windowsPathsNoEscape` is not set, then both square-bracket escapes and
- * backslash escapes are removed.
- *
- * Slashes (and backslashes in `windowsPathsNoEscape` mode) cannot be escaped
- * or unescaped.
- *
- * When `magicalBraces` is not set, escapes of braces (`{` and `}`) will not be
- * unescaped.
- */
-const unescape_unescape = (s, { windowsPathsNoEscape = false, magicalBraces = true, } = {}) => {
-    if (magicalBraces) {
-        return windowsPathsNoEscape ?
-            s.replace(/\[([^/\\])\]/g, '$1')
-            : s
-                .replace(/((?!\\).|^)\[([^/\\])\]/g, '$1$2')
-                .replace(/\\([^/])/g, '$1');
-    }
-    return windowsPathsNoEscape ?
-        s.replace(/\[([^/\\{}])\]/g, '$1')
-        : s
-            .replace(/((?!\\).|^)\[([^/\\{}])\]/g, '$1$2')
-            .replace(/\\([^/{}])/g, '$1');
-};
-//# sourceMappingURL=unescape.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/minimatch/dist/esm/ast.js
-// parse a single path portion
-var _a;
-
-
-const types = new Set(['!', '?', '+', '*', '@']);
-const isExtglobType = (c) => types.has(c);
-const isExtglobAST = (c) => isExtglobType(c.type);
-// Map of which extglob types can adopt the children of a nested extglob
-//
-// anything but ! can adopt a matching type:
-// +(a|+(b|c)|d) => +(a|b|c|d)
-// *(a|*(b|c)|d) => *(a|b|c|d)
-// @(a|@(b|c)|d) => @(a|b|c|d)
-// ?(a|?(b|c)|d) => ?(a|b|c|d)
-//
-// * can adopt anything, because 0 or repetition is allowed
-// *(a|?(b|c)|d) => *(a|b|c|d)
-// *(a|+(b|c)|d) => *(a|b|c|d)
-// *(a|@(b|c)|d) => *(a|b|c|d)
-//
-// + can adopt @, because 1 or repetition is allowed
-// +(a|@(b|c)|d) => +(a|b|c|d)
-//
-// + and @ CANNOT adopt *, because 0 would be allowed
-// +(a|*(b|c)|d) => would match "", on *(b|c)
-// @(a|*(b|c)|d) => would match "", on *(b|c)
-//
-// + and @ CANNOT adopt ?, because 0 would be allowed
-// +(a|?(b|c)|d) => would match "", on ?(b|c)
-// @(a|?(b|c)|d) => would match "", on ?(b|c)
-//
-// ? can adopt @, because 0 or 1 is allowed
-// ?(a|@(b|c)|d) => ?(a|b|c|d)
-//
-// ? and @ CANNOT adopt * or +, because >1 would be allowed
-// ?(a|*(b|c)|d) => would match bbb on *(b|c)
-// @(a|*(b|c)|d) => would match bbb on *(b|c)
-// ?(a|+(b|c)|d) => would match bbb on +(b|c)
-// @(a|+(b|c)|d) => would match bbb on +(b|c)
-//
-// ! CANNOT adopt ! (nothing else can either)
-// !(a|!(b|c)|d) => !(a|b|c|d) would fail to match on b (not not b|c)
-//
-// ! can adopt @
-// !(a|@(b|c)|d) => !(a|b|c|d)
-//
-// ! CANNOT adopt *
-// !(a|*(b|c)|d) => !(a|b|c|d) would match on bbb, not allowed
-//
-// ! CANNOT adopt +
-// !(a|+(b|c)|d) => !(a|b|c|d) would match on bbb, not allowed
-//
-// ! CANNOT adopt ?
-// x!(a|?(b|c)|d) => x!(a|b|c|d) would fail to match "x"
-const adoptionMap = new Map([
-    ['!', ['@']],
-    ['?', ['?', '@']],
-    ['@', ['@']],
-    ['*', ['*', '+', '?', '@']],
-    ['+', ['+', '@']],
-]);
-// nested extglobs that can be adopted in, but with the addition of
-// a blank '' element.
-const adoptionWithSpaceMap = new Map([
-    ['!', ['?']],
-    ['@', ['?']],
-    ['+', ['?', '*']],
-]);
-// union of the previous two maps
-const adoptionAnyMap = new Map([
-    ['!', ['?', '@']],
-    ['?', ['?', '@']],
-    ['@', ['?', '@']],
-    ['*', ['*', '+', '?', '@']],
-    ['+', ['+', '@', '?', '*']],
-]);
-// Extglobs that can take over their parent if they are the only child
-// the key is parent, value maps child to resulting extglob parent type
-// '@' is omitted because it's a special case. An `@` extglob with a single
-// member can always be usurped by that subpattern.
-const usurpMap = new Map([
-    ['!', new Map([['!', '@']])],
-    [
-        '?',
-        new Map([
-            ['*', '*'],
-            ['+', '*'],
-        ]),
-    ],
-    [
-        '@',
-        new Map([
-            ['!', '!'],
-            ['?', '?'],
-            ['@', '@'],
-            ['*', '*'],
-            ['+', '+'],
-        ]),
-    ],
-    [
-        '+',
-        new Map([
-            ['?', '*'],
-            ['*', '*'],
-        ]),
-    ],
-]);
-// Patterns that get prepended to bind to the start of either the
-// entire string, or just a single path portion, to prevent dots
-// and/or traversal patterns, when needed.
-// Exts don't need the ^ or / bit, because the root binds that already.
-const startNoTraversal = '(?!(?:^|/)\\.\\.?(?:$|/))';
-const startNoDot = '(?!\\.)';
-// characters that indicate a start of pattern needs the "no dots" bit,
-// because a dot *might* be matched. ( is not in the list, because in
-// the case of a child extglob, it will handle the prevention itself.
-const addPatternStart = new Set(['[', '.']);
-// cases where traversal is A-OK, no dot prevention needed
-const justDots = new Set(['..', '.']);
-const reSpecials = new Set('().*{}+?[]^$\\!');
-const regExpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
-// any single thing other than /
-const qmark = '[^/]';
-// * => any number of characters
-const star = qmark + '*?';
-// use + when we need to ensure that *something* matches, because the * is
-// the only thing in the path portion.
-const starNoEmpty = qmark + '+?';
-// remove the \ chars that we added if we end up doing a nonmagic compare
-// const deslash = (s: string) => s.replace(/\\(.)/g, '$1')
-let ID = 0;
-class AST {
-    type;
-    #root;
-    #hasMagic;
-    #uflag = false;
-    #parts = [];
-    #parent;
-    #parentIndex;
-    #negs;
-    #filledNegs = false;
-    #options;
-    #toString;
-    // set to true if it's an extglob with no children
-    // (which really means one child of '')
-    #emptyExt = false;
-    id = ++ID;
-    get depth() {
-        return (this.#parent?.depth ?? -1) + 1;
-    }
-    [Symbol.for('nodejs.util.inspect.custom')]() {
-        return {
-            '@@type': 'AST',
-            id: this.id,
-            type: this.type,
-            root: this.#root.id,
-            parent: this.#parent?.id,
-            depth: this.depth,
-            partsLength: this.#parts.length,
-            parts: this.#parts,
-        };
-    }
-    constructor(type, parent, options = {}) {
-        this.type = type;
-        // extglobs are inherently magical
-        if (type)
-            this.#hasMagic = true;
-        this.#parent = parent;
-        this.#root = this.#parent ? this.#parent.#root : this;
-        this.#options = this.#root === this ? options : this.#root.#options;
-        this.#negs = this.#root === this ? [] : this.#root.#negs;
-        if (type === '!' && !this.#root.#filledNegs)
-            this.#negs.push(this);
-        this.#parentIndex = this.#parent ? this.#parent.#parts.length : 0;
-    }
-    get hasMagic() {
-        /* c8 ignore start */
-        if (this.#hasMagic !== undefined)
-            return this.#hasMagic;
-        /* c8 ignore stop */
-        for (const p of this.#parts) {
-            if (typeof p === 'string')
-                continue;
-            if (p.type || p.hasMagic)
-                return (this.#hasMagic = true);
-        }
-        // note: will be undefined until we generate the regexp src and find out
-        return this.#hasMagic;
-    }
-    // reconstructs the pattern
-    toString() {
-        return (this.#toString !== undefined ? this.#toString
-            : !this.type ?
-                (this.#toString = this.#parts.map(p => String(p)).join(''))
-                : (this.#toString =
-                    this.type +
-                        '(' +
-                        this.#parts.map(p => String(p)).join('|') +
-                        ')'));
-    }
-    #fillNegs() {
-        /* c8 ignore start */
-        if (this !== this.#root)
-            throw new Error('should only call on root');
-        if (this.#filledNegs)
-            return this;
-        /* c8 ignore stop */
-        // call toString() once to fill this out
-        this.toString();
-        this.#filledNegs = true;
-        let n;
-        while ((n = this.#negs.pop())) {
-            if (n.type !== '!')
-                continue;
-            // walk up the tree, appending everthing that comes AFTER parentIndex
-            let p = n;
-            let pp = p.#parent;
-            while (pp) {
-                for (let i = p.#parentIndex + 1; !pp.type && i < pp.#parts.length; i++) {
-                    for (const part of n.#parts) {
-                        /* c8 ignore start */
-                        if (typeof part === 'string') {
-                            throw new Error('string part in extglob AST??');
-                        }
-                        /* c8 ignore stop */
-                        part.copyIn(pp.#parts[i]);
-                    }
-                }
-                p = pp;
-                pp = p.#parent;
-            }
-        }
-        return this;
-    }
-    push(...parts) {
-        for (const p of parts) {
-            if (p === '')
-                continue;
-            /* c8 ignore start */
-            if (typeof p !== 'string' &&
-                !(p instanceof _a && p.#parent === this)) {
-                throw new Error('invalid part: ' + p);
-            }
-            /* c8 ignore stop */
-            this.#parts.push(p);
-        }
-    }
-    toJSON() {
-        const ret = this.type === null ?
-            this.#parts
-                .slice()
-                .map(p => (typeof p === 'string' ? p : p.toJSON()))
-            : [this.type, ...this.#parts.map(p => p.toJSON())];
-        if (this.isStart() && !this.type)
-            ret.unshift([]);
-        if (this.isEnd() &&
-            (this === this.#root ||
-                (this.#root.#filledNegs && this.#parent?.type === '!'))) {
-            ret.push({});
-        }
-        return ret;
-    }
-    isStart() {
-        if (this.#root === this)
-            return true;
-        // if (this.type) return !!this.#parent?.isStart()
-        if (!this.#parent?.isStart())
-            return false;
-        if (this.#parentIndex === 0)
-            return true;
-        // if everything AHEAD of this is a negation, then it's still the "start"
-        const p = this.#parent;
-        for (let i = 0; i < this.#parentIndex; i++) {
-            const pp = p.#parts[i];
-            if (!(pp instanceof _a && pp.type === '!')) {
-                return false;
-            }
-        }
-        return true;
-    }
-    isEnd() {
-        if (this.#root === this)
-            return true;
-        if (this.#parent?.type === '!')
-            return true;
-        if (!this.#parent?.isEnd())
-            return false;
-        if (!this.type)
-            return this.#parent?.isEnd();
-        // if not root, it'll always have a parent
-        /* c8 ignore start */
-        const pl = this.#parent ? this.#parent.#parts.length : 0;
-        /* c8 ignore stop */
-        return this.#parentIndex === pl - 1;
-    }
-    copyIn(part) {
-        if (typeof part === 'string')
-            this.push(part);
-        else
-            this.push(part.clone(this));
-    }
-    clone(parent) {
-        const c = new _a(this.type, parent);
-        for (const p of this.#parts) {
-            c.copyIn(p);
-        }
-        return c;
-    }
-    static #parseAST(str, ast, pos, opt, extDepth) {
-        const maxDepth = opt.maxExtglobRecursion ?? 2;
-        let escaping = false;
-        let inBrace = false;
-        let braceStart = -1;
-        let braceNeg = false;
-        if (ast.type === null) {
-            // outside of a extglob, append until we find a start
-            let i = pos;
-            let acc = '';
-            while (i < str.length) {
-                const c = str.charAt(i++);
-                // still accumulate escapes at this point, but we do ignore
-                // starts that are escaped
-                if (escaping || c === '\\') {
-                    escaping = !escaping;
-                    acc += c;
-                    continue;
-                }
-                if (inBrace) {
-                    if (i === braceStart + 1) {
-                        if (c === '^' || c === '!') {
-                            braceNeg = true;
-                        }
-                    }
-                    else if (c === ']' && !(i === braceStart + 2 && braceNeg)) {
-                        inBrace = false;
-                    }
-                    acc += c;
-                    continue;
-                }
-                else if (c === '[') {
-                    inBrace = true;
-                    braceStart = i;
-                    braceNeg = false;
-                    acc += c;
-                    continue;
-                }
-                // we don't have to check for adoption here, because that's
-                // done at the other recursion point.
-                const doRecurse = !opt.noext &&
-                    isExtglobType(c) &&
-                    str.charAt(i) === '(' &&
-                    extDepth <= maxDepth;
-                if (doRecurse) {
-                    ast.push(acc);
-                    acc = '';
-                    const ext = new _a(c, ast);
-                    i = _a.#parseAST(str, ext, i, opt, extDepth + 1);
-                    ast.push(ext);
-                    continue;
-                }
-                acc += c;
-            }
-            ast.push(acc);
-            return i;
-        }
-        // some kind of extglob, pos is at the (
-        // find the next | or )
-        let i = pos + 1;
-        let part = new _a(null, ast);
-        const parts = [];
-        let acc = '';
-        while (i < str.length) {
-            const c = str.charAt(i++);
-            // still accumulate escapes at this point, but we do ignore
-            // starts that are escaped
-            if (escaping || c === '\\') {
-                escaping = !escaping;
-                acc += c;
-                continue;
-            }
-            if (inBrace) {
-                if (i === braceStart + 1) {
-                    if (c === '^' || c === '!') {
-                        braceNeg = true;
-                    }
-                }
-                else if (c === ']' && !(i === braceStart + 2 && braceNeg)) {
-                    inBrace = false;
-                }
-                acc += c;
-                continue;
-            }
-            else if (c === '[') {
-                inBrace = true;
-                braceStart = i;
-                braceNeg = false;
-                acc += c;
-                continue;
-            }
-            const doRecurse = !opt.noext &&
-                isExtglobType(c) &&
-                str.charAt(i) === '(' &&
-                /* c8 ignore start - the maxDepth is sufficient here */
-                (extDepth <= maxDepth || (ast && ast.#canAdoptType(c)));
-            /* c8 ignore stop */
-            if (doRecurse) {
-                const depthAdd = ast && ast.#canAdoptType(c) ? 0 : 1;
-                part.push(acc);
-                acc = '';
-                const ext = new _a(c, part);
-                part.push(ext);
-                i = _a.#parseAST(str, ext, i, opt, extDepth + depthAdd);
-                continue;
-            }
-            if (c === '|') {
-                part.push(acc);
-                acc = '';
-                parts.push(part);
-                part = new _a(null, ast);
-                continue;
-            }
-            if (c === ')') {
-                if (acc === '' && ast.#parts.length === 0) {
-                    ast.#emptyExt = true;
-                }
-                part.push(acc);
-                acc = '';
-                ast.push(...parts, part);
-                return i;
-            }
-            acc += c;
-        }
-        // unfinished extglob
-        // if we got here, it was a malformed extglob! not an extglob, but
-        // maybe something else in there.
-        ast.type = null;
-        ast.#hasMagic = undefined;
-        ast.#parts = [str.substring(pos - 1)];
-        return i;
-    }
-    #canAdoptWithSpace(child) {
-        return this.#canAdopt(child, adoptionWithSpaceMap);
-    }
-    #canAdopt(child, map = adoptionMap) {
-        if (!child ||
-            typeof child !== 'object' ||
-            child.type !== null ||
-            child.#parts.length !== 1 ||
-            this.type === null) {
-            return false;
-        }
-        const gc = child.#parts[0];
-        if (!gc || typeof gc !== 'object' || gc.type === null) {
-            return false;
-        }
-        return this.#canAdoptType(gc.type, map);
-    }
-    #canAdoptType(c, map = adoptionAnyMap) {
-        return !!map.get(this.type)?.includes(c);
-    }
-    #adoptWithSpace(child, index) {
-        const gc = child.#parts[0];
-        const blank = new _a(null, gc, this.options);
-        blank.#parts.push('');
-        gc.push(blank);
-        this.#adopt(child, index);
-    }
-    #adopt(child, index) {
-        const gc = child.#parts[0];
-        this.#parts.splice(index, 1, ...gc.#parts);
-        for (const p of gc.#parts) {
-            if (typeof p === 'object')
-                p.#parent = this;
-        }
-        this.#toString = undefined;
-    }
-    #canUsurpType(c) {
-        const m = usurpMap.get(this.type);
-        return !!m?.has(c);
-    }
-    #canUsurp(child) {
-        if (!child ||
-            typeof child !== 'object' ||
-            child.type !== null ||
-            child.#parts.length !== 1 ||
-            this.type === null ||
-            this.#parts.length !== 1) {
-            return false;
-        }
-        const gc = child.#parts[0];
-        if (!gc || typeof gc !== 'object' || gc.type === null) {
-            return false;
-        }
-        return this.#canUsurpType(gc.type);
-    }
-    #usurp(child) {
-        const m = usurpMap.get(this.type);
-        const gc = child.#parts[0];
-        const nt = m?.get(gc.type);
-        /* c8 ignore start - impossible */
-        if (!nt)
-            return false;
-        /* c8 ignore stop */
-        this.#parts = gc.#parts;
-        for (const p of this.#parts) {
-            if (typeof p === 'object') {
-                p.#parent = this;
-            }
-        }
-        this.type = nt;
-        this.#toString = undefined;
-        this.#emptyExt = false;
-    }
-    static fromGlob(pattern, options = {}) {
-        const ast = new _a(null, undefined, options);
-        _a.#parseAST(pattern, ast, 0, options, 0);
-        return ast;
-    }
-    // returns the regular expression if there's magic, or the unescaped
-    // string if not.
-    toMMPattern() {
-        // should only be called on root
-        /* c8 ignore start */
-        if (this !== this.#root)
-            return this.#root.toMMPattern();
-        /* c8 ignore stop */
-        const glob = this.toString();
-        const [re, body, hasMagic, uflag] = this.toRegExpSource();
-        // if we're in nocase mode, and not nocaseMagicOnly, then we do
-        // still need a regular expression if we have to case-insensitively
-        // match capital/lowercase characters.
-        const anyMagic = hasMagic ||
-            this.#hasMagic ||
-            (this.#options.nocase &&
-                !this.#options.nocaseMagicOnly &&
-                glob.toUpperCase() !== glob.toLowerCase());
-        if (!anyMagic) {
-            return body;
-        }
-        const flags = (this.#options.nocase ? 'i' : '') + (uflag ? 'u' : '');
-        return Object.assign(new RegExp(`^${re}$`, flags), {
-            _src: re,
-            _glob: glob,
-        });
-    }
-    get options() {
-        return this.#options;
-    }
-    // returns the string match, the regexp source, whether there's magic
-    // in the regexp (so a regular expression is required) and whether or
-    // not the uflag is needed for the regular expression (for posix classes)
-    // TODO: instead of injecting the start/end at this point, just return
-    // the BODY of the regexp, along with the start/end portions suitable
-    // for binding the start/end in either a joined full-path makeRe context
-    // (where we bind to (^|/), or a standalone matchPart context (where
-    // we bind to ^, and not /).  Otherwise slashes get duped!
-    //
-    // In part-matching mode, the start is:
-    // - if not isStart: nothing
-    // - if traversal possible, but not allowed: ^(?!\.\.?$)
-    // - if dots allowed or not possible: ^
-    // - if dots possible and not allowed: ^(?!\.)
-    // end is:
-    // - if not isEnd(): nothing
-    // - else: $
-    //
-    // In full-path matching mode, we put the slash at the START of the
-    // pattern, so start is:
-    // - if first pattern: same as part-matching mode
-    // - if not isStart(): nothing
-    // - if traversal possible, but not allowed: /(?!\.\.?(?:$|/))
-    // - if dots allowed or not possible: /
-    // - if dots possible and not allowed: /(?!\.)
-    // end is:
-    // - if last pattern, same as part-matching mode
-    // - else nothing
-    //
-    // Always put the (?:$|/) on negated tails, though, because that has to be
-    // there to bind the end of the negated pattern portion, and it's easier to
-    // just stick it in now rather than try to inject it later in the middle of
-    // the pattern.
-    //
-    // We can just always return the same end, and leave it up to the caller
-    // to know whether it's going to be used joined or in parts.
-    // And, if the start is adjusted slightly, can do the same there:
-    // - if not isStart: nothing
-    // - if traversal possible, but not allowed: (?:/|^)(?!\.\.?$)
-    // - if dots allowed or not possible: (?:/|^)
-    // - if dots possible and not allowed: (?:/|^)(?!\.)
-    //
-    // But it's better to have a simpler binding without a conditional, for
-    // performance, so probably better to return both start options.
-    //
-    // Then the caller just ignores the end if it's not the first pattern,
-    // and the start always gets applied.
-    //
-    // But that's always going to be $ if it's the ending pattern, or nothing,
-    // so the caller can just attach $ at the end of the pattern when building.
-    //
-    // So the todo is:
-    // - better detect what kind of start is needed
-    // - return both flavors of starting pattern
-    // - attach $ at the end of the pattern when creating the actual RegExp
-    //
-    // Ah, but wait, no, that all only applies to the root when the first pattern
-    // is not an extglob. If the first pattern IS an extglob, then we need all
-    // that dot prevention biz to live in the extglob portions, because eg
-    // +(*|.x*) can match .xy but not .yx.
-    //
-    // So, return the two flavors if it's #root and the first child is not an
-    // AST, otherwise leave it to the child AST to handle it, and there,
-    // use the (?:^|/) style of start binding.
-    //
-    // Even simplified further:
-    // - Since the start for a join is eg /(?!\.) and the start for a part
-    // is ^(?!\.), we can just prepend (?!\.) to the pattern (either root
-    // or start or whatever) and prepend ^ or / at the Regexp construction.
-    toRegExpSource(allowDot) {
-        const dot = allowDot ?? !!this.#options.dot;
-        if (this.#root === this) {
-            this.#flatten();
-            this.#fillNegs();
-        }
-        if (!isExtglobAST(this)) {
-            const noEmpty = this.isStart() &&
-                this.isEnd() &&
-                !this.#parts.some(s => typeof s !== 'string');
-            const src = this.#parts
-                .map(p => {
-                const [re, _, hasMagic, uflag] = typeof p === 'string' ?
-                    _a.#parseGlob(p, this.#hasMagic, noEmpty)
-                    : p.toRegExpSource(allowDot);
-                this.#hasMagic = this.#hasMagic || hasMagic;
-                this.#uflag = this.#uflag || uflag;
-                return re;
-            })
-                .join('');
-            let start = '';
-            if (this.isStart()) {
-                if (typeof this.#parts[0] === 'string') {
-                    // this is the string that will match the start of the pattern,
-                    // so we need to protect against dots and such.
-                    // '.' and '..' cannot match unless the pattern is that exactly,
-                    // even if it starts with . or dot:true is set.
-                    const dotTravAllowed = this.#parts.length === 1 && justDots.has(this.#parts[0]);
-                    if (!dotTravAllowed) {
-                        const aps = addPatternStart;
-                        // check if we have a possibility of matching . or ..,
-                        // and prevent that.
-                        const needNoTrav = 
-                        // dots are allowed, and the pattern starts with [ or .
-                        (dot && aps.has(src.charAt(0))) ||
-                            // the pattern starts with \., and then [ or .
-                            (src.startsWith('\\.') && aps.has(src.charAt(2))) ||
-                            // the pattern starts with \.\., and then [ or .
-                            (src.startsWith('\\.\\.') && aps.has(src.charAt(4)));
-                        // no need to prevent dots if it can't match a dot, or if a
-                        // sub-pattern will be preventing it anyway.
-                        const needNoDot = !dot && !allowDot && aps.has(src.charAt(0));
-                        start =
-                            needNoTrav ? startNoTraversal
-                                : needNoDot ? startNoDot
-                                    : '';
-                    }
-                }
-            }
-            // append the "end of path portion" pattern to negation tails
-            let end = '';
-            if (this.isEnd() &&
-                this.#root.#filledNegs &&
-                this.#parent?.type === '!') {
-                end = '(?:$|\\/)';
-            }
-            const final = start + src + end;
-            return [
-                final,
-                unescape_unescape(src),
-                (this.#hasMagic = !!this.#hasMagic),
-                this.#uflag,
-            ];
-        }
-        // We need to calculate the body *twice* if it's a repeat pattern
-        // at the start, once in nodot mode, then again in dot mode, so a
-        // pattern like *(?) can match 'x.y'
-        const repeated = this.type === '*' || this.type === '+';
-        // some kind of extglob
-        const start = this.type === '!' ? '(?:(?!(?:' : '(?:';
-        let body = this.#partsToRegExp(dot);
-        if (this.isStart() && this.isEnd() && !body && this.type !== '!') {
-            // invalid extglob, has to at least be *something* present, if it's
-            // the entire path portion.
-            const s = this.toString();
-            const me = this;
-            me.#parts = [s];
-            me.type = null;
-            me.#hasMagic = undefined;
-            return [s, unescape_unescape(this.toString()), false, false];
-        }
-        let bodyDotAllowed = !repeated || allowDot || dot || !startNoDot ?
-            ''
-            : this.#partsToRegExp(true);
-        if (bodyDotAllowed === body) {
-            bodyDotAllowed = '';
-        }
-        if (bodyDotAllowed) {
-            body = `(?:${body})(?:${bodyDotAllowed})*?`;
-        }
-        // an empty !() is exactly equivalent to a starNoEmpty
-        let final = '';
-        if (this.type === '!' && this.#emptyExt) {
-            final = (this.isStart() && !dot ? startNoDot : '') + starNoEmpty;
-        }
-        else {
-            const close = this.type === '!' ?
-                // !() must match something,but !(x) can match ''
-                '))' +
-                    (this.isStart() && !dot && !allowDot ? startNoDot : '') +
-                    star +
-                    ')'
-                : this.type === '@' ? ')'
-                    : this.type === '?' ? ')?'
-                        : this.type === '+' && bodyDotAllowed ? ')'
-                            : this.type === '*' && bodyDotAllowed ? `)?`
-                                : `)${this.type}`;
-            final = start + body + close;
-        }
-        return [
-            final,
-            unescape_unescape(body),
-            (this.#hasMagic = !!this.#hasMagic),
-            this.#uflag,
-        ];
-    }
-    #flatten() {
-        if (!isExtglobAST(this)) {
-            for (const p of this.#parts) {
-                if (typeof p === 'object') {
-                    p.#flatten();
-                }
-            }
-        }
-        else {
-            // do up to 10 passes to flatten as much as possible
-            let iterations = 0;
-            let done = false;
-            do {
-                done = true;
-                for (let i = 0; i < this.#parts.length; i++) {
-                    const c = this.#parts[i];
-                    if (typeof c === 'object') {
-                        c.#flatten();
-                        if (this.#canAdopt(c)) {
-                            done = false;
-                            this.#adopt(c, i);
-                        }
-                        else if (this.#canAdoptWithSpace(c)) {
-                            done = false;
-                            this.#adoptWithSpace(c, i);
-                        }
-                        else if (this.#canUsurp(c)) {
-                            done = false;
-                            this.#usurp(c);
-                        }
-                    }
-                }
-            } while (!done && ++iterations < 10);
-        }
-        this.#toString = undefined;
-    }
-    #partsToRegExp(dot) {
-        return this.#parts
-            .map(p => {
-            // extglob ASTs should only contain parent ASTs
-            /* c8 ignore start */
-            if (typeof p === 'string') {
-                throw new Error('string type in extglob ast??');
-            }
-            /* c8 ignore stop */
-            // can ignore hasMagic, because extglobs are already always magic
-            const [re, _, _hasMagic, uflag] = p.toRegExpSource(dot);
-            this.#uflag = this.#uflag || uflag;
-            return re;
-        })
-            .filter(p => !(this.isStart() && this.isEnd()) || !!p)
-            .join('|');
-    }
-    static #parseGlob(glob, hasMagic, noEmpty = false) {
-        let escaping = false;
-        let re = '';
-        let uflag = false;
-        // multiple stars that aren't globstars coalesce into one *
-        let inStar = false;
-        for (let i = 0; i < glob.length; i++) {
-            const c = glob.charAt(i);
-            if (escaping) {
-                escaping = false;
-                re += (reSpecials.has(c) ? '\\' : '') + c;
-                continue;
-            }
-            if (c === '*') {
-                if (inStar)
-                    continue;
-                inStar = true;
-                re += noEmpty && /^[*]+$/.test(glob) ? starNoEmpty : star;
-                hasMagic = true;
-                continue;
-            }
-            else {
-                inStar = false;
-            }
-            if (c === '\\') {
-                if (i === glob.length - 1) {
-                    re += '\\\\';
-                }
-                else {
-                    escaping = true;
-                }
-                continue;
-            }
-            if (c === '[') {
-                const [src, needUflag, consumed, magic] = parseClass(glob, i);
-                if (consumed) {
-                    re += src;
-                    uflag = uflag || needUflag;
-                    i += consumed - 1;
-                    hasMagic = hasMagic || magic;
-                    continue;
-                }
-            }
-            if (c === '?') {
-                re += qmark;
-                hasMagic = true;
-                continue;
-            }
-            re += regExpEscape(c);
-        }
-        return [re, unescape_unescape(glob), !!hasMagic, uflag];
-    }
-}
-_a = AST;
-//# sourceMappingURL=ast.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/minimatch/dist/esm/escape.js
-/**
- * Escape all magic characters in a glob pattern.
- *
- * If the {@link MinimatchOptions.windowsPathsNoEscape}
- * option is used, then characters are escaped by wrapping in `[]`, because
- * a magic character wrapped in a character class can only be satisfied by
- * that exact character.  In this mode, `\` is _not_ escaped, because it is
- * not interpreted as a magic character, but instead as a path separator.
- *
- * If the {@link MinimatchOptions.magicalBraces} option is used,
- * then braces (`{` and `}`) will be escaped.
- */
-const escape_escape = (s, { windowsPathsNoEscape = false, magicalBraces = false, } = {}) => {
-    // don't need to escape +@! because we escape the parens
-    // that make those magic, and escaping ! as [!] isn't valid,
-    // because [!]] is a valid glob class meaning not ']'.
-    if (magicalBraces) {
-        return windowsPathsNoEscape ?
-            s.replace(/[?*()[\]{}]/g, '[$&]')
-            : s.replace(/[?*()[\]\\{}]/g, '\\$&');
-    }
-    return windowsPathsNoEscape ?
-        s.replace(/[?*()[\]]/g, '[$&]')
-        : s.replace(/[?*()[\]\\]/g, '\\$&');
-};
-//# sourceMappingURL=escape.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/node_modules/minimatch/dist/esm/index.js
-
-
-
-
-
-const esm_minimatch = (p, pattern, options = {}) => {
-    assertValidPattern(pattern);
-    // shortcut: comments match nothing.
-    if (!options.nocomment && pattern.charAt(0) === '#') {
-        return false;
-    }
-    return new esm_Minimatch(pattern, options).match(p);
-};
-// Optimized checking for the most common glob patterns.
-const starDotExtRE = /^\*+([^+@!?*[(]*)$/;
-const starDotExtTest = (ext) => (f) => !f.startsWith('.') && f.endsWith(ext);
-const starDotExtTestDot = (ext) => (f) => f.endsWith(ext);
-const starDotExtTestNocase = (ext) => {
-    ext = ext.toLowerCase();
-    return (f) => !f.startsWith('.') && f.toLowerCase().endsWith(ext);
-};
-const starDotExtTestNocaseDot = (ext) => {
-    ext = ext.toLowerCase();
-    return (f) => f.toLowerCase().endsWith(ext);
-};
-const starDotStarRE = /^\*+\.\*+$/;
-const starDotStarTest = (f) => !f.startsWith('.') && f.includes('.');
-const starDotStarTestDot = (f) => f !== '.' && f !== '..' && f.includes('.');
-const dotStarRE = /^\.\*+$/;
-const dotStarTest = (f) => f !== '.' && f !== '..' && f.startsWith('.');
-const starRE = /^\*+$/;
-const starTest = (f) => f.length !== 0 && !f.startsWith('.');
-const starTestDot = (f) => f.length !== 0 && f !== '.' && f !== '..';
-const qmarksRE = /^\?+([^+@!?*[(]*)?$/;
-const qmarksTestNocase = ([$0, ext = '']) => {
-    const noext = qmarksTestNoExt([$0]);
-    if (!ext)
-        return noext;
-    ext = ext.toLowerCase();
-    return (f) => noext(f) && f.toLowerCase().endsWith(ext);
-};
-const qmarksTestNocaseDot = ([$0, ext = '']) => {
-    const noext = qmarksTestNoExtDot([$0]);
-    if (!ext)
-        return noext;
-    ext = ext.toLowerCase();
-    return (f) => noext(f) && f.toLowerCase().endsWith(ext);
-};
-const qmarksTestDot = ([$0, ext = '']) => {
-    const noext = qmarksTestNoExtDot([$0]);
-    return !ext ? noext : (f) => noext(f) && f.endsWith(ext);
-};
-const qmarksTest = ([$0, ext = '']) => {
-    const noext = qmarksTestNoExt([$0]);
-    return !ext ? noext : (f) => noext(f) && f.endsWith(ext);
-};
-const qmarksTestNoExt = ([$0]) => {
-    const len = $0.length;
-    return (f) => f.length === len && !f.startsWith('.');
-};
-const qmarksTestNoExtDot = ([$0]) => {
-    const len = $0.length;
-    return (f) => f.length === len && f !== '.' && f !== '..';
-};
-/* c8 ignore start */
-const defaultPlatform = (typeof process === 'object' && process ?
-    (typeof process.env === 'object' &&
-        process.env &&
-        process.env.__MINIMATCH_TESTING_PLATFORM__) ||
-        process.platform
-    : 'posix');
-const esm_path = {
-    win32: { sep: '\\' },
-    posix: { sep: '/' },
-};
-/* c8 ignore stop */
-const sep = defaultPlatform === 'win32' ? esm_path.win32.sep : esm_path.posix.sep;
-esm_minimatch.sep = sep;
-const GLOBSTAR = Symbol('globstar **');
-esm_minimatch.GLOBSTAR = GLOBSTAR;
-// any single thing other than /
-// don't need to escape / when using new RegExp()
-const esm_qmark = '[^/]';
-// * => any number of characters
-const esm_star = esm_qmark + '*?';
-// ** when dots are allowed.  Anything goes, except .. and .
-// not (^ or / followed by one or two dots followed by $ or /),
-// followed by anything, any number of times.
-const twoStarDot = '(?:(?!(?:\\/|^)(?:\\.{1,2})($|\\/)).)*?';
-// not a ^ or / followed by a dot,
-// followed by anything, any number of times.
-const twoStarNoDot = '(?:(?!(?:\\/|^)\\.).)*?';
-const filter = (pattern, options = {}) => (p) => esm_minimatch(p, pattern, options);
-esm_minimatch.filter = filter;
-const ext = (a, b = {}) => Object.assign({}, a, b);
-const defaults = (def) => {
-    if (!def || typeof def !== 'object' || !Object.keys(def).length) {
-        return esm_minimatch;
-    }
-    const orig = esm_minimatch;
-    const m = (p, pattern, options = {}) => orig(p, pattern, ext(def, options));
-    return Object.assign(m, {
-        Minimatch: class Minimatch extends orig.Minimatch {
-            constructor(pattern, options = {}) {
-                super(pattern, ext(def, options));
-            }
-            static defaults(options) {
-                return orig.defaults(ext(def, options)).Minimatch;
-            }
-        },
-        AST: class AST extends orig.AST {
-            /* c8 ignore start */
-            constructor(type, parent, options = {}) {
-                super(type, parent, ext(def, options));
-            }
-            /* c8 ignore stop */
-            static fromGlob(pattern, options = {}) {
-                return orig.AST.fromGlob(pattern, ext(def, options));
-            }
-        },
-        unescape: (s, options = {}) => orig.unescape(s, ext(def, options)),
-        escape: (s, options = {}) => orig.escape(s, ext(def, options)),
-        filter: (pattern, options = {}) => orig.filter(pattern, ext(def, options)),
-        defaults: (options) => orig.defaults(ext(def, options)),
-        makeRe: (pattern, options = {}) => orig.makeRe(pattern, ext(def, options)),
-        braceExpand: (pattern, options = {}) => orig.braceExpand(pattern, ext(def, options)),
-        match: (list, pattern, options = {}) => orig.match(list, pattern, ext(def, options)),
-        sep: orig.sep,
-        GLOBSTAR: GLOBSTAR,
-    });
-};
-esm_minimatch.defaults = defaults;
-// Brace expansion:
-// a{b,c}d -> abd acd
-// a{b,}c -> abc ac
-// a{0..3}d -> a0d a1d a2d a3d
-// a{b,c{d,e}f}g -> abg acdfg acefg
-// a{b,c}d{e,f}g -> abdeg acdeg abdeg abdfg
-//
-// Invalid sets are not expanded.
-// a{2..}b -> a{2..}b
-// a{b}c -> a{b}c
-const braceExpand = (pattern, options = {}) => {
-    assertValidPattern(pattern);
-    // Thanks to Yeting Li <https://github.com/yetingli> for
-    // improving this regexp to avoid a ReDOS vulnerability.
-    if (options.nobrace || !/\{(?:(?!\{).)*\}/.test(pattern)) {
-        // shortcut. no need to expand.
-        return [pattern];
-    }
-    return expand(pattern, { max: options.braceExpandMax });
-};
-esm_minimatch.braceExpand = braceExpand;
-// parse a component of the expanded set.
-// At this point, no pattern may contain "/" in it
-// so we're going to return a 2d array, where each entry is the full
-// pattern, split on '/', and then turned into a regular expression.
-// A regexp is made at the end which joins each array with an
-// escaped /, and another full one which joins each regexp with |.
-//
-// Following the lead of Bash 4.1, note that "**" only has special meaning
-// when it is the *only* thing in a path portion.  Otherwise, any series
-// of * is equivalent to a single *.  Globstar behavior is enabled by
-// default, and can be disabled by setting options.noglobstar.
-const makeRe = (pattern, options = {}) => new esm_Minimatch(pattern, options).makeRe();
-esm_minimatch.makeRe = makeRe;
-const match = (list, pattern, options = {}) => {
-    const mm = new esm_Minimatch(pattern, options);
-    list = list.filter(f => mm.match(f));
-    if (mm.options.nonull && !list.length) {
-        list.push(pattern);
-    }
-    return list;
-};
-esm_minimatch.match = match;
-// replace stuff like \* with *
-const globMagic = /[?*]|[+@!]\(.*?\)|\[|\]/;
-const esm_regExpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
-class esm_Minimatch {
-    options;
-    set;
-    pattern;
-    windowsPathsNoEscape;
-    nonegate;
-    negate;
-    comment;
-    empty;
-    preserveMultipleSlashes;
-    partial;
-    globSet;
-    globParts;
-    nocase;
-    isWindows;
-    platform;
-    windowsNoMagicRoot;
-    maxGlobstarRecursion;
-    regexp;
-    constructor(pattern, options = {}) {
-        assertValidPattern(pattern);
-        options = options || {};
-        this.options = options;
-        this.maxGlobstarRecursion = options.maxGlobstarRecursion ?? 200;
-        this.pattern = pattern;
-        this.platform = options.platform || defaultPlatform;
-        this.isWindows = this.platform === 'win32';
-        // avoid the annoying deprecation flag lol
-        const awe = ('allowWindow' + 'sEscape');
-        this.windowsPathsNoEscape =
-            !!options.windowsPathsNoEscape || options[awe] === false;
-        if (this.windowsPathsNoEscape) {
-            this.pattern = this.pattern.replace(/\\/g, '/');
-        }
-        this.preserveMultipleSlashes = !!options.preserveMultipleSlashes;
-        this.regexp = null;
-        this.negate = false;
-        this.nonegate = !!options.nonegate;
-        this.comment = false;
-        this.empty = false;
-        this.partial = !!options.partial;
-        this.nocase = !!this.options.nocase;
-        this.windowsNoMagicRoot =
-            options.windowsNoMagicRoot !== undefined ?
-                options.windowsNoMagicRoot
-                : !!(this.isWindows && this.nocase);
-        this.globSet = [];
-        this.globParts = [];
-        this.set = [];
-        // make the set of regexps etc.
-        this.make();
-    }
-    hasMagic() {
-        if (this.options.magicalBraces && this.set.length > 1) {
-            return true;
-        }
-        for (const pattern of this.set) {
-            for (const part of pattern) {
-                if (typeof part !== 'string')
-                    return true;
-            }
-        }
-        return false;
-    }
-    debug(..._) { }
-    make() {
-        const pattern = this.pattern;
-        const options = this.options;
-        // empty patterns and comments match nothing.
-        if (!options.nocomment && pattern.charAt(0) === '#') {
-            this.comment = true;
-            return;
-        }
-        if (!pattern) {
-            this.empty = true;
-            return;
-        }
-        // step 1: figure out negation, etc.
-        this.parseNegate();
-        // step 2: expand braces
-        this.globSet = [...new Set(this.braceExpand())];
-        if (options.debug) {
-            //oxlint-disable-next-line no-console
-            this.debug = (...args) => console.error(...args);
-        }
-        this.debug(this.pattern, this.globSet);
-        // step 3: now we have a set, so turn each one into a series of
-        // path-portion matching patterns.
-        // These will be regexps, except in the case of "**", which is
-        // set to the GLOBSTAR object for globstar behavior,
-        // and will not contain any / characters
-        //
-        // First, we preprocess to make the glob pattern sets a bit simpler
-        // and deduped.  There are some perf-killing patterns that can cause
-        // problems with a glob walk, but we can simplify them down a bit.
-        const rawGlobParts = this.globSet.map(s => this.slashSplit(s));
-        this.globParts = this.preprocess(rawGlobParts);
-        this.debug(this.pattern, this.globParts);
-        // glob --> regexps
-        let set = this.globParts.map((s, _, __) => {
-            if (this.isWindows && this.windowsNoMagicRoot) {
-                // check if it's a drive or unc path.
-                const isUNC = s[0] === '' &&
-                    s[1] === '' &&
-                    (s[2] === '?' || !globMagic.test(s[2])) &&
-                    !globMagic.test(s[3]);
-                const isDrive = /^[a-z]:/i.test(s[0]);
-                if (isUNC) {
-                    return [
-                        ...s.slice(0, 4),
-                        ...s.slice(4).map(ss => this.parse(ss)),
-                    ];
-                }
-                else if (isDrive) {
-                    return [s[0], ...s.slice(1).map(ss => this.parse(ss))];
-                }
-            }
-            return s.map(ss => this.parse(ss));
-        });
-        this.debug(this.pattern, set);
-        // filter out everything that didn't compile properly.
-        this.set = set.filter(s => s.indexOf(false) === -1);
-        // do not treat the ? in UNC paths as magic
-        if (this.isWindows) {
-            for (let i = 0; i < this.set.length; i++) {
-                const p = this.set[i];
-                if (p[0] === '' &&
-                    p[1] === '' &&
-                    this.globParts[i][2] === '?' &&
-                    typeof p[3] === 'string' &&
-                    /^[a-z]:$/i.test(p[3])) {
-                    p[2] = '?';
-                }
-            }
-        }
-        this.debug(this.pattern, this.set);
-    }
-    // various transforms to equivalent pattern sets that are
-    // faster to process in a filesystem walk.  The goal is to
-    // eliminate what we can, and push all ** patterns as far
-    // to the right as possible, even if it increases the number
-    // of patterns that we have to process.
-    preprocess(globParts) {
-        // if we're not in globstar mode, then turn ** into *
-        if (this.options.noglobstar) {
-            for (const partset of globParts) {
-                for (let j = 0; j < partset.length; j++) {
-                    if (partset[j] === '**') {
-                        partset[j] = '*';
-                    }
-                }
-            }
-        }
-        const { optimizationLevel = 1 } = this.options;
-        if (optimizationLevel >= 2) {
-            // aggressive optimization for the purpose of fs walking
-            globParts = this.firstPhasePreProcess(globParts);
-            globParts = this.secondPhasePreProcess(globParts);
-        }
-        else if (optimizationLevel >= 1) {
-            // just basic optimizations to remove some .. parts
-            globParts = this.levelOneOptimize(globParts);
-        }
-        else {
-            // just collapse multiple ** portions into one
-            globParts = this.adjascentGlobstarOptimize(globParts);
-        }
-        return globParts;
-    }
-    // just get rid of adjascent ** portions
-    adjascentGlobstarOptimize(globParts) {
-        return globParts.map(parts => {
-            let gs = -1;
-            while (-1 !== (gs = parts.indexOf('**', gs + 1))) {
-                let i = gs;
-                while (parts[i + 1] === '**') {
-                    i++;
-                }
-                if (i !== gs) {
-                    parts.splice(gs, i - gs);
-                }
-            }
-            return parts;
-        });
-    }
-    // get rid of adjascent ** and resolve .. portions
-    levelOneOptimize(globParts) {
-        return globParts.map(parts => {
-            parts = parts.reduce((set, part) => {
-                const prev = set[set.length - 1];
-                if (part === '**' && prev === '**') {
-                    return set;
-                }
-                if (part === '..') {
-                    if (prev && prev !== '..' && prev !== '.' && prev !== '**') {
-                        set.pop();
-                        return set;
-                    }
-                }
-                set.push(part);
-                return set;
-            }, []);
-            return parts.length === 0 ? [''] : parts;
-        });
-    }
-    levelTwoFileOptimize(parts) {
-        if (!Array.isArray(parts)) {
-            parts = this.slashSplit(parts);
-        }
-        let didSomething = false;
-        do {
-            didSomething = false;
-            // <pre>/<e>/<rest> -> <pre>/<rest>
-            if (!this.preserveMultipleSlashes) {
-                for (let i = 1; i < parts.length - 1; i++) {
-                    const p = parts[i];
-                    // don't squeeze out UNC patterns
-                    if (i === 1 && p === '' && parts[0] === '')
-                        continue;
-                    if (p === '.' || p === '') {
-                        didSomething = true;
-                        parts.splice(i, 1);
-                        i--;
-                    }
-                }
-                if (parts[0] === '.' &&
-                    parts.length === 2 &&
-                    (parts[1] === '.' || parts[1] === '')) {
-                    didSomething = true;
-                    parts.pop();
-                }
-            }
-            // <pre>/<p>/../<rest> -> <pre>/<rest>
-            let dd = 0;
-            while (-1 !== (dd = parts.indexOf('..', dd + 1))) {
-                const p = parts[dd - 1];
-                if (p &&
-                    p !== '.' &&
-                    p !== '..' &&
-                    p !== '**' &&
-                    !(this.isWindows && /^[a-z]:$/i.test(p))) {
-                    didSomething = true;
-                    parts.splice(dd - 1, 2);
-                    dd -= 2;
-                }
-            }
-        } while (didSomething);
-        return parts.length === 0 ? [''] : parts;
-    }
-    // First phase: single-pattern processing
-    // <pre> is 1 or more portions
-    // <rest> is 1 or more portions
-    // <p> is any portion other than ., .., '', or **
-    // <e> is . or ''
-    //
-    // **/.. is *brutal* for filesystem walking performance, because
-    // it effectively resets the recursive walk each time it occurs,
-    // and ** cannot be reduced out by a .. pattern part like a regexp
-    // or most strings (other than .., ., and '') can be.
-    //
-    // <pre>/**/../<p>/<p>/<rest> -> {<pre>/../<p>/<p>/<rest>,<pre>/**/<p>/<p>/<rest>}
-    // <pre>/<e>/<rest> -> <pre>/<rest>
-    // <pre>/<p>/../<rest> -> <pre>/<rest>
-    // **/**/<rest> -> **/<rest>
-    //
-    // **/*/<rest> -> */**/<rest> <== not valid because ** doesn't follow
-    // this WOULD be allowed if ** did follow symlinks, or * didn't
-    firstPhasePreProcess(globParts) {
-        let didSomething = false;
-        do {
-            didSomething = false;
-            // <pre>/**/../<p>/<p>/<rest> -> {<pre>/../<p>/<p>/<rest>,<pre>/**/<p>/<p>/<rest>}
-            for (let parts of globParts) {
-                let gs = -1;
-                while (-1 !== (gs = parts.indexOf('**', gs + 1))) {
-                    let gss = gs;
-                    while (parts[gss + 1] === '**') {
-                        // <pre>/**/**/<rest> -> <pre>/**/<rest>
-                        gss++;
-                    }
-                    // eg, if gs is 2 and gss is 4, that means we have 3 **
-                    // parts, and can remove 2 of them.
-                    if (gss > gs) {
-                        parts.splice(gs + 1, gss - gs);
-                    }
-                    let next = parts[gs + 1];
-                    const p = parts[gs + 2];
-                    const p2 = parts[gs + 3];
-                    if (next !== '..')
-                        continue;
-                    if (!p ||
-                        p === '.' ||
-                        p === '..' ||
-                        !p2 ||
-                        p2 === '.' ||
-                        p2 === '..') {
-                        continue;
-                    }
-                    didSomething = true;
-                    // edit parts in place, and push the new one
-                    parts.splice(gs, 1);
-                    const other = parts.slice(0);
-                    other[gs] = '**';
-                    globParts.push(other);
-                    gs--;
-                }
-                // <pre>/<e>/<rest> -> <pre>/<rest>
-                if (!this.preserveMultipleSlashes) {
-                    for (let i = 1; i < parts.length - 1; i++) {
-                        const p = parts[i];
-                        // don't squeeze out UNC patterns
-                        if (i === 1 && p === '' && parts[0] === '')
-                            continue;
-                        if (p === '.' || p === '') {
-                            didSomething = true;
-                            parts.splice(i, 1);
-                            i--;
-                        }
-                    }
-                    if (parts[0] === '.' &&
-                        parts.length === 2 &&
-                        (parts[1] === '.' || parts[1] === '')) {
-                        didSomething = true;
-                        parts.pop();
-                    }
-                }
-                // <pre>/<p>/../<rest> -> <pre>/<rest>
-                let dd = 0;
-                while (-1 !== (dd = parts.indexOf('..', dd + 1))) {
-                    const p = parts[dd - 1];
-                    if (p && p !== '.' && p !== '..' && p !== '**') {
-                        didSomething = true;
-                        const needDot = dd === 1 && parts[dd + 1] === '**';
-                        const splin = needDot ? ['.'] : [];
-                        parts.splice(dd - 1, 2, ...splin);
-                        if (parts.length === 0)
-                            parts.push('');
-                        dd -= 2;
-                    }
-                }
-            }
-        } while (didSomething);
-        return globParts;
-    }
-    // second phase: multi-pattern dedupes
-    // {<pre>/*/<rest>,<pre>/<p>/<rest>} -> <pre>/*/<rest>
-    // {<pre>/<rest>,<pre>/<rest>} -> <pre>/<rest>
-    // {<pre>/**/<rest>,<pre>/<rest>} -> <pre>/**/<rest>
-    //
-    // {<pre>/**/<rest>,<pre>/**/<p>/<rest>} -> <pre>/**/<rest>
-    // ^-- not valid because ** doens't follow symlinks
-    secondPhasePreProcess(globParts) {
-        for (let i = 0; i < globParts.length - 1; i++) {
-            for (let j = i + 1; j < globParts.length; j++) {
-                const matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);
-                if (matched) {
-                    globParts[i] = [];
-                    globParts[j] = matched;
-                    break;
-                }
-            }
-        }
-        return globParts.filter(gs => gs.length);
-    }
-    partsMatch(a, b, emptyGSMatch = false) {
-        let ai = 0;
-        let bi = 0;
-        let result = [];
-        let which = '';
-        while (ai < a.length && bi < b.length) {
-            if (a[ai] === b[bi]) {
-                result.push(which === 'b' ? b[bi] : a[ai]);
-                ai++;
-                bi++;
-            }
-            else if (emptyGSMatch && a[ai] === '**' && b[bi] === a[ai + 1]) {
-                result.push(a[ai]);
-                ai++;
-            }
-            else if (emptyGSMatch && b[bi] === '**' && a[ai] === b[bi + 1]) {
-                result.push(b[bi]);
-                bi++;
-            }
-            else if (a[ai] === '*' &&
-                b[bi] &&
-                (this.options.dot || !b[bi].startsWith('.')) &&
-                b[bi] !== '**') {
-                if (which === 'b')
-                    return false;
-                which = 'a';
-                result.push(a[ai]);
-                ai++;
-                bi++;
-            }
-            else if (b[bi] === '*' &&
-                a[ai] &&
-                (this.options.dot || !a[ai].startsWith('.')) &&
-                a[ai] !== '**') {
-                if (which === 'a')
-                    return false;
-                which = 'b';
-                result.push(b[bi]);
-                ai++;
-                bi++;
-            }
-            else {
-                return false;
-            }
-        }
-        // if we fall out of the loop, it means they two are identical
-        // as long as their lengths match
-        return a.length === b.length && result;
-    }
-    parseNegate() {
-        if (this.nonegate)
-            return;
-        const pattern = this.pattern;
-        let negate = false;
-        let negateOffset = 0;
-        for (let i = 0; i < pattern.length && pattern.charAt(i) === '!'; i++) {
-            negate = !negate;
-            negateOffset++;
-        }
-        if (negateOffset)
-            this.pattern = pattern.slice(negateOffset);
-        this.negate = negate;
-    }
-    // set partial to true to test if, for example,
-    // "/a/b" matches the start of "/*/b/*/d"
-    // Partial means, if you run out of file before you run
-    // out of pattern, then that's fine, as long as all
-    // the parts match.
-    matchOne(file, pattern, partial = false) {
-        let fileStartIndex = 0;
-        let patternStartIndex = 0;
-        // UNC paths like //?/X:/... can match X:/... and vice versa
-        // Drive letters in absolute drive or unc paths are always compared
-        // case-insensitively.
-        if (this.isWindows) {
-            const fileDrive = typeof file[0] === 'string' && /^[a-z]:$/i.test(file[0]);
-            const fileUNC = !fileDrive &&
-                file[0] === '' &&
-                file[1] === '' &&
-                file[2] === '?' &&
-                /^[a-z]:$/i.test(file[3]);
-            const patternDrive = typeof pattern[0] === 'string' && /^[a-z]:$/i.test(pattern[0]);
-            const patternUNC = !patternDrive &&
-                pattern[0] === '' &&
-                pattern[1] === '' &&
-                pattern[2] === '?' &&
-                typeof pattern[3] === 'string' &&
-                /^[a-z]:$/i.test(pattern[3]);
-            const fdi = fileUNC ? 3
-                : fileDrive ? 0
-                    : undefined;
-            const pdi = patternUNC ? 3
-                : patternDrive ? 0
-                    : undefined;
-            if (typeof fdi === 'number' && typeof pdi === 'number') {
-                const [fd, pd] = [
-                    file[fdi],
-                    pattern[pdi],
-                ];
-                // start matching at the drive letter index of each
-                if (fd.toLowerCase() === pd.toLowerCase()) {
-                    pattern[pdi] = fd;
-                    patternStartIndex = pdi;
-                    fileStartIndex = fdi;
-                }
-            }
-        }
-        // resolve and reduce . and .. portions in the file as well.
-        // don't need to do the second phase, because it's only one string[]
-        const { optimizationLevel = 1 } = this.options;
-        if (optimizationLevel >= 2) {
-            file = this.levelTwoFileOptimize(file);
-        }
-        if (pattern.includes(GLOBSTAR)) {
-            return this.#matchGlobstar(file, pattern, partial, fileStartIndex, patternStartIndex);
-        }
-        return this.#matchOne(file, pattern, partial, fileStartIndex, patternStartIndex);
-    }
-    #matchGlobstar(file, pattern, partial, fileIndex, patternIndex) {
-        // split the pattern into head, tail, and middle of ** delimited parts
-        const firstgs = pattern.indexOf(GLOBSTAR, patternIndex);
-        const lastgs = pattern.lastIndexOf(GLOBSTAR);
-        // split the pattern up into globstar-delimited sections
-        // the tail has to be at the end, and the others just have
-        // to be found in order from the head.
-        const [head, body, tail] = partial ?
-            [
-                pattern.slice(patternIndex, firstgs),
-                pattern.slice(firstgs + 1),
-                [],
-            ]
-            : [
-                pattern.slice(patternIndex, firstgs),
-                pattern.slice(firstgs + 1, lastgs),
-                pattern.slice(lastgs + 1),
-            ];
-        // check the head, from the current file/pattern index.
-        if (head.length) {
-            const fileHead = file.slice(fileIndex, fileIndex + head.length);
-            if (!this.#matchOne(fileHead, head, partial, 0, 0)) {
-                return false;
-            }
-            fileIndex += head.length;
-            patternIndex += head.length;
-        }
-        // now we know the head matches!
-        // if the last portion is not empty, it MUST match the end
-        // check the tail
-        let fileTailMatch = 0;
-        if (tail.length) {
-            // if head + tail > file, then we cannot possibly match
-            if (tail.length + fileIndex > file.length)
-                return false;
-            // try to match the tail
-            let tailStart = file.length - tail.length;
-            if (this.#matchOne(file, tail, partial, tailStart, 0)) {
-                fileTailMatch = tail.length;
-            }
-            else {
-                // affordance for stuff like a/**/* matching a/b/
-                // if the last file portion is '', and there's more to the pattern
-                // then try without the '' bit.
-                if (file[file.length - 1] !== '' ||
-                    fileIndex + tail.length === file.length) {
-                    return false;
-                }
-                tailStart--;
-                if (!this.#matchOne(file, tail, partial, tailStart, 0)) {
-                    return false;
-                }
-                fileTailMatch = tail.length + 1;
-            }
-        }
-        // now we know the tail matches!
-        // the middle is zero or more portions wrapped in **, possibly
-        // containing more ** sections.
-        // so a/**/b/**/c/**/d has become **/b/**/c/**
-        // if it's empty, it means a/**/b, just verify we have no bad dots
-        // if there's no tail, so it ends on /**, then we must have *something*
-        // after the head, or it's not a matc
-        if (!body.length) {
-            let sawSome = !!fileTailMatch;
-            for (let i = fileIndex; i < file.length - fileTailMatch; i++) {
-                const f = String(file[i]);
-                sawSome = true;
-                if (f === '.' ||
-                    f === '..' ||
-                    (!this.options.dot && f.startsWith('.'))) {
-                    return false;
-                }
-            }
-            // in partial mode, we just need to get past all file parts
-            return partial || sawSome;
-        }
-        // now we know that there's one or more body sections, which can
-        // be matched anywhere from the 0 index (because the head was pruned)
-        // through to the length-fileTailMatch index.
-        // split the body up into sections, and note the minimum index it can
-        // be found at (start with the length of all previous segments)
-        // [section, before, after]
-        const bodySegments = [[[], 0]];
-        let currentBody = bodySegments[0];
-        let nonGsParts = 0;
-        const nonGsPartsSums = [0];
-        for (const b of body) {
-            if (b === GLOBSTAR) {
-                nonGsPartsSums.push(nonGsParts);
-                currentBody = [[], 0];
-                bodySegments.push(currentBody);
-            }
-            else {
-                currentBody[0].push(b);
-                nonGsParts++;
-            }
-        }
-        let i = bodySegments.length - 1;
-        const fileLength = file.length - fileTailMatch;
-        for (const b of bodySegments) {
-            b[1] = fileLength - (nonGsPartsSums[i--] + b[0].length);
-        }
-        return !!this.#matchGlobStarBodySections(file, bodySegments, fileIndex, 0, partial, 0, !!fileTailMatch);
-    }
-    // return false for "nope, not matching"
-    // return null for "not matching, cannot keep trying"
-    #matchGlobStarBodySections(file, 
-    // pattern section, last possible position for it
-    bodySegments, fileIndex, bodyIndex, partial, globStarDepth, sawTail) {
-        // take the first body segment, and walk from fileIndex to its "after"
-        // value at the end
-        // If it doesn't match at that position, we increment, until we hit
-        // that final possible position, and give up.
-        // If it does match, then advance and try to rest.
-        // If any of them fail we keep walking forward.
-        // this is still a bit recursively painful, but it's more constrained
-        // than previous implementations, because we never test something that
-        // can't possibly be a valid matching condition.
-        const bs = bodySegments[bodyIndex];
-        if (!bs) {
-            // just make sure that there's no bad dots
-            for (let i = fileIndex; i < file.length; i++) {
-                sawTail = true;
-                const f = file[i];
-                if (f === '.' ||
-                    f === '..' ||
-                    (!this.options.dot && f.startsWith('.'))) {
-                    return false;
-                }
-            }
-            return sawTail;
-        }
-        // have a non-globstar body section to test
-        const [body, after] = bs;
-        while (fileIndex <= after) {
-            const m = this.#matchOne(file.slice(0, fileIndex + body.length), body, partial, fileIndex, 0);
-            // if limit exceeded, no match. intentional false negative,
-            // acceptable break in correctness for security.
-            if (m && globStarDepth < this.maxGlobstarRecursion) {
-                // match! see if the rest match. if so, we're done!
-                const sub = this.#matchGlobStarBodySections(file, bodySegments, fileIndex + body.length, bodyIndex + 1, partial, globStarDepth + 1, sawTail);
-                if (sub !== false) {
-                    return sub;
-                }
-            }
-            const f = file[fileIndex];
-            if (f === '.' ||
-                f === '..' ||
-                (!this.options.dot && f.startsWith('.'))) {
-                return false;
-            }
-            fileIndex++;
-        }
-        // walked off. no point continuing
-        return partial || null;
-    }
-    #matchOne(file, pattern, partial, fileIndex, patternIndex) {
-        let fi;
-        let pi;
-        let pl;
-        let fl;
-        for (fi = fileIndex,
-            pi = patternIndex,
-            fl = file.length,
-            pl = pattern.length; fi < fl && pi < pl; fi++, pi++) {
-            this.debug('matchOne loop');
-            let p = pattern[pi];
-            let f = file[fi];
-            this.debug(pattern, p, f);
-            // should be impossible.
-            // some invalid regexp stuff in the set.
-            /* c8 ignore start */
-            if (p === false || p === GLOBSTAR) {
-                return false;
-            }
-            /* c8 ignore stop */
-            // something other than **
-            // non-magic patterns just have to match exactly
-            // patterns with magic have been turned into regexps.
-            let hit;
-            if (typeof p === 'string') {
-                hit = f === p;
-                this.debug('string match', p, f, hit);
-            }
-            else {
-                hit = p.test(f);
-                this.debug('pattern match', p, f, hit);
-            }
-            if (!hit)
-                return false;
-        }
-        // Note: ending in / means that we'll get a final ""
-        // at the end of the pattern.  This can only match a
-        // corresponding "" at the end of the file.
-        // If the file ends in /, then it can only match a
-        // a pattern that ends in /, unless the pattern just
-        // doesn't have any more for it. But, a/b/ should *not*
-        // match "a/b/*", even though "" matches against the
-        // [^/]*? pattern, except in partial mode, where it might
-        // simply not be reached yet.
-        // However, a/b/ should still satisfy a/*
-        // now either we fell off the end of the pattern, or we're done.
-        if (fi === fl && pi === pl) {
-            // ran out of pattern and filename at the same time.
-            // an exact hit!
-            return true;
-        }
-        else if (fi === fl) {
-            // ran out of file, but still had pattern left.
-            // this is ok if we're doing the match as part of
-            // a glob fs traversal.
-            return partial;
-        }
-        else if (pi === pl) {
-            // ran out of pattern, still have file left.
-            // this is only acceptable if we're on the very last
-            // empty segment of a file with a trailing slash.
-            // a/* should match a/b/
-            return fi === fl - 1 && file[fi] === '';
-            /* c8 ignore start */
-        }
-        else {
-            // should be unreachable.
-            throw new Error('wtf?');
-        }
-        /* c8 ignore stop */
-    }
-    braceExpand() {
-        return braceExpand(this.pattern, this.options);
-    }
-    parse(pattern) {
-        assertValidPattern(pattern);
-        const options = this.options;
-        // shortcuts
-        if (pattern === '**')
-            return GLOBSTAR;
-        if (pattern === '')
-            return '';
-        // far and away, the most common glob pattern parts are
-        // *, *.*, and *.<ext>  Add a fast check method for those.
-        let m;
-        let fastTest = null;
-        if ((m = pattern.match(starRE))) {
-            fastTest = options.dot ? starTestDot : starTest;
-        }
-        else if ((m = pattern.match(starDotExtRE))) {
-            fastTest = (options.nocase ?
-                options.dot ?
-                    starDotExtTestNocaseDot
-                    : starDotExtTestNocase
-                : options.dot ? starDotExtTestDot
-                    : starDotExtTest)(m[1]);
-        }
-        else if ((m = pattern.match(qmarksRE))) {
-            fastTest = (options.nocase ?
-                options.dot ?
-                    qmarksTestNocaseDot
-                    : qmarksTestNocase
-                : options.dot ? qmarksTestDot
-                    : qmarksTest)(m);
-        }
-        else if ((m = pattern.match(starDotStarRE))) {
-            fastTest = options.dot ? starDotStarTestDot : starDotStarTest;
-        }
-        else if ((m = pattern.match(dotStarRE))) {
-            fastTest = dotStarTest;
-        }
-        const re = AST.fromGlob(pattern, this.options).toMMPattern();
-        if (fastTest && typeof re === 'object') {
-            // Avoids overriding in frozen environments
-            Reflect.defineProperty(re, 'test', { value: fastTest });
-        }
-        return re;
-    }
-    makeRe() {
-        if (this.regexp || this.regexp === false)
-            return this.regexp;
-        // at this point, this.set is a 2d array of partial
-        // pattern strings, or "**".
-        //
-        // It's better to use .match().  This function shouldn't
-        // be used, really, but it's pretty convenient sometimes,
-        // when you just want to work with a regex.
-        const set = this.set;
-        if (!set.length) {
-            this.regexp = false;
-            return this.regexp;
-        }
-        const options = this.options;
-        const twoStar = options.noglobstar ? esm_star
-            : options.dot ? twoStarDot
-                : twoStarNoDot;
-        const flags = new Set(options.nocase ? ['i'] : []);
-        // regexpify non-globstar patterns
-        // if ** is only item, then we just do one twoStar
-        // if ** is first, and there are more, prepend (\/|twoStar\/)? to next
-        // if ** is last, append (\/twoStar|) to previous
-        // if ** is in the middle, append (\/|\/twoStar\/) to previous
-        // then filter out GLOBSTAR symbols
-        let re = set
-            .map(pattern => {
-            const pp = pattern.map(p => {
-                if (p instanceof RegExp) {
-                    for (const f of p.flags.split(''))
-                        flags.add(f);
-                }
-                return (typeof p === 'string' ? esm_regExpEscape(p)
-                    : p === GLOBSTAR ? GLOBSTAR
-                        : p._src);
-            });
-            pp.forEach((p, i) => {
-                const next = pp[i + 1];
-                const prev = pp[i - 1];
-                if (p !== GLOBSTAR || prev === GLOBSTAR) {
-                    return;
-                }
-                if (prev === undefined) {
-                    if (next !== undefined && next !== GLOBSTAR) {
-                        pp[i + 1] = '(?:\\/|' + twoStar + '\\/)?' + next;
-                    }
-                    else {
-                        pp[i] = twoStar;
-                    }
-                }
-                else if (next === undefined) {
-                    pp[i - 1] = prev + '(?:\\/|\\/' + twoStar + ')?';
-                }
-                else if (next !== GLOBSTAR) {
-                    pp[i - 1] = prev + '(?:\\/|\\/' + twoStar + '\\/)' + next;
-                    pp[i + 1] = GLOBSTAR;
-                }
-            });
-            const filtered = pp.filter(p => p !== GLOBSTAR);
-            // For partial matches, we need to make the pattern match
-            // any prefix of the full path. We do this by generating
-            // alternative patterns that match progressively longer prefixes.
-            if (this.partial && filtered.length >= 1) {
-                const prefixes = [];
-                for (let i = 1; i <= filtered.length; i++) {
-                    prefixes.push(filtered.slice(0, i).join('/'));
-                }
-                return '(?:' + prefixes.join('|') + ')';
-            }
-            return filtered.join('/');
-        })
-            .join('|');
-        // need to wrap in parens if we had more than one thing with |,
-        // otherwise only the first will be anchored to ^ and the last to $
-        const [open, close] = set.length > 1 ? ['(?:', ')'] : ['', ''];
-        // must match entire pattern
-        // ending in a * or ** will make it less strict.
-        re = '^' + open + re + close + '$';
-        // In partial mode, '/' should always match as it's a valid prefix for any pattern
-        if (this.partial) {
-            re = '^(?:\\/|' + open + re.slice(1, -1) + close + ')$';
-        }
-        // can match anything, as long as it's not this.
-        if (this.negate)
-            re = '^(?!' + re + ').+$';
-        try {
-            this.regexp = new RegExp(re, [...flags].join(''));
-            /* c8 ignore start */
-        }
-        catch {
-            // should be impossible
-            this.regexp = false;
-        }
-        /* c8 ignore stop */
-        return this.regexp;
-    }
-    slashSplit(p) {
-        // if p starts with // on windows, we preserve that
-        // so that UNC paths aren't broken.  Otherwise, any number of
-        // / characters are coalesced into one, unless
-        // preserveMultipleSlashes is set to true.
-        if (this.preserveMultipleSlashes) {
-            return p.split('/');
-        }
-        else if (this.isWindows && /^\/\/[^/]+/.test(p)) {
-            // add an extra '' for the one we lose
-            return ['', ...p.split(/\/+/)];
-        }
-        else {
-            return p.split(/\/+/);
-        }
-    }
-    match(f, partial = this.partial) {
-        this.debug('match', f, this.pattern);
-        // short-circuit in the case of busted things.
-        // comments, etc.
-        if (this.comment) {
-            return false;
-        }
-        if (this.empty) {
-            return f === '';
-        }
-        if (f === '/' && partial) {
-            return true;
-        }
-        const options = this.options;
-        // windows: need to use /, not \
-        if (this.isWindows) {
-            f = f.split('\\').join('/');
-        }
-        // treat the test path as a set of pathparts.
-        const ff = this.slashSplit(f);
-        this.debug(this.pattern, 'split', ff);
-        // just ONE of the pattern sets in this.set needs to match
-        // in order for it to be valid.  If negating, then just one
-        // match means that we have failed.
-        // Either way, return on the first hit.
-        const set = this.set;
-        this.debug(this.pattern, 'set', set);
-        // Find the basename of the path by looking for the last non-empty segment
-        let filename = ff[ff.length - 1];
-        if (!filename) {
-            for (let i = ff.length - 2; !filename && i >= 0; i--) {
-                filename = ff[i];
-            }
-        }
-        for (const pattern of set) {
-            let file = ff;
-            if (options.matchBase && pattern.length === 1) {
-                file = [filename];
-            }
-            const hit = this.matchOne(file, pattern, partial);
-            if (hit) {
-                if (options.flipNegate) {
-                    return true;
-                }
-                return !this.negate;
-            }
-        }
-        // didn't get any hits.  this is success if it's a negative
-        // pattern, failure otherwise.
-        if (options.flipNegate) {
-            return false;
-        }
-        return this.negate;
-    }
-    static defaults(def) {
-        return esm_minimatch.defaults(def).Minimatch;
-    }
-}
-/* c8 ignore start */
-
-
-
-/* c8 ignore stop */
-esm_minimatch.AST = AST;
-esm_minimatch.Minimatch = esm_Minimatch;
-esm_minimatch.escape = escape_escape;
-esm_minimatch.unescape = unescape_unescape;
-//# sourceMappingURL=index.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-path.js
-
-
-
-const lib_internal_path_IS_WINDOWS = process.platform === 'win32';
-/**
- * Helper class for parsing paths into segments
- */
-class internal_path_Path {
-    /**
-     * Constructs a Path
-     * @param itemPath Path or array of segments
-     */
-    constructor(itemPath) {
-        this.segments = [];
-        // String
-        if (typeof itemPath === 'string') {
-            external_assert_(itemPath, `Parameter 'itemPath' must not be empty`);
-            // Normalize slashes and trim unnecessary trailing slash
-            itemPath = internal_path_helper_safeTrimTrailingSeparator(itemPath);
-            // Not rooted
-            if (!internal_path_helper_hasRoot(itemPath)) {
-                this.segments = itemPath.split(external_path_.sep);
-            }
-            // Rooted
-            else {
-                // Add all segments, while not at the root
-                let remaining = itemPath;
-                let dir = internal_path_helper_dirname(remaining);
-                while (dir !== remaining) {
-                    // Add the segment
-                    const basename = external_path_.basename(remaining);
-                    this.segments.unshift(basename);
-                    // Truncate the last segment
-                    remaining = dir;
-                    dir = internal_path_helper_dirname(remaining);
-                }
-                // Remainder is the root
-                this.segments.unshift(remaining);
-            }
-        }
-        // Array
-        else {
-            // Must not be empty
-            external_assert_(itemPath.length > 0, `Parameter 'itemPath' must not be an empty array`);
-            // Each segment
-            for (let i = 0; i < itemPath.length; i++) {
-                let segment = itemPath[i];
-                // Must not be empty
-                external_assert_(segment, `Parameter 'itemPath' must not contain any empty segments`);
-                // Normalize slashes
-                segment = lib_internal_path_helper_normalizeSeparators(itemPath[i]);
-                // Root segment
-                if (i === 0 && internal_path_helper_hasRoot(segment)) {
-                    segment = internal_path_helper_safeTrimTrailingSeparator(segment);
-                    external_assert_(segment === internal_path_helper_dirname(segment), `Parameter 'itemPath' root segment contains information for multiple segments`);
-                    this.segments.push(segment);
-                }
-                // All other segments
-                else {
-                    // Must not contain slash
-                    external_assert_(!segment.includes(external_path_.sep), `Parameter 'itemPath' contains unexpected path separators`);
-                    this.segments.push(segment);
-                }
-            }
-        }
-    }
-    /**
-     * Converts the path to it's string representation
-     */
-    toString() {
-        // First segment
-        let result = this.segments[0];
-        // All others
-        let skipSlash = result.endsWith(external_path_.sep) || (lib_internal_path_IS_WINDOWS && /^[A-Z]:$/i.test(result));
-        for (let i = 1; i < this.segments.length; i++) {
-            if (skipSlash) {
-                skipSlash = false;
-            }
-            else {
-                result += external_path_.sep;
-            }
-            result += this.segments[i];
-        }
-        return result;
-    }
-}
-//# sourceMappingURL=internal-path.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-pattern.js
-
-
-
-
-
-
-
-const lib_internal_pattern_IS_WINDOWS = process.platform === 'win32';
-class internal_pattern_Pattern {
-    constructor(patternOrNegate, isImplicitPattern = false, segments, homedir) {
-        /**
-         * Indicates whether matches should be excluded from the result set
-         */
-        this.negate = false;
-        // Pattern overload
-        let pattern;
-        if (typeof patternOrNegate === 'string') {
-            pattern = patternOrNegate.trim();
-        }
-        // Segments overload
-        else {
-            // Convert to pattern
-            segments = segments || [];
-            external_assert_(segments.length, `Parameter 'segments' must not empty`);
-            const root = internal_pattern_Pattern.getLiteral(segments[0]);
-            external_assert_(root && internal_path_helper_hasAbsoluteRoot(root), `Parameter 'segments' first element must be a root path`);
-            pattern = new internal_path_Path(segments).toString().trim();
-            if (patternOrNegate) {
-                pattern = `!${pattern}`;
-            }
-        }
-        // Negate
-        while (pattern.startsWith('!')) {
-            this.negate = !this.negate;
-            pattern = pattern.substr(1).trim();
-        }
-        // Normalize slashes and ensures absolute root
-        pattern = internal_pattern_Pattern.fixupPattern(pattern, homedir);
-        // Segments
-        this.segments = new internal_path_Path(pattern).segments;
-        // Trailing slash indicates the pattern should only match directories, not regular files
-        this.trailingSeparator = lib_internal_path_helper_normalizeSeparators(pattern)
-            .endsWith(external_path_.sep);
-        pattern = internal_path_helper_safeTrimTrailingSeparator(pattern);
-        // Search path (literal path prior to the first glob segment)
-        let foundGlob = false;
-        const searchSegments = this.segments
-            .map(x => internal_pattern_Pattern.getLiteral(x))
-            .filter(x => !foundGlob && !(foundGlob = x === ''));
-        this.searchPath = new internal_path_Path(searchSegments).toString();
-        // Root RegExp (required when determining partial match)
-        this.rootRegExp = new RegExp(internal_pattern_Pattern.regExpEscape(searchSegments[0]), lib_internal_pattern_IS_WINDOWS ? 'i' : '');
-        this.isImplicitPattern = isImplicitPattern;
-        // Create minimatch
-        const minimatchOptions = {
-            dot: true,
-            nobrace: true,
-            nocase: lib_internal_pattern_IS_WINDOWS,
-            nocomment: true,
-            noext: true,
-            nonegate: true
-        };
-        pattern = lib_internal_pattern_IS_WINDOWS ? pattern.replace(/\\/g, '/') : pattern;
-        this.minimatch = new esm_Minimatch(pattern, minimatchOptions);
-    }
-    /**
-     * Matches the pattern against the specified path
-     */
-    match(itemPath) {
-        // Last segment is globstar?
-        if (this.segments[this.segments.length - 1] === '**') {
-            // Normalize slashes
-            itemPath = lib_internal_path_helper_normalizeSeparators(itemPath);
-            // Append a trailing slash. Otherwise Minimatch will not match the directory immediately
-            // preceding the globstar. For example, given the pattern `/foo/**`, Minimatch returns
-            // false for `/foo` but returns true for `/foo/`. Append a trailing slash to handle that quirk.
-            if (!itemPath.endsWith(external_path_.sep) && this.isImplicitPattern === false) {
-                // Note, this is safe because the constructor ensures the pattern has an absolute root.
-                // For example, formats like C: and C:foo on Windows are resolved to an absolute root.
-                itemPath = `${itemPath}${external_path_.sep}`;
-            }
-        }
-        else {
-            // Normalize slashes and trim unnecessary trailing slash
-            itemPath = internal_path_helper_safeTrimTrailingSeparator(itemPath);
-        }
-        // Match
-        if (this.minimatch.match(itemPath)) {
-            return this.trailingSeparator ? internal_match_kind_MatchKind.Directory : internal_match_kind_MatchKind.All;
-        }
-        return internal_match_kind_MatchKind.None;
-    }
-    /**
-     * Indicates whether the pattern may match descendants of the specified path
-     */
-    partialMatch(itemPath) {
-        // Normalize slashes and trim unnecessary trailing slash
-        itemPath = internal_path_helper_safeTrimTrailingSeparator(itemPath);
-        // matchOne does not handle root path correctly
-        if (internal_path_helper_dirname(itemPath) === itemPath) {
-            return this.rootRegExp.test(itemPath);
-        }
-        return this.minimatch.matchOne(itemPath.split(lib_internal_pattern_IS_WINDOWS ? /\\+/ : /\/+/), this.minimatch.set[0], true);
-    }
-    /**
-     * Escapes glob patterns within a path
-     */
-    static globEscape(s) {
-        return (lib_internal_pattern_IS_WINDOWS ? s : s.replace(/\\/g, '\\\\')) // escape '\' on Linux/macOS
-            .replace(/(\[)(?=[^/]+\])/g, '[[]') // escape '[' when ']' follows within the path segment
-            .replace(/\?/g, '[?]') // escape '?'
-            .replace(/\*/g, '[*]'); // escape '*'
-    }
-    /**
-     * Normalizes slashes and ensures absolute root
-     */
-    static fixupPattern(pattern, homedir) {
-        // Empty
-        external_assert_(pattern, 'pattern cannot be empty');
-        // Must not contain `.` segment, unless first segment
-        // Must not contain `..` segment
-        const literalSegments = new internal_path_Path(pattern).segments.map(x => internal_pattern_Pattern.getLiteral(x));
-        external_assert_(literalSegments.every((x, i) => (x !== '.' || i === 0) && x !== '..'), `Invalid pattern '${pattern}'. Relative pathing '.' and '..' is not allowed.`);
-        // Must not contain globs in root, e.g. Windows UNC path \\foo\b*r
-        external_assert_(!internal_path_helper_hasRoot(pattern) || literalSegments[0], `Invalid pattern '${pattern}'. Root segment must not contain globs.`);
-        // Normalize slashes
-        pattern = lib_internal_path_helper_normalizeSeparators(pattern);
-        // Replace leading `.` segment
-        if (pattern === '.' || pattern.startsWith(`.${external_path_.sep}`)) {
-            pattern = internal_pattern_Pattern.globEscape(process.cwd()) + pattern.substr(1);
-        }
-        // Replace leading `~` segment
-        else if (pattern === '~' || pattern.startsWith(`~${external_path_.sep}`)) {
-            homedir = homedir || external_os_.homedir();
-            external_assert_(homedir, 'Unable to determine HOME directory');
-            external_assert_(internal_path_helper_hasAbsoluteRoot(homedir), `Expected HOME directory to be a rooted path. Actual '${homedir}'`);
-            pattern = internal_pattern_Pattern.globEscape(homedir) + pattern.substr(1);
-        }
-        // Replace relative drive root, e.g. pattern is C: or C:foo
-        else if (lib_internal_pattern_IS_WINDOWS &&
-            (pattern.match(/^[A-Z]:$/i) || pattern.match(/^[A-Z]:[^\\]/i))) {
-            let root = internal_path_helper_ensureAbsoluteRoot('C:\\dummy-root', pattern.substr(0, 2));
-            if (pattern.length > 2 && !root.endsWith('\\')) {
-                root += '\\';
-            }
-            pattern = internal_pattern_Pattern.globEscape(root) + pattern.substr(2);
-        }
-        // Replace relative root, e.g. pattern is \ or \foo
-        else if (lib_internal_pattern_IS_WINDOWS && (pattern === '\\' || pattern.match(/^\\[^\\]/))) {
-            let root = internal_path_helper_ensureAbsoluteRoot('C:\\dummy-root', '\\');
-            if (!root.endsWith('\\')) {
-                root += '\\';
-            }
-            pattern = internal_pattern_Pattern.globEscape(root) + pattern.substr(1);
-        }
-        // Otherwise ensure absolute root
-        else {
-            pattern = internal_path_helper_ensureAbsoluteRoot(internal_pattern_Pattern.globEscape(process.cwd()), pattern);
-        }
-        return lib_internal_path_helper_normalizeSeparators(pattern);
-    }
-    /**
-     * Attempts to unescape a pattern segment to create a literal path segment.
-     * Otherwise returns empty string.
-     */
-    static getLiteral(segment) {
-        let literal = '';
-        for (let i = 0; i < segment.length; i++) {
-            const c = segment[i];
-            // Escape
-            if (c === '\\' && !lib_internal_pattern_IS_WINDOWS && i + 1 < segment.length) {
-                literal += segment[++i];
-                continue;
-            }
-            // Wildcard
-            else if (c === '*' || c === '?') {
-                return '';
-            }
-            // Character set
-            else if (c === '[' && i + 1 < segment.length) {
-                let set = '';
-                let closed = -1;
-                for (let i2 = i + 1; i2 < segment.length; i2++) {
-                    const c2 = segment[i2];
-                    // Escape
-                    if (c2 === '\\' && !lib_internal_pattern_IS_WINDOWS && i2 + 1 < segment.length) {
-                        set += segment[++i2];
-                        continue;
-                    }
-                    // Closed
-                    else if (c2 === ']') {
-                        closed = i2;
-                        break;
-                    }
-                    // Otherwise
-                    else {
-                        set += c2;
-                    }
-                }
-                // Closed?
-                if (closed >= 0) {
-                    // Cannot convert
-                    if (set.length > 1) {
-                        return '';
-                    }
-                    // Convert to literal
-                    if (set) {
-                        literal += set;
-                        i = closed;
-                        continue;
-                    }
-                }
-                // Otherwise fall thru
-            }
-            // Append
-            literal += c;
-        }
-        return literal;
-    }
-    /**
-     * Escapes regexp special characters
-     * https://javascript.info/regexp-escaping
-     */
-    static regExpEscape(s) {
-        return s.replace(/[[\\^$.|?*+()]/g, '\\$&');
-    }
-}
-//# sourceMappingURL=internal-pattern.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-search-state.js
-class internal_search_state_SearchState {
-    constructor(path, level) {
-        this.path = path;
-        this.level = level;
-    }
-}
-//# sourceMappingURL=internal-search-state.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-globber.js
-var lib_internal_globber_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var internal_globber_asyncValues = (undefined && undefined.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
-var internal_globber_await = (undefined && undefined.__await) || function (v) { return this instanceof internal_globber_await ? (this.v = v, this) : new internal_globber_await(v); }
-var internal_globber_asyncGenerator = (undefined && undefined.__asyncGenerator) || function (thisArg, _arguments, generator) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var g = generator.apply(thisArg, _arguments || []), i, q = [];
-    return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function () { return this; }, i;
-    function awaitReturn(f) { return function (v) { return Promise.resolve(v).then(f, reject); }; }
-    function verb(n, f) { if (g[n]) { i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; if (f) i[n] = f(i[n]); } }
-    function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
-    function step(r) { r.value instanceof internal_globber_await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
-    function fulfill(value) { resume("next", value); }
-    function reject(value) { resume("throw", value); }
-    function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
-};
-
-
-
-
-
-
-
-
-const lib_internal_globber_IS_WINDOWS = process.platform === 'win32';
-class internal_globber_DefaultGlobber {
-    constructor(options) {
-        this.patterns = [];
-        this.searchPaths = [];
-        this.options = internal_glob_options_helper_getOptions(options);
-    }
-    getSearchPaths() {
-        // Return a copy
-        return this.searchPaths.slice();
-    }
-    glob() {
-        return lib_internal_globber_awaiter(this, void 0, void 0, function* () {
-            var _a, e_1, _b, _c;
-            const result = [];
-            try {
-                for (var _d = true, _e = internal_globber_asyncValues(this.globGenerator()), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
-                    _c = _f.value;
-                    _d = false;
-                    const itemPath = _c;
-                    result.push(itemPath);
-                }
-            }
-            catch (e_1_1) { e_1 = { error: e_1_1 }; }
-            finally {
-                try {
-                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-                }
-                finally { if (e_1) throw e_1.error; }
-            }
-            return result;
-        });
-    }
-    globGenerator() {
-        return internal_globber_asyncGenerator(this, arguments, function* globGenerator_1() {
-            // Fill in defaults options
-            const options = internal_glob_options_helper_getOptions(this.options);
-            // Implicit descendants?
-            const patterns = [];
-            for (const pattern of this.patterns) {
-                patterns.push(pattern);
-                if (options.implicitDescendants &&
-                    (pattern.trailingSeparator ||
-                        pattern.segments[pattern.segments.length - 1] !== '**')) {
-                    patterns.push(new internal_pattern_Pattern(pattern.negate, true, pattern.segments.concat('**')));
-                }
-            }
-            // Push the search paths
-            const stack = [];
-            for (const searchPath of internal_pattern_helper_getSearchPaths(patterns)) {
-                core_debug(`Search path '${searchPath}'`);
-                // Exists?
-                try {
-                    // Intentionally using lstat. Detection for broken symlink
-                    // will be performed later (if following symlinks).
-                    yield internal_globber_await(external_fs_namespaceObject.promises.lstat(searchPath));
-                }
-                catch (err) {
-                    if (err.code === 'ENOENT') {
-                        continue;
-                    }
-                    throw err;
-                }
-                stack.unshift(new internal_search_state_SearchState(searchPath, 1));
-            }
-            // Search
-            const traversalChain = []; // used to detect cycles
-            while (stack.length) {
-                // Pop
-                const item = stack.pop();
-                // Match?
-                const match = lib_internal_pattern_helper_match(patterns, item.path);
-                const partialMatch = !!match || lib_internal_pattern_helper_partialMatch(patterns, item.path);
-                if (!match && !partialMatch) {
-                    continue;
-                }
-                // Stat
-                const stats = yield internal_globber_await(internal_globber_DefaultGlobber.stat(item, options, traversalChain)
-                // Broken symlink, or symlink cycle detected, or no longer exists
-                );
-                // Broken symlink, or symlink cycle detected, or no longer exists
-                if (!stats) {
-                    continue;
-                }
-                // Hidden file or directory?
-                if (options.excludeHiddenFiles && external_path_.basename(item.path).match(/^\./)) {
-                    continue;
-                }
-                // Directory
-                if (stats.isDirectory()) {
-                    // Matched
-                    if (match & internal_match_kind_MatchKind.Directory && options.matchDirectories) {
-                        yield yield internal_globber_await(item.path);
-                    }
-                    // Descend?
-                    else if (!partialMatch) {
-                        continue;
-                    }
-                    // Push the child items in reverse
-                    const childLevel = item.level + 1;
-                    const childItems = (yield internal_globber_await(external_fs_namespaceObject.promises.readdir(item.path))).map(x => new internal_search_state_SearchState(external_path_.join(item.path, x), childLevel));
-                    stack.push(...childItems.reverse());
-                }
-                // File
-                else if (match & internal_match_kind_MatchKind.File) {
-                    yield yield internal_globber_await(item.path);
-                }
-            }
-        });
-    }
-    /**
-     * Constructs a DefaultGlobber
-     */
-    static create(patterns, options) {
-        return lib_internal_globber_awaiter(this, void 0, void 0, function* () {
-            const result = new internal_globber_DefaultGlobber(options);
-            if (lib_internal_globber_IS_WINDOWS) {
-                patterns = patterns.replace(/\r\n/g, '\n');
-                patterns = patterns.replace(/\r/g, '\n');
-            }
-            const lines = patterns.split('\n').map(x => x.trim());
-            for (const line of lines) {
-                // Empty or comment
-                if (!line || line.startsWith('#')) {
-                    continue;
-                }
-                // Pattern
-                else {
-                    result.patterns.push(new internal_pattern_Pattern(line));
-                }
-            }
-            result.searchPaths.push(...internal_pattern_helper_getSearchPaths(result.patterns));
-            return result;
-        });
-    }
-    static stat(item, options, traversalChain) {
-        return lib_internal_globber_awaiter(this, void 0, void 0, function* () {
-            // Note:
-            // `stat` returns info about the target of a symlink (or symlink chain)
-            // `lstat` returns info about a symlink itself
-            let stats;
-            if (options.followSymbolicLinks) {
-                try {
-                    // Use `stat` (following symlinks)
-                    stats = yield external_fs_namespaceObject.promises.stat(item.path);
-                }
-                catch (err) {
-                    if (err.code === 'ENOENT') {
-                        if (options.omitBrokenSymbolicLinks) {
-                            core_debug(`Broken symlink '${item.path}'`);
-                            return undefined;
-                        }
-                        throw new Error(`No information found for the path '${item.path}'. This may indicate a broken symbolic link.`);
-                    }
-                    throw err;
-                }
-            }
-            else {
-                // Use `lstat` (not following symlinks)
-                stats = yield external_fs_namespaceObject.promises.lstat(item.path);
-            }
-            // Note, isDirectory() returns false for the lstat of a symlink
-            if (stats.isDirectory() && options.followSymbolicLinks) {
-                // Get the realpath
-                const realPath = yield external_fs_namespaceObject.promises.realpath(item.path);
-                // Fixup the traversal chain to match the item level
-                while (traversalChain.length >= item.level) {
-                    traversalChain.pop();
-                }
-                // Test for a cycle
-                if (traversalChain.some((x) => x === realPath)) {
-                    core_debug(`Symlink cycle detected for path '${item.path}' and realpath '${realPath}'`);
-                    return undefined;
-                }
-                // Update the traversal chain
-                traversalChain.push(realPath);
-            }
-            return stats;
-        });
-    }
-}
-//# sourceMappingURL=internal-globber.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-hash-files.js
-var lib_internal_hash_files_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var lib_internal_hash_files_asyncValues = (undefined && undefined.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
-
-
-
-
-
-
-function internal_hash_files_hashFiles(globber_1, currentWorkspace_1) {
-    return lib_internal_hash_files_awaiter(this, arguments, void 0, function* (globber, currentWorkspace, verbose = false) {
-        var _a, e_1, _b, _c;
-        var _d;
-        const writeDelegate = verbose ? core.info : core.debug;
-        let hasMatch = false;
-        const githubWorkspace = currentWorkspace
-            ? currentWorkspace
-            : ((_d = process.env['GITHUB_WORKSPACE']) !== null && _d !== void 0 ? _d : process.cwd());
-        const result = crypto.createHash('sha256');
-        let count = 0;
-        try {
-            for (var _e = true, _f = lib_internal_hash_files_asyncValues(globber.globGenerator()), _g; _g = yield _f.next(), _a = _g.done, !_a; _e = true) {
-                _c = _g.value;
-                _e = false;
-                const file = _c;
-                writeDelegate(file);
-                if (!file.startsWith(`${githubWorkspace}${path.sep}`)) {
-                    writeDelegate(`Ignore '${file}' since it is not under GITHUB_WORKSPACE.`);
-                    continue;
-                }
-                if (fs.statSync(file).isDirectory()) {
-                    writeDelegate(`Skip directory '${file}'.`);
-                    continue;
-                }
-                const hash = crypto.createHash('sha256');
-                const pipeline = util.promisify(stream.pipeline);
-                yield pipeline(fs.createReadStream(file), hash);
-                result.write(hash.digest());
-                count++;
-                if (!hasMatch) {
-                    hasMatch = true;
-                }
-            }
-        }
-        catch (e_1_1) { e_1 = { error: e_1_1 }; }
-        finally {
-            try {
-                if (!_e && !_a && (_b = _f.return)) yield _b.call(_f);
-            }
-            finally { if (e_1) throw e_1.error; }
-        }
-        result.end();
-        if (hasMatch) {
-            writeDelegate(`Found ${count} files to hash.`);
-            return result.digest('hex');
-        }
-        else {
-            writeDelegate(`No matches found for glob`);
-            return '';
-        }
-    });
-}
-//# sourceMappingURL=internal-hash-files.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/glob.js
-var lib_glob_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-
-
-/**
- * Constructs a globber
- *
- * @param patterns  Patterns separated by newlines
- * @param options   Glob options
- */
-function glob_create(patterns, options) {
-    return lib_glob_awaiter(this, void 0, void 0, function* () {
-        return yield internal_globber_DefaultGlobber.create(patterns, options);
-    });
-}
-/**
- * Computes the sha256 hash of a glob
- *
- * @param patterns  Patterns separated by newlines
- * @param currentWorkspace  Workspace used when matching files
- * @param options   Glob options
- * @param verbose   Enables verbose logging
- */
-function lib_glob_hashFiles(patterns_1) {
-    return lib_glob_awaiter(this, arguments, void 0, function* (patterns, currentWorkspace = '', options, verbose = false) {
-        let followSymbolicLinks = true;
-        if (options && typeof options.followSymbolicLinks === 'boolean') {
-            followSymbolicLinks = options.followSymbolicLinks;
-        }
-        const globber = yield glob_create(patterns, { followSymbolicLinks });
-        return _hashFiles(globber, currentWorkspace, verbose);
-    });
-}
-//# sourceMappingURL=glob.js.map
 ;// CONCATENATED MODULE: ./dist/modes.js
 const MODE_SPECS = {
     archive: {
         resolved: 'archive',
         implemented: true,
-        description: 'Opaque tar archive caching and actions/cache compatibility.',
+        description: 'Opaque tar archive caching from a CLI-owned repo profile.',
     },
     docker: {
         resolved: 'docker',
@@ -98525,26 +94842,25 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Maven build cache proxy integration.',
     },
-    'nx-proxy': {
-        resolved: 'nx-proxy',
+    nx: {
+        resolved: 'nx',
         implemented: true,
         description: 'Nx self-hosted remote cache proxy integration.',
     },
-    'rust-sccache': {
-        resolved: 'rust-sccache',
+    sccache: {
+        resolved: 'sccache',
         implemented: true,
         description: 'Rust sccache proxy integration.',
     },
-    'turbo-proxy': {
-        resolved: 'turbo-proxy',
+    turbo: {
+        resolved: 'turbo',
         implemented: true,
         description: 'Turbo remote cache proxy integration.',
     },
 };
 function normalizeMode(value) {
-    const normalized = (value || 'auto').trim().toLowerCase();
+    const normalized = (value || 'archive').trim().toLowerCase();
     switch (normalized) {
-        case 'auto':
         case 'archive':
         case 'docker':
         case 'buildkit':
@@ -98552,17 +94868,16 @@ function normalizeMode(value) {
         case 'go':
         case 'gradle':
         case 'maven':
-        case 'nx-proxy':
-        case 'rust-sccache':
-        case 'turbo-proxy':
+        case 'nx':
+        case 'sccache':
+        case 'turbo':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy.`);
+            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, go, gradle, maven, nx, sccache, or turbo.`);
     }
 }
 function resolveModeSpec(mode) {
-    const resolved = mode === 'auto' ? 'archive' : mode;
-    const spec = MODE_SPECS[resolved];
+    const spec = MODE_SPECS[mode];
     return {
         requested: mode,
         ...spec,
@@ -98587,14 +94902,12 @@ function assertImplementedMode(modeSpec) {
 
 
 
-
 const utils_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 const MAX_DIAGNOSTICS_LOG_LINES = 500;
 const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
 const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
 const MAX_VERIFY_TIMEOUT_SECONDS = 900;
 const MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
-const PORTABLE_ARCHIVE_ARGS_MIN_VERSION = '1.13.100';
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
@@ -98623,17 +94936,9 @@ function getInputs() {
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
-        preset: normalizePreset(getInput('preset')),
-        workspace: getInput('workspace'),
-        cacheTag: getInput('cache-tag'),
-        runtimeCacheTag: getInput('runtime-cache-tag'),
         workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
         tools: getInput('tools'),
-        toolVersionScope: normalizeToolVersionScope(getInput('tool-version-scope')),
-        cacheRuntime: getBooleanInput('cache-runtime'),
         mavenVersion: getInput('maven-version') || '3.9.9',
-        uvVersion: getInput('uv-version') || '0.9.21',
-        composerVersion: getInput('composer-version') || '2.9.5',
         mavenLocalRepo: getInput('maven-local-repo') || '~/.m2/repository',
         readOnly: getBooleanInput('read-only'),
         savePolicy: normalizeSavePolicy(getInput('save-policy') || 'auto'),
@@ -98647,26 +94952,14 @@ function getInputs() {
         diagnosticsLogLines: normalizeDiagnosticsLogLines(getInput('diagnostics-log-lines')),
         metadataHints: getInput('metadata-hints'),
         proxyPort: getInput('proxy-port'),
-        proxyNoGit: getBooleanInput('proxy-no-git'),
-        proxyNoPlatform: getBooleanInput('proxy-no-platform'),
         managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:9b44a5426d7e32db41584c8d7d9f5251b0ad8348427e15849b541418030e7dab',
         dockerToolCache: getInput('docker-tool-cache'),
         cacheProfiles: getInput('cache-profiles'),
-        entries: getInput('entries', { trimWhitespace: false }),
-        path: getInput('path'),
-        key: getInput('key'),
-        restoreKeys: getInput('restore-keys'),
-        enableCrossOsArchive: getBooleanInput('enableCrossOsArchive'),
-        noPlatform: getBooleanInput('no-platform'),
         failOnCacheMiss: getBooleanInput('fail-on-cache-miss'),
         failOnCacheError: getBooleanInput('fail-on-cache-error'),
-        requireOciImportReady: getBooleanInput('require-oci-import-ready'),
         lookupOnly: getBooleanInput('lookup-only'),
         force: getBooleanInput('force'),
         verbose: getBooleanInput('verbose'),
-        exclude: getInput('exclude'),
-        excludePatterns: getInput('exclude-patterns', { trimWhitespace: false }),
-        allowExternalSymlinks: getBooleanInput('allow-external-symlinks'),
     };
 }
 function isPullRequestEvent() {
@@ -98692,14 +94985,12 @@ function applyPullRequestSaveScopeEnv() {
 }
 function applyRestoreOnlyTokenPolicy() {
     const restoreFallback = process.env.BORINGCACHE_RESTORE_TOKEN ||
-        process.env.BORINGCACHE_SAVE_TOKEN ||
-        process.env.BORINGCACHE_API_TOKEN;
-    const hadSaveCapableToken = Boolean(process.env.BORINGCACHE_SAVE_TOKEN || process.env.BORINGCACHE_API_TOKEN);
+        process.env.BORINGCACHE_SAVE_TOKEN;
+    const hadSaveCapableToken = Boolean(process.env.BORINGCACHE_SAVE_TOKEN);
     if (restoreFallback) {
         process.env.BORINGCACHE_RESTORE_TOKEN = restoreFallback;
     }
     delete process.env.BORINGCACHE_SAVE_TOKEN;
-    delete process.env.BORINGCACHE_API_TOKEN;
     return hadSaveCapableToken;
 }
 function applySaveTokenPolicy(inputs) {
@@ -98760,15 +95051,12 @@ function buildActionTrustState(inputs, options) {
         token_capabilities: {
             restore: hasRestoreToken(),
             save: auth_hasSaveToken(),
-            legacy_api_only: isUsingLegacyApiTokenOnly(),
         },
     };
 }
 function restorePhaseSummary(options) {
     if (options.cacheHit) {
-        const hitDetail = options.runtimeCacheHit
-            ? 'BoringCache restored at least one requested cache for this step, including the runtime cache.'
-            : 'BoringCache restored at least one requested cache for this step.';
+        const hitDetail = 'BoringCache restored at least one requested cache for this step.';
         if (options.saveCapable) {
             return {
                 status: 'cache_hit',
@@ -99175,48 +95463,13 @@ function parsePositiveIntegerInput(value, inputName) {
     return parsed;
 }
 function normalizeSetup(value) {
-    switch ((value || 'mise').trim().toLowerCase()) {
-        case 'mise':
-        case 'external':
-        case 'none':
-            return (value || 'mise').trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported setup "${value}". Expected mise, external, or none.`);
-    }
-}
-function normalizePreset(value) {
     switch ((value || 'none').trim().toLowerCase()) {
+        case 'mise':
         case 'none':
-        case 'rails':
-        case 'ruby':
-        case 'node':
-        case 'node-turbo':
-        case 'python-uv':
-        case 'go':
-        case 'php-composer':
             return (value || 'none').trim().toLowerCase();
         default:
-            throw new Error(`Unsupported preset "${value}". Expected none, rails, ruby, node, node-turbo, python-uv, go, or php-composer.`);
+            throw new Error(`Unsupported setup "${value}". Expected mise or none.`);
     }
-}
-function normalizeToolVersionScope(value) {
-    switch ((value || 'patch').trim().toLowerCase()) {
-        case 'major':
-        case 'minor':
-        case 'patch':
-            return (value || 'patch').trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported tool-version-scope "${value}". Expected major, minor, or patch.`);
-    }
-}
-function resolveWorkspace(workspace) {
-    const resolved = workspace
-        ? workspace.includes('/') ? workspace : `default/${workspace}`
-        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || getInputsWorkspace({}));
-    if (!resolved.includes('/')) {
-        return `default/${resolved}`;
-    }
-    return resolved;
 }
 function expandUserPath(value) {
     if (value.startsWith('~/')) {
@@ -99523,13 +95776,9 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
         });
     }
 }
-function buildGenericVerificationSpecs(plan, inputs, includeRuntime) {
+function buildGenericVerificationSpecs(plan) {
     const specs = [];
-    const noPlatform = inputs.noPlatform || inputs.enableCrossOsArchive;
-    if (includeRuntime && plan.runtimeEntry) {
-        appendVerificationSpecsFromEntries(specs, plan.runtimeEntry, noPlatform, false);
-    }
-    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, noPlatform, false);
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, false);
     return specs;
 }
 function envWithOverrides(overrides) {
@@ -99798,15 +96047,14 @@ function parseToolSpecs(input) {
         };
     });
 }
-async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory, uvVersion, composerVersion) {
+async function resolveRuntimeTools(setup, mode, toolsInput, workingDirectory) {
     if (setup !== 'mise') {
         return [];
     }
     const explicitTools = parseToolSpecs(toolsInput);
     const projectTools = await detectProjectTools(workingDirectory);
-    const presetTools = await detectPresetTools(preset, workingDirectory, uvVersion, composerVersion);
     const modeTools = await detectModeTools(mode, workingDirectory);
-    return mergeTools(explicitTools, projectTools, presetTools, modeTools);
+    return mergeTools(explicitTools, projectTools, modeTools);
 }
 async function detectProjectTools(workingDirectory) {
     const tools = new Map();
@@ -99840,30 +96088,10 @@ async function detectProjectTools(workingDirectory) {
     }
     return Array.from(tools.values());
 }
-async function detectPresetTools(preset, workingDirectory, uvVersion, composerVersion) {
-    switch (preset) {
-        case 'rails':
-            return detectRailsTools(workingDirectory);
-        case 'ruby':
-            return detectRubyTools(workingDirectory);
-        case 'node':
-            return detectNodeTools(workingDirectory);
-        case 'node-turbo':
-            return detectNodeTurboTools(workingDirectory);
-        case 'python-uv':
-            return detectPythonUvTools(workingDirectory, uvVersion);
-        case 'go':
-            return detectGoTools(workingDirectory);
-        case 'php-composer':
-            return detectPhpComposerTools(workingDirectory, composerVersion);
-        default:
-            return [];
-    }
-}
 async function detectModeTools(mode, workingDirectory) {
     switch (mode) {
-        case 'turbo-proxy':
-        case 'nx-proxy':
+        case 'turbo':
+        case 'nx':
             return detectNodeTurboTools(workingDirectory);
         case 'bazel':
             return detectBazelTools(workingDirectory);
@@ -99873,40 +96101,19 @@ async function detectModeTools(mode, workingDirectory) {
             return detectGradleTools(workingDirectory);
         case 'maven':
             return detectMavenTools(workingDirectory);
-        case 'rust-sccache':
+        case 'sccache':
             return detectRustTools(workingDirectory);
         default:
             return [];
     }
 }
-async function detectRubyTools(workingDirectory) {
-    const rubyVersion = await detectRubyVersion(workingDirectory);
-    if (!rubyVersion) {
-        return [];
-    }
-    return [{ name: 'ruby', version: rubyVersion, label: 'Ruby', source: 'preset' }];
-}
-async function detectRailsTools(workingDirectory) {
-    const tools = await detectRubyTools(workingDirectory);
-    if (await needsNodeRuntime(workingDirectory)) {
-        const nodeVersion = await detectNodeVersion(workingDirectory);
-        if (nodeVersion) {
-            tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
-        }
-    }
-    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
-    if (packageManagerTool) {
-        tools.push(packageManagerTool);
-    }
-    return tools;
-}
 async function detectNodeTools(workingDirectory) {
     const tools = [];
     const nodeVersion = await detectNodeVersion(workingDirectory);
     if (nodeVersion) {
-        tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
+        tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'mode' });
     }
-    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
+    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'mode');
     if (packageManagerTool) {
         tools.push(packageManagerTool);
     }
@@ -99915,40 +96122,12 @@ async function detectNodeTools(workingDirectory) {
 async function detectNodeTurboTools(workingDirectory) {
     return detectNodeTools(workingDirectory);
 }
-async function detectPythonUvTools(workingDirectory, defaultUvVersion) {
-    const tools = [];
-    const pythonVersion = await detectPythonVersion(workingDirectory);
-    if (pythonVersion) {
-        tools.push({ name: 'python', version: pythonVersion, label: 'Python', source: 'preset' });
-    }
-    tools.push({
-        name: 'uv',
-        version: (await detectUvVersion(workingDirectory)) || defaultUvVersion,
-        label: 'uv',
-        source: 'preset',
-    });
-    return tools;
-}
 async function detectGoTools(workingDirectory) {
     const goVersion = await detectGoVersion(workingDirectory);
     if (!goVersion) {
         return [];
     }
-    return [{ name: 'go', version: goVersion, label: 'Go', source: 'preset' }];
-}
-async function detectPhpComposerTools(workingDirectory, defaultComposerVersion) {
-    const tools = [];
-    const phpVersion = await detectPhpVersion(workingDirectory);
-    if (phpVersion) {
-        tools.push({ name: 'php', version: phpVersion, label: 'PHP', source: 'preset' });
-    }
-    tools.push({
-        name: 'composer',
-        version: (await detectComposerVersion(workingDirectory)) || defaultComposerVersion,
-        label: 'Composer',
-        source: 'preset',
-    });
-    return tools;
+    return [{ name: 'go', version: goVersion, label: 'Go', source: 'mode' }];
 }
 async function detectBazelTools(workingDirectory) {
     const bazelVersion = await detectBazelVersion(workingDirectory);
@@ -100046,31 +96225,6 @@ async function detectGoVersion(workingDirectory) {
     return (await readMiseTomlVersion(workingDirectory, 'go'))
         || (await readMiseTomlVersion(workingDirectory, 'golang'));
 }
-async function detectUvVersion(workingDirectory) {
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'uv');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'uv');
-}
-async function detectPhpVersion(workingDirectory) {
-    const phpVersion = await readFirstLine(external_path_.join(workingDirectory, '.php-version'));
-    if (phpVersion) {
-        return phpVersion;
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'php');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'php');
-}
-async function detectComposerVersion(workingDirectory) {
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'composer');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'composer');
-}
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(external_path_.join(workingDirectory, '.java-version'));
     if (javaVersion) {
@@ -100156,15 +96310,6 @@ async function readFile(filePath) {
         return null;
     }
 }
-async function needsNodeRuntime(workingDirectory) {
-    const markers = ['package.json', 'yarn.lock', 'pnpm-lock.yaml', 'package-lock.json', 'turbo.json'];
-    for (const marker of markers) {
-        if (await utils_pathExists(external_path_.join(workingDirectory, marker))) {
-            return true;
-        }
-    }
-    return false;
-}
 async function readPackageJson(workingDirectory) {
     const packageJson = await readFile(external_path_.join(workingDirectory, 'package.json'));
     if (!packageJson) {
@@ -100209,14 +96354,14 @@ async function detectNodePackageManager(workingDirectory) {
         }
     }
     if (!name) {
-        if (await utils_pathExists(external_path_.join(workingDirectory, 'pnpm-lock.yaml'))) {
+        if (await pathExists(external_path_.join(workingDirectory, 'pnpm-lock.yaml'))) {
             name = 'pnpm';
         }
-        else if (await utils_pathExists(external_path_.join(workingDirectory, 'yarn.lock'))) {
+        else if (await pathExists(external_path_.join(workingDirectory, 'yarn.lock'))) {
             name = 'yarn';
         }
-        else if (await utils_pathExists(external_path_.join(workingDirectory, 'package-lock.json'))
-            || await utils_pathExists(external_path_.join(workingDirectory, 'npm-shrinkwrap.json'))) {
+        else if (await pathExists(external_path_.join(workingDirectory, 'package-lock.json'))
+            || await pathExists(external_path_.join(workingDirectory, 'npm-shrinkwrap.json'))) {
             name = 'npm';
         }
         else if (packageJson) {
@@ -100246,7 +96391,7 @@ async function detectNodePackageManagerTool(workingDirectory, source = 'project'
         source,
     };
 }
-async function utils_pathExists(filePath) {
+async function pathExists(filePath) {
     try {
         await external_fs_namespaceObject.promises.access(filePath);
         return true;
@@ -100275,22 +96420,6 @@ function utils_normalizeToolName(name) {
         return 'go';
     }
     return normalized;
-}
-function buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
-    if (tools.length === 0) {
-        return null;
-    }
-    if (runtimeCacheTag.trim()) {
-        return runtimeCacheTag.trim();
-    }
-    return buildMiseRuntimeTag(cacheTagPrefix, tools, versionScope);
-}
-function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
-    const runtimeTag = buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope);
-    if (!runtimeTag) {
-        return null;
-    }
-    return `${runtimeTag}:${getMiseInstallsDir()}`;
 }
 function splitEntriesInput(entries) {
     const values = [];
@@ -100347,285 +96476,15 @@ async function resolveCliCapabilityVersion(version) {
     }
     return match[1];
 }
-function supportsPortableArchiveArgs(version) {
-    const parsed = parseCliVersion(version);
-    const minimum = parseCliVersion(PORTABLE_ARCHIVE_ARGS_MIN_VERSION);
-    if (!parsed) {
-        return false;
-    }
-    for (let index = 0; index < parsed.length; index += 1) {
-        if (parsed[index] !== minimum[index]) {
-            return parsed[index] > minimum[index];
-        }
-    }
-    return true;
-}
-function assertCrossOsArchiveTransportSupported(version) {
-    if (supportsPortableArchiveArgs(version)) {
-        return;
-    }
-    throw new Error(`enableCrossOsArchive requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so the Action can force tar archive transport. Update cli-version before sharing this tag across operating systems.`);
-}
-function assertExternalSymlinkRoundTripSupported(version) {
-    if (supportsPortableArchiveArgs(version)) {
-        return;
-    }
-    throw new Error(`allow-external-symlinks requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ for content-addressed layouts. Tar archive transport leaves symlink handling to tar. Update cli-version before enabling this input.`);
-}
-function assertLegacyArchiveEntriesAreLossless(entries, operation) {
-    const incompatible = entries.find((entry) => {
-        const separator = entry.indexOf(':');
-        if (separator <= 0) {
-            return true;
-        }
-        const tag = entry.slice(0, separator);
-        const selectedPath = entry.slice(separator + 1);
-        return entry.includes(',')
-            || tag !== tag.trim()
-            || selectedPath !== selectedPath.trim();
-    });
-    if (!incompatible) {
-        return;
-    }
-    throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to ${operation} cache paths containing commas or significant leading/trailing whitespace. Update cli-version instead of allowing a lossy legacy invocation.`);
-}
-function splitExcludeInput(input) {
-    if (!input) {
-        return [];
-    }
-    return input.split(',').filter((pattern) => pattern.length > 0);
-}
-function splitLiteralExcludeInput(input) {
-    if (!input) {
-        return [];
-    }
-    return input.split(/\r?\n/).filter((pattern) => pattern.length > 0);
-}
-function appendSaveExcludeArgs(args, excludes, version) {
-    if (supportsPortableArchiveArgs(version)) {
-        for (const pattern of excludes) {
-            args.push('--exclude-pattern', pattern);
-        }
-        return;
-    }
-    const incompatible = excludes.find((pattern) => pattern.includes(',') || pattern.startsWith('./'));
-    if (incompatible !== undefined) {
-        throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to preserve exclusion patterns and exclusion names containing commas. Update cli-version instead of allowing a lossy legacy invocation.`);
-    }
-    for (const pattern of excludes) {
-        args.push('--exclude', pattern);
-    }
-}
-function splitActionsCachePathInput(input) {
-    return input
-        .split(/\r?\n/)
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-}
-function absoluteGlobPattern(pattern, workingDirectory) {
-    let value = pattern;
-    let negate = '';
-    while (value.startsWith('!')) {
-        negate += '!';
-        value = value.slice(1);
-    }
-    const selectedPath = value.trim();
-    if (selectedPath === '~' || selectedPath.startsWith('~/')) {
-        const expanded = selectedPath === '~'
-            ? external_os_.homedir()
-            : external_path_.join(external_os_.homedir(), selectedPath.slice(2));
-        return `${negate}${expanded}`;
-    }
-    if (external_path_.isAbsolute(selectedPath)) {
-        return `${negate}${selectedPath}`;
-    }
-    return `${negate}${external_path_.join(workingDirectory, selectedPath)}`;
-}
-function hasUnescapedGlob(pattern) {
-    for (let index = 0; index < pattern.length; index += 1) {
-        if (pattern[index] === '\\' && process.platform !== 'win32') {
-            index += 1;
-            continue;
-        }
-        if (pattern[index] === '*' || pattern[index] === '?' || pattern[index] === '[') {
-            return true;
-        }
-    }
-    return false;
-}
-function hasInvalidGlobDotSegments(pattern) {
-    const normalized = process.platform === 'win32'
-        ? pattern.replace(/\\/g, '/')
-        : pattern;
-    return normalized
-        .split('/')
-        .some((segment, index) => segment === '..' || (segment === '.' && index !== 0));
-}
-function resolveLiteralActionsCachePath(pattern, workingDirectory) {
-    const selectedPath = pattern.trim();
-    const expanded = selectedPath === '~'
-        ? external_os_.homedir()
-        : selectedPath.startsWith('~/')
-            ? external_path_.join(external_os_.homedir(), selectedPath.slice(2))
-            : selectedPath;
-    return external_path_.isAbsolute(expanded) ? expanded : external_path_.join(workingDirectory, expanded);
-}
-function pathIsWithin(parent, candidate) {
-    const relative = external_path_.relative(parent, candidate);
-    return relative === '' || (!relative.startsWith(`..${external_path_.sep}`) && relative !== '..' && !external_path_.isAbsolute(relative));
-}
-function coalesceCacheRoots(paths) {
-    const roots = [];
-    for (const candidate of paths) {
-        if (roots.some((root) => pathIsWithin(root, candidate))) {
-            continue;
-        }
-        for (let index = roots.length - 1; index >= 0; index -= 1) {
-            if (pathIsWithin(candidate, roots[index])) {
-                roots.splice(index, 1);
-            }
-        }
-        roots.push(candidate);
-    }
-    return roots;
-}
-async function resolveActionsCachePaths(input, workingDirectory) {
-    const patterns = splitActionsCachePathInput(input);
-    if (patterns.length === 0) {
-        return { paths: [], excludes: [] };
-    }
-    const roots = [];
-    const exclusions = [];
-    let sawExclusion = false;
-    for (const pattern of patterns) {
-        if (pattern.startsWith('!')) {
-            sawExclusion = true;
-            exclusions.push(pattern.slice(1));
-            continue;
-        }
-        if (sawExclusion) {
-            throw new Error('BoringCache path compatibility requires all include roots before exclusion patterns. Move leading-! exclusions after the paths they filter.');
-        }
-        if (process.platform !== 'win32' && pattern.includes('\\')) {
-            throw new Error(`Unsupported actions/cache path pattern "${pattern}". Escaped glob characters cannot be translated to a literal CLI cache root without changing their meaning; use an exact path with no escapes.`);
-        }
-        const absolutePattern = absoluteGlobPattern(pattern, workingDirectory);
-        const globber = await glob_create(absolutePattern, {
-            followSymbolicLinks: true,
-            implicitDescendants: false,
-        });
-        if (!hasUnescapedGlob(pattern)) {
-            roots.push({
-                requested: pattern.trim(),
-                absolute: resolveLiteralActionsCachePath(pattern, workingDirectory),
-                descendantGlob: false,
-            });
-            continue;
-        }
-        if (!/\/\*\*\/?$/.test(pattern) || hasUnescapedGlob(pattern.replace(/\/\*\*\/?$/, ''))) {
-            throw new Error(`Unsupported actions/cache path pattern "${pattern}". BoringCache preserves one deterministic archive root per tag, so wildcard roots must use the form directory/**. Use exact paths or BoringCache entries for other shapes.`);
-        }
-        roots.push({
-            requested: pattern.replace(/\/\*\*\/?$/, ''),
-            absolute: globber.getSearchPaths()[0],
-            descendantGlob: true,
-        });
-    }
-    if (exclusions.length > 0 && (roots.length !== 1 || !roots[0].descendantGlob)) {
-        throw new Error('actions/cache exclusion patterns require exactly one directory/** include root. Exact roots and multiple roots cannot safely scope exclusions in a shared save batch.');
-    }
-    const selectedRootPaths = coalesceCacheRoots(roots.map((root) => root.absolute));
-    const selectedRoots = selectedRootPaths.map((absolute) => roots.find((root) => root.absolute === absolute));
-    if (exclusions.length > 0 && selectedRoots.length !== 1) {
-        throw new Error('actions/cache exclusion patterns require exactly one deterministic directory/** root. Split multiple roots into separate BoringCache entries so exclusions cannot affect the wrong cache.');
-    }
-    const excludePatterns = exclusions.map((pattern) => {
-        if (pattern.startsWith('!')) {
-            throw new Error('Repeated ! path negation is not supported. Use one leading ! exclusion after the include root.');
-        }
-        if (process.platform !== 'win32' && pattern.includes('\\')) {
-            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". Escaped glob characters cannot be translated to the CLI matcher without changing their meaning; use a literal descendant subtree with no escapes.`);
-        }
-        if (!/\/\*\*\/?$/.test(pattern) || hasUnescapedGlob(pattern.replace(/\/\*\*\/?$/, ''))) {
-            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". BoringCache currently supports only a literal descendant subtree in the form !directory/subdirectory/** so its root scope can be preserved exactly. Split other glob shapes into separate BoringCache entries.`);
-        }
-        const subtree = pattern.replace(/\/\*\*\/?$/, '');
-        if (hasInvalidGlobDotSegments(subtree)) {
-            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". Internal . segments and all .. segments are rejected by actions/glob and cannot be normalized into a different cache exclusion.`);
-        }
-        const absolutePattern = resolveLiteralActionsCachePath(subtree, workingDirectory);
-        const root = selectedRoots[0].absolute;
-        const relativePattern = external_path_.relative(root, absolutePattern);
-        if (!relativePattern || relativePattern === '..' || relativePattern.startsWith(`..${external_path_.sep}`)) {
-            throw new Error(`actions/cache exclusion pattern "!${pattern}" must stay inside its directory/** cache root.`);
-        }
-        const normalized = relativePattern.split(external_path_.sep).join('/');
-        return `./${normalized}/`;
-    });
-    return { paths: selectedRoots.map((root) => root.requested), excludes: excludePatterns };
-}
 function appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
 }
-const PROJECT_CONFIG_FILE_NAMES = ['.boringcache.toml', 'boringcache.toml'];
-function findNearestRepoConfigPath(workingDirectory) {
-    let current = external_path_.resolve(workingDirectory);
-    while (true) {
-        for (const fileName of PROJECT_CONFIG_FILE_NAMES) {
-            const candidate = external_path_.join(current, fileName);
-            if (external_fs_namespaceObject.existsSync(candidate)) {
-                return candidate;
-            }
-        }
-        const parent = external_path_.dirname(current);
-        if (parent === current) {
-            return null;
-        }
-        current = parent;
-    }
-}
 async function runDryRunPlan(workingDirectory, options) {
-    const { workspaceInput, entryIds = [], profileNames = [], manualTagPathPairs = [], archivePaths = [], archiveTagPrefix = '', archiveRestorePrefixes = [], cacheTag = '', toolTagSuffix = '', noPlatform = false, readOnly = false, fallbackWorkspace, portableArchiveArgs = true, } = options;
-    const executePlan = async (candidateWorkspace) => {
+    const { profileNames = [], readOnly = false, } = options;
+    const executePlan = async () => {
         const args = ['run'];
-        const trimmedWorkspace = candidateWorkspace.trim();
-        if (trimmedWorkspace) {
-            args.push(trimmedWorkspace);
-        }
-        if (manualTagPathPairs.length > 0) {
-            if (portableArchiveArgs) {
-                for (const pair of manualTagPathPairs) {
-                    args.push('--manual-entry', pair);
-                }
-            }
-            else {
-                assertLegacyArchiveEntriesAreLossless(manualTagPathPairs, 'save');
-                args.push(manualTagPathPairs.join(','));
-            }
-        }
         for (const profileName of profileNames) {
             args.push('--profile', profileName);
-        }
-        for (const entryId of entryIds) {
-            args.push('--entry', entryId);
-        }
-        for (const archivePath of archivePaths) {
-            args.push('--archive-path', archivePath);
-        }
-        if (archiveTagPrefix.trim()) {
-            args.push('--archive-tag-prefix', archiveTagPrefix.trim());
-        }
-        for (const archiveRestorePrefix of archiveRestorePrefixes) {
-            args.push('--archive-restore-prefix', archiveRestorePrefix);
-        }
-        if (cacheTag.trim()) {
-            args.push('--cache-tag', cacheTag.trim());
-        }
-        if (toolTagSuffix?.trim()) {
-            args.push('--tool-tag-suffix', toolTagSuffix.trim());
-        }
-        if (noPlatform) {
-            args.push('--no-platform');
         }
         appendCliPublicationPolicy(args, readOnly);
         args.push('--dry-run', '--json');
@@ -100654,310 +96513,50 @@ async function runDryRunPlan(workingDirectory, options) {
             throw new Error(`Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
         }
     };
-    try {
-        return await executePlan(workspaceInput);
-    }
-    catch (error) {
-        if (!workspaceInput.trim()
-            && fallbackWorkspace
-            && error instanceof Error
-            && /No workspace specified/i.test(error.message)) {
-            return executePlan(fallbackWorkspace);
-        }
-        throw error;
-    }
+    return executePlan();
 }
-async function resolveCliArchiveEntries(workingDirectory, options) {
+async function maybeResolveWorkspaceViaCli(workingDirectory, readOnly) {
     const plan = await runDryRunPlan(workingDirectory, {
-        workspaceInput: options.workspaceInput,
-        entryIds: options.entryIds,
-        cacheTag: options.cacheTag,
-        toolTagSuffix: options.toolTagSuffix,
-        readOnly: options.readOnly,
-        fallbackWorkspace: options.fallbackWorkspace,
-    });
-    const workspace = plan.workspace?.trim()
-        || options.fallbackWorkspace?.trim()
-        || resolveWorkspace(options.workspaceInput);
-    return {
-        workspace,
-        envVars: plan.env_vars,
-        entries: (plan.archive_entries || [])
-            .filter((entry) => Boolean(entry.path))
-            .map((entry) => ({
-            requested: entry.requested,
-            tag: entry.tag,
-            path: entry.path,
-            tagPathPair: entry.tag_path_pair,
-        })),
-    };
-}
-function isUnknownEntryResolutionError(error) {
-    return error instanceof Error && /Unknown cache entry/i.test(error.message);
-}
-async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawTag, cacheTag, toolTagSuffix, readOnly, fallbackWorkspace, portableArchiveArgs = true) {
-    try {
-        return await runDryRunPlan(workingDirectory, {
-            workspaceInput,
-            entryIds: [rawTag],
-            cacheTag,
-            toolTagSuffix,
-            readOnly,
-            fallbackWorkspace,
-            portableArchiveArgs,
-        });
-    }
-    catch (error) {
-        if (isUnknownEntryResolutionError(error)) {
-            return null;
-        }
-        throw error;
-    }
-}
-async function maybeResolveWorkspaceViaCli(workingDirectory, workspaceInput, fallbackWorkspace, readOnly) {
-    const plan = await runDryRunPlan(workingDirectory, {
-        workspaceInput,
         readOnly,
-        fallbackWorkspace,
     });
     return plan.workspace?.trim() || null;
 }
-function cliPlanHasProvenance(plan) {
-    return Boolean(plan.workspace_source || plan.repo_config_path || plan.archive_entries);
-}
-function cliPlanUsesRepoConfigResolution(plan) {
-    const firstEntry = plan.archive_entries?.[0];
-    if (firstEntry) {
-        return firstEntry.resolution_source === 'repo-config';
-    }
-    return Boolean(plan.repo_config_path);
-}
-async function detectDefaultArchiveEntries(inputs) {
-    if (inputs.preset === 'ruby') {
-        return 'bundler';
-    }
-    if (inputs.preset === 'rails') {
-        return joinDefaultEntries('bundler', await detectNodeDefaultArchiveEntries(inputs.workingDirectory));
-    }
-    if (inputs.preset === 'node' || inputs.preset === 'node-turbo') {
-        return await detectNodeDefaultArchiveEntries(inputs.workingDirectory);
-    }
-    if (inputs.preset === 'python-uv') {
-        return 'uv-cache';
-    }
-    if (inputs.preset === 'go') {
-        return joinDefaultEntries('go-mod-cache', 'go-build-cache');
-    }
-    if (inputs.preset === 'php-composer') {
-        return joinDefaultEntries('composer-cache', 'vendor');
-    }
-    return '';
-}
-function joinDefaultEntries(...groups) {
-    return groups
-        .flatMap((group) => group.split(/\r?\n/))
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .join('\n');
-}
-async function detectNodeDefaultArchiveEntries(workingDirectory) {
-    const packageManager = await detectNodePackageManager(workingDirectory);
-    if (!packageManager) {
-        return '';
-    }
-    switch (packageManager.name) {
-        case 'pnpm':
-            return 'pnpm-store\nnode-modules';
-        case 'yarn':
-            return 'yarn-cache\nnode-modules';
-        case 'npm':
-            return 'npm-cache\nnode-modules';
-    }
-}
-async function buildArchiveEntries(inputs, runtimeTools) {
-    let archiveEntries = [];
-    let restoreCandidates = [];
-    let archiveExcludes = [];
-    let usesCacheFormat = false;
-    const envVars = {};
-    let cacheTagPrefix;
-    let resolvedWorkspace;
-    let sourceEntries = inputs.entries;
+async function buildArchiveEntries(inputs) {
     const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
-    const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
-    const fallbackWorkspace = resolveWorkspace(inputs.workspace);
-    const cliWorkspaceInput = inputs.workspace.trim();
-    const cliToolTagSuffix = inputs.setup === 'mise'
-        ? buildMiseToolTag(runtimeTools, inputs.toolVersionScope)
-        : null;
-    const portableArchiveArgs = supportsPortableArchiveArgs(inputs.cliVersion);
-    const mergeCliPlan = (plan) => {
-        archiveEntries.push(...plan.tag_path_pairs);
-        if (!cacheTagPrefix) {
-            const firstEntry = plan.archive_entries?.[0];
-            const firstPair = plan.tag_path_pairs[0];
-            cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
-                || (firstPair ? parseEntries(firstPair, 'restore', {
-                    resolvePaths: false,
-                    separatorMode: 'single',
-                })[0]?.tag : undefined);
-        }
-        Object.assign(envVars, plan.env_vars);
-        if (!resolvedWorkspace && plan.workspace) {
-            resolvedWorkspace = plan.workspace;
-        }
-    };
-    if (cacheProfiles.length > 0 || sourceEntries.trim()) {
-        const semanticEntries = [];
-        const rawEntries = [];
-        for (const entry of splitEntriesInput(sourceEntries)) {
-            if (entry.includes(':')) {
-                rawEntries.push(entry);
-            }
-            else {
-                semanticEntries.push(entry.trim());
-            }
-        }
-        if (cacheProfiles.length > 0 || semanticEntries.length > 0) {
-            mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
-                workspaceInput: cliWorkspaceInput,
-                entryIds: semanticEntries,
-                profileNames: cacheProfiles,
-                cacheTag: inputs.cacheTag,
-                toolTagSuffix: cliToolTagSuffix,
-                readOnly: inputs.readOnly,
-                fallbackWorkspace,
-            }));
-        }
-        for (const entryToken of rawEntries) {
-            const parsedEntry = parseEntries(entryToken, 'restore', {
-                resolvePaths: false,
-                separatorMode: 'single',
-            })[0];
-            if (!parsedEntry) {
-                continue;
-            }
-            if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
-                const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, inputs.cacheTag, cliToolTagSuffix, inputs.readOnly, fallbackWorkspace, portableArchiveArgs);
-                const shouldUpgrade = resolved
-                    && resolved.tag_path_pairs.length > 0
-                    && (cliPlanUsesRepoConfigResolution(resolved)
-                        || (!cliPlanHasProvenance(resolved) && Boolean(repoConfigPath)));
-                if (shouldUpgrade) {
-                    mergeCliPlan(resolved);
-                    continue;
-                }
-            }
-            if (!inputs.cacheTag.trim() && !cliToolTagSuffix?.trim()) {
-                if (!cacheTagPrefix) {
-                    cacheTagPrefix = parsedEntry.tag;
-                }
-                archiveEntries.push(entryToken);
-                continue;
-            }
-            mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
-                workspaceInput: cliWorkspaceInput,
-                manualTagPathPairs: [entryToken],
-                cacheTag: inputs.cacheTag,
-                toolTagSuffix: cliToolTagSuffix,
-                readOnly: inputs.readOnly,
-                fallbackWorkspace,
-                portableArchiveArgs,
-            }));
-        }
+    if (cacheProfiles.length === 0) {
+        return {
+            entries: '',
+            envVars: {},
+        };
     }
-    else if (inputs.path || inputs.key) {
-        if (!inputs.path || !inputs.key) {
-            throw new Error('actions/cache compatibility mode requires both path and key');
-        }
-        const resolvedArchivePaths = await resolveActionsCachePaths(inputs.path, inputs.workingDirectory);
-        archiveExcludes = resolvedArchivePaths.excludes;
-        if (!inputs.readOnly && archiveExcludes.length > 0 && !portableArchiveArgs) {
-            throw new Error(`actions/cache path exclusions require BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so their cache-root scope is preserved exactly. Update cli-version, or use a restore-only step with read-only: true.`);
-        }
-        const archivePathPlan = await runDryRunPlan(inputs.workingDirectory, {
-            workspaceInput: cliWorkspaceInput,
-            archivePaths: resolvedArchivePaths.paths,
-            archiveTagPrefix: inputs.key,
-            archiveRestorePrefixes: getRestoreKeyCandidates(inputs),
-            noPlatform: inputs.noPlatform || inputs.enableCrossOsArchive,
-            readOnly: inputs.readOnly,
-            fallbackWorkspace,
-            portableArchiveArgs,
-        });
-        archiveEntries = archivePathPlan.tag_path_pairs;
-        restoreCandidates = (archivePathPlan.archive_restore_candidates || []).map((candidate) => ({
-            tagPrefix: candidate.tag_prefix,
-            entries: candidate.tag_path_pairs.join('\n'),
-        }));
-        usesCacheFormat = true;
-        cacheTagPrefix = inputs.key.trim() || undefined;
-    }
-    else {
-        sourceEntries = await detectDefaultArchiveEntries(inputs);
-        const defaultEntryIds = splitEntriesInput(sourceEntries).map((entry) => entry.trim());
-        if (defaultEntryIds.length > 0) {
-            mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
-                workspaceInput: cliWorkspaceInput,
-                entryIds: defaultEntryIds,
-                cacheTag: inputs.cacheTag,
-                toolTagSuffix: cliToolTagSuffix,
-                readOnly: inputs.readOnly,
-                fallbackWorkspace,
-            }));
-        }
-    }
+    const plan = await runDryRunPlan(inputs.workingDirectory, {
+        profileNames: cacheProfiles,
+        readOnly: inputs.readOnly,
+    });
+    const firstEntry = plan.archive_entries?.[0];
+    const firstPair = plan.tag_path_pairs[0];
+    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
+        || (firstPair ? parseEntries(firstPair, 'restore', { separatorMode: 'single' })[0]?.tag : undefined);
     return {
-        entries: archiveEntries.join('\n'),
-        excludes: archiveExcludes,
-        restoreCandidates,
-        usesCacheFormat,
-        envVars,
+        entries: plan.tag_path_pairs.join('\n'),
+        envVars: plan.env_vars,
         cacheTagPrefix,
-        workspace: resolvedWorkspace,
+        workspace: plan.workspace,
     };
 }
-function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries, pathExcludes) {
-    if (inputs.enableCrossOsArchive) {
-        assertCrossOsArchiveTransportSupported(inputs.cliVersion);
-    }
-    if (inputs.allowExternalSymlinks) {
-        assertExternalSymlinkRoundTripSupported(inputs.cliVersion);
-    }
-    if ((inputs.entries || inputs.cacheProfiles.trim()) && (inputs.path || inputs.key)) {
-        warning('Both explicit entries/cache-profiles and actions/cache compatibility inputs were provided. Using entries/cache-profiles.');
-    }
-    if ((inputs.path && !inputs.key) || (!inputs.path && inputs.key)) {
-        throw new Error('actions/cache compatibility mode requires both path and key');
-    }
-    if (pathExcludes.length > 0 && runtimeEntry) {
-        throw new Error('actions/cache path exclusions cannot share a save batch with the Mise runtime cache. Set cache-runtime: false or move the path cache to a separate boringcache/one step so exclusions remain scoped to their directory/** root.');
-    }
+function validateOneInputs(inputs, modeSpec, archiveEntries) {
     if (inputs.setup !== 'mise' && inputs.tools.trim()) {
         warning(`Ignoring tools because setup=${inputs.setup}`);
     }
-    if (inputs.setup !== 'mise' && inputs.cacheRuntime) {
-        warning(`Ignoring cache-runtime because setup=${inputs.setup}`);
-    }
-    if (inputs.setup === 'mise' && inputs.cacheRuntime && runtimeTools.length === 0) {
-        warning('cache-runtime requested but no mise tools were resolved');
-    }
-    const hasArchiveInputs = Boolean(archiveEntries || runtimeEntry);
-    if (modeSpec.resolved === 'archive' && !hasArchiveInputs) {
-        if (inputs.cliVersion.trim().toLowerCase() !== 'skip') {
-            notice('No cache entries resolved; boringcache/one will install the CLI only.');
-            return;
-        }
-        throw new Error('No cache entries resolved. Provide entries, path+key, or enable cache-runtime with setup=mise.');
+    if (modeSpec.resolved === 'archive' && !archiveEntries) {
+        throw new Error('Archive mode requires cache-profiles from the committed .boringcache.toml plan.');
     }
 }
 async function buildPlan(inputs) {
     const modeSpec = resolveModeSpec(inputs.mode);
     assertImplementedMode(modeSpec);
     const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
-    const fallbackWorkspace = resolveWorkspace(inputs.workspace);
-    const explicitWorkspace = inputs.workspace.trim();
-    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory, inputs.uvVersion, inputs.composerVersion);
+    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.mode, inputs.tools, inputs.workingDirectory);
     if (inputs.setup === 'mise'
         && modeSpec.resolved === 'maven'
         && resolvedMavenVersion
@@ -100969,64 +96568,34 @@ async function buildPlan(inputs) {
             source: 'mode',
         });
     }
-    const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
-    const workspace = explicitWorkspace
-        ? fallbackWorkspace
-        : archiveEntries.workspace
-            || (!archiveEntries.usesCacheFormat
-                ? await maybeResolveWorkspaceViaCli(inputs.workingDirectory, explicitWorkspace, fallbackWorkspace, inputs.readOnly)
-                : null)
-            || fallbackWorkspace;
-    const cacheTagPrefix = utils_getCacheTagPrefix(inputs, runtimeTools, archiveEntries.cacheTagPrefix);
-    const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
-        ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
-        : null;
-    const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
-        ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
-        : null;
-    validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries, archiveEntries.excludes);
+    const archiveEntries = await buildArchiveEntries(inputs);
+    const workspace = archiveEntries.workspace
+        || await maybeResolveWorkspaceViaCli(inputs.workingDirectory, inputs.readOnly);
+    if (!workspace) {
+        throw new Error('The BoringCache CLI plan did not resolve a workspace. Set workspace in .boringcache.toml.');
+    }
+    const cacheTagPrefix = getCacheTagPrefix(archiveEntries.cacheTagPrefix);
+    validateOneInputs(inputs, modeSpec, archiveEntries.entries);
     return {
         workspace,
         workingDirectory: inputs.workingDirectory,
         setup: inputs.setup,
         mode: modeSpec.resolved,
         modeSpec,
-        preset: inputs.preset,
         cacheTagPrefix,
         runtimeTools,
-        runtimeTag,
-        runtimeEntry,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
-        archiveExcludes: [
-            ...splitExcludeInput(inputs.exclude),
-            ...splitLiteralExcludeInput(inputs.excludePatterns),
-            ...archiveEntries.excludes,
-        ],
-        archiveRestoreCandidates: archiveEntries.restoreCandidates,
-        usesCacheFormat: archiveEntries.usesCacheFormat,
     };
 }
-function utils_getCacheTagPrefix(inputs, runtimeTools, resolvedArchivePrefix) {
-    if (inputs.cacheTag) {
-        return inputs.cacheTag;
-    }
+function getCacheTagPrefix(resolvedArchivePrefix) {
     if (resolvedArchivePrefix?.trim()) {
         return resolvedArchivePrefix.trim();
-    }
-    if (inputs.key) {
-        return inputs.key;
-    }
-    if (runtimeTools.length > 0) {
-        return runtimeTools.map((tool) => tool.name).join('-');
     }
     return 'one';
 }
 function buildFlagArgs(inputs) {
     const flagArgs = [];
-    if (inputs.enableCrossOsArchive || inputs.noPlatform) {
-        flagArgs.push('--no-platform');
-    }
     if (inputs.failOnCacheMiss) {
         flagArgs.push('--fail-on-cache-miss');
     }
@@ -101039,13 +96608,9 @@ function buildFlagArgs(inputs) {
     if (inputs.verbose) {
         flagArgs.push('--verbose');
     }
-    if (inputs.allowExternalSymlinks) {
-        flagArgs.push('--allow-external-symlinks');
-    }
     return flagArgs;
 }
-async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
-    void _runtimeCacheHit;
+async function applyMiseSetup(runtimeTools, cwd) {
     if (runtimeTools.length === 0) {
         return false;
     }
@@ -101074,19 +96639,13 @@ async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     await exportMiseEnv(cwd);
     return true;
 }
-async function applyPresetCacheEnv(plan) {
+async function applyCliPlanEnv(plan) {
     for (const [key, value] of Object.entries(plan.envVars)) {
         exportVariable(key, value);
     }
 }
 function serializeTools(runtimeTools) {
     return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');
-}
-function getRestoreKeyCandidates(inputs) {
-    return inputs.restoreKeys
-        .split('\n')
-        .map((value) => value.trim())
-        .filter(Boolean);
 }
 
 ;// CONCATENATED MODULE: ./dist/core/integrity.js
@@ -101273,11 +96832,11 @@ async function runModeRestore(plan, inputs) {
             return runGradleRestore(plan, inputs);
         case 'maven':
             return runMavenRestore(plan, inputs);
-        case 'rust-sccache':
-            return runRustRestore(plan, inputs);
-        case 'turbo-proxy':
+        case 'sccache':
+            return runSccacheRestore(plan, inputs);
+        case 'turbo':
             return runTurboProxyRestore(plan, inputs);
-        case 'nx-proxy':
+        case 'nx':
             return runNxProxyRestore(plan, inputs);
         case 'archive':
             return {};
@@ -101300,12 +96859,12 @@ async function runModeSave(mode, options = {}) {
             return;
         case 'gradle':
         case 'maven':
-        case 'nx-proxy':
-        case 'turbo-proxy':
+        case 'nx':
+        case 'turbo':
             await stopProxyFromState();
             return;
-        case 'rust-sccache':
-            await runRustSave(options);
+        case 'sccache':
+            await runSccacheSave(options);
             return;
         case 'archive':
             return;
@@ -101441,7 +97000,7 @@ function saveModeState(key, value) {
     saveState(modeStateKey(key), value);
 }
 function getModeState(key) {
-    return getState(modeStateKey(key));
+    return core.getState(modeStateKey(key));
 }
 function getModeStateList(key) {
     return getModeState(key)
@@ -101576,28 +97135,7 @@ function normalizeDockerCommand(value) {
     }
     throw new Error(`Unsupported docker-command "${value}". Expected build or setup.`);
 }
-function normalizeDockerCacheMode(value) {
-    const mode = (value.trim() || 'max');
-    if (mode === 'min' || mode === 'max') {
-        return mode;
-    }
-    throw new Error(`Unsupported cache-mode "${value}". Expected min or max.`);
-}
-function normalizeSccacheMode(value) {
-    const mode = (value.trim() || 'local');
-    if (mode === 'local' || mode === 'proxy') {
-        return mode;
-    }
-    throw new Error(`Unsupported sccache-mode "${value}". Expected local or proxy.`);
-}
-function normalizeRustupProfile(value) {
-    const profile = (value.trim() || 'minimal');
-    if (profile === 'minimal' || profile === 'default' || profile === 'complete') {
-        return profile;
-    }
-    throw new Error(`Unsupported profile "${value}". Expected minimal, default, or complete.`);
-}
-async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, noPlatform, noGit, readOnly, options = {}) {
+async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, readOnly, options = {}) {
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
@@ -101605,12 +97143,6 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     }
     if (preferredPort > 0) {
         args.push('--port', String(preferredPort));
-    }
-    if (noPlatform) {
-        args.push('--no-platform');
-    }
-    if (noGit) {
-        args.push('--no-git');
     }
     mode_handlers_appendCliPublicationPolicy(args, readOnly);
     appendMetadataHintArgs(args, options.metadataHintsInput || '');
@@ -101668,7 +97200,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     assertSupportedCliDryRunSchema(adapter, plan);
     return plan;
 }
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput = '', dockerToolCacheInput = '') {
+async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '') {
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
@@ -101683,18 +97215,9 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     if (endpointHost.trim()) {
         args.push('--endpoint-host', endpointHost.trim());
     }
-    if (noPlatform) {
-        args.push('--no-platform');
-    }
-    if (noGit) {
-        args.push('--no-git');
-    }
     mode_handlers_appendCliPublicationPolicy(args, readOnly);
     if (failOnCacheError) {
         args.push('--fail-on-cache-error');
-    }
-    if (cacheMode.trim()) {
-        args.push('--cache-mode', cacheMode.trim());
     }
     if (adapter === 'docker') {
         for (const tool of parseList(dockerToolCacheInput)) {
@@ -101746,11 +97269,11 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     }
     return plan;
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput = '', dockerToolCacheInput = '') {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput, dockerToolCacheInput);
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '') {
+    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput);
 }
-async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput = '') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, noPlatform, noGit, readOnly, failOnCacheError, cacheMode, metadataHintsInput);
+async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '') {
+    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput);
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!hasSaveToken()) {
@@ -101764,9 +97287,6 @@ async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     const args = ['save', workspace, `${cacheKey}:${cacheDir}`, '--force'];
     if (flags.verbose) {
         args.push('--verbose');
-    }
-    if (flags.exclude) {
-        args.push('--exclude', flags.exclude);
     }
     await mode_handlers_execBoringCache(args);
 }
@@ -102127,7 +97647,7 @@ async function buildDockerImage(opts) {
         throw new Error(`docker buildx build failed with exit code ${result}`);
     }
 }
-function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, cacheMode, command, commandArgs) {
+function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, command, commandArgs) {
     const args = [
         adapter,
         '--workspace',
@@ -102136,20 +97656,12 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port
         cacheTag,
         '--port',
         String(port),
-        '--cache-mode',
-        cacheMode,
     ];
     if (proxyBindHost.trim()) {
         args.push('--host', proxyBindHost.trim());
     }
     if (refHost.trim()) {
         args.push('--endpoint-host', refHost.trim());
-    }
-    if (inputs.proxyNoPlatform) {
-        args.push('--no-platform');
-    }
-    if (inputs.proxyNoGit) {
-        args.push('--no-git');
     }
     mode_handlers_appendCliPublicationPolicy(args, inputs.readOnly);
     if (inputs.failOnCacheError) {
@@ -102164,13 +97676,13 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port
     args.push('--', command, ...commandArgs);
     return args;
 }
-async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, cacheMode, opts) {
+async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, opts) {
     const dockerBuildArgs = dockerBuildxArgs({
         ...opts,
         cacheFrom: undefined,
         cacheTo: undefined,
     });
-    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, cacheMode, 'docker', dockerBuildArgs);
+    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, 'docker', dockerBuildArgs);
     const result = await mode_handlers_execBoringCache(args, {
         cwd: opts.context,
         env: {
@@ -102400,89 +97912,6 @@ function readBuildkitDigest(metadataFile) {
         return '';
     }
 }
-async function execRustBoringCache(args) {
-    return mode_handlers_execBoringCache(args);
-}
-function getCargoHome() {
-    return process.env.CARGO_HOME || external_path_.join(currentHomeDir(), '.cargo');
-}
-function configureCargoEnv() {
-    const cargoHome = getCargoHome();
-    process.env.CARGO_HOME = cargoHome;
-    exportVariable('CARGO_HOME', cargoHome);
-    addPath(external_path_.join(cargoHome, 'bin'));
-    exportVariable('CARGO_TERM_COLOR', 'always');
-}
-async function setupRustToolchain(version, options) {
-    const profile = options.profile || 'minimal';
-    await exec_exec('rustup', ['toolchain', 'install', version, '--profile', profile, '--no-self-update']);
-    await exec_exec('rustup', ['default', version]);
-    for (const target of parseList(options.targets || '', /,/)) {
-        await exec_exec('rustup', ['target', 'add', target]);
-    }
-    for (const component of parseList(options.components || '', /,/)) {
-        await exec_exec('rustup', ['component', 'add', component]);
-    }
-    await exec_exec('rustc', ['--version']);
-}
-async function mode_handlers_detectRustVersion(workingDir, inputVersion) {
-    if (inputVersion) {
-        return inputVersion;
-    }
-    const toolchainToml = external_path_.join(workingDir, 'rust-toolchain.toml');
-    try {
-        const content = await external_fs_namespaceObject.promises.readFile(toolchainToml, 'utf-8');
-        const match = content.match(/channel\s*=\s*["']([^"']+)["']/);
-        if (match?.[1]) {
-            return match[1];
-        }
-    }
-    catch {
-    }
-    const toolchainFile = external_path_.join(workingDir, 'rust-toolchain');
-    try {
-        return (await external_fs_namespaceObject.promises.readFile(toolchainFile, 'utf-8')).trim();
-    }
-    catch {
-    }
-    const toolVersionsFile = external_path_.join(workingDir, '.tool-versions');
-    try {
-        const content = await external_fs_namespaceObject.promises.readFile(toolVersionsFile, 'utf-8');
-        const rustLine = content.split('\n').find((line) => line.startsWith('rust '));
-        if (rustLine) {
-            return rustLine.split(/\s+/)[1].trim();
-        }
-    }
-    catch {
-    }
-    return 'stable';
-}
-async function hasGitDependencies(lockPath) {
-    try {
-        const content = await external_fs_namespaceObject.promises.readFile(lockPath, 'utf-8');
-        return content.includes('source = "git+');
-    }
-    catch {
-        return false;
-    }
-}
-function getSccacheDir() {
-    return process.env.SCCACHE_DIR || external_path_.join(currentHomeDir(), '.cache', 'sccache');
-}
-function configureSccacheEnv(cacheSize, sccacheDir) {
-    process.env.RUSTC_WRAPPER = 'sccache';
-    exportVariable('RUSTC_WRAPPER', 'sccache');
-    process.env.SCCACHE_DIR = sccacheDir;
-    exportVariable('SCCACHE_DIR', sccacheDir);
-    process.env.SCCACHE_CACHE_SIZE = cacheSize;
-    exportVariable('SCCACHE_CACHE_SIZE', cacheSize);
-    exportVariable('CC', 'sccache cc');
-    exportVariable('CXX', 'sccache c++');
-    exportVariable('SCCACHE_IDLE_TIMEOUT', process.env.SCCACHE_IDLE_TIMEOUT || '0');
-    // SCCACHE_DIR is action-owned cache state selected by the action plan.
-    // codeql[js/path-injection]
-    external_fs_namespaceObject.mkdirSync(sccacheDir, { recursive: true });
-}
 async function startSccacheServer() {
     await exec_exec('sccache', ['--start-server'], { ignoreReturnCode: true });
 }
@@ -102647,7 +98076,7 @@ function summarizeSccacheStats(output) {
         rustHitRate: parseSccacheTextStat(output, 'Cache hits rate (Rust)'),
     };
 }
-function emptyRustTagCheckStatus() {
+function emptySccacheTagCheckStatus() {
     return {
         hit: false,
         cacheEntryHit: false,
@@ -102672,7 +98101,7 @@ function checkResultHasCacheEntryHit(result) {
     }
     return result.cache_type !== 'kv';
 }
-async function checkRustTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
+async function checkSccacheTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
     const args = ['check', workspace, tag, '--json'];
     if (requireServerSignature) {
         args.unshift('--require-server-signature');
@@ -102694,7 +98123,7 @@ async function checkRustTagStatus(workspace, tag, { noPlatform = false, noGit = 
         },
     });
     if (exitCode !== 0) {
-        return emptyRustTagCheckStatus();
+        return emptySccacheTagCheckStatus();
     }
     try {
         const summary = JSON.parse(stdout);
@@ -102712,21 +98141,18 @@ async function checkRustTagStatus(workspace, tag, { noPlatform = false, noGit = 
     }
     catch (error) {
         warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
-        return emptyRustTagCheckStatus();
+        return emptySccacheTagCheckStatus();
     }
 }
-async function checkRustTagHit(workspace, tag, options = {}) {
-    return (await checkRustTagStatus(workspace, tag, options)).hit;
-}
-async function checkRustProxyTagStatus(workspace, tag, options = {}) {
-    const strictStatus = await checkRustTagStatus(workspace, tag, {
+async function checkSccacheProxyTagStatus(workspace, tag, options = {}) {
+    const strictStatus = await checkSccacheTagStatus(workspace, tag, {
         ...options,
         requireServerSignature: true,
     });
     if (strictStatus.kvChecked || strictStatus.kvHit) {
         return strictStatus;
     }
-    const kvStatus = await checkRustTagStatus(workspace, tag, {
+    const kvStatus = await checkSccacheTagStatus(workspace, tag, {
         ...options,
         requireServerSignature: false,
     });
@@ -102737,75 +98163,33 @@ async function checkRustProxyTagStatus(workspace, tag, options = {}) {
         kvChecked: kvStatus.kvChecked || kvStatus.kvHit,
     };
 }
-function configureTurboRemoteEnv(apiUrl, token, team) {
-    exportVariable('TURBO_API', apiUrl);
-    exportVariable('TURBO_TOKEN', token);
-    exportVariable('TURBO_TEAM', team || 'team_boringcache');
-}
 function rewritePlannedProxyPort(value, plannedPort, actualPort) {
     if (plannedPort === actualPort) {
         return value;
     }
     return value.replace(new RegExp(`:${plannedPort}(?=/|$)`), `:${actualPort}`);
 }
-function turboEnvForStartedProxy(plan, actualPort, tokenOverride, teamOverride) {
+function turboEnvForStartedProxy(plan, actualPort) {
     const envVars = {};
     for (const [key, value] of Object.entries(plan.env_vars || {})) {
         envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
     }
     const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
     envVars.TURBO_API = `http://${endpointHost}:${actualPort}`;
-    envVars.TURBO_TOKEN = tokenOverride.trim()
-        || envVars.TURBO_TOKEN
-        || 'boringcache';
-    envVars.TURBO_TEAM = teamOverride.trim()
-        || envVars.TURBO_TEAM
-        || 'boringcache';
+    envVars.TURBO_TOKEN = envVars.TURBO_TOKEN || 'boringcache';
+    envVars.TURBO_TEAM = envVars.TURBO_TEAM || 'boringcache';
     envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
     return envVars;
 }
-function nxEnvForStartedProxy(plan, actualPort, accessTokenOverride) {
+function nxEnvForStartedProxy(plan, actualPort) {
     const envVars = {};
     for (const [key, value] of Object.entries(plan.env_vars || {})) {
         envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
     }
     const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
     envVars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER = `http://${endpointHost}:${actualPort}`;
-    envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN = accessTokenOverride.trim()
-        || envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN
-        || 'boringcache';
+    envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN = envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || 'boringcache';
     envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
-    return envVars;
-}
-function plannedNodePackageManagerEnv(packageManager, plan) {
-    const plannedEnv = plan.env_vars || {};
-    if (!packageManager) {
-        return {};
-    }
-    const envVars = {};
-    switch (packageManager.name) {
-        case 'pnpm':
-            for (const key of ['PNPM_STORE_DIR', 'NPM_CONFIG_STORE_DIR']) {
-                if (plannedEnv[key]) {
-                    envVars[key] = plannedEnv[key];
-                }
-            }
-            break;
-        case 'yarn':
-            for (const key of ['YARN_CACHE_FOLDER', 'YARN_ENABLE_GLOBAL_CACHE']) {
-                if (plannedEnv[key]) {
-                    envVars[key] = plannedEnv[key];
-                }
-            }
-            break;
-        case 'npm':
-            for (const key of ['npm_config_cache', 'NPM_CONFIG_CACHE']) {
-                if (plannedEnv[key]) {
-                    envVars[key] = plannedEnv[key];
-                }
-            }
-            break;
-    }
     return envVars;
 }
 function plannedNodePackageManagerCacheDir(packageManager, plan) {
@@ -102848,48 +98232,6 @@ function sccacheEnvForStartedProxy(plan, actualPort) {
         || '0';
     return envVars;
 }
-function getRustArchiveEntry(entries, requested, description) {
-    const entry = entries.get(requested);
-    if (!entry?.path?.trim()) {
-        throw new Error(`CLI dry-run did not resolve a ${description} path for ${requested}.`);
-    }
-    return entry;
-}
-function saveRustArchiveEntryState(key, entry) {
-    saveModeState(`${key}-tag`, entry.tag);
-    saveModeState(`${key}-path`, entry.path);
-}
-function readRustArchiveEntryState(key) {
-    const tag = getModeState(`${key}-tag`);
-    const entryPath = getModeState(`${key}-path`);
-    if (!tag || !entryPath) {
-        return null;
-    }
-    return {
-        requested: key,
-        tag,
-        path: entryPath,
-        tagPathPair: `${tag}:${entryPath}`,
-    };
-}
-function buildRustCacheArgs(action, workspace, entry, verbose, exclude = '') {
-    const args = [action, workspace, entry.tagPathPair];
-    if (verbose) {
-        args.push('--verbose');
-    }
-    if (action === 'save' && exclude) {
-        args.push('--exclude', exclude);
-    }
-    return args;
-}
-async function restoreRustArchiveEntry(workspace, entry, verbose, failOnCacheError) {
-    const preflightHit = await checkRustTagHit(workspace, entry.tag);
-    const exitCode = await mode_handlers_execBoringCache(buildRustCacheArgs('restore', workspace, entry, verbose), { ignoreReturnCode: !failOnCacheError });
-    return preflightHit && exitCode === 0;
-}
-function toolEnabled(plan, toolName) {
-    return plan.runtimeTools.some((tool) => tool.name === toolName);
-}
 async function runDockerRestore(plan, inputs) {
     const context = external_path_.resolve(plan.workingDirectory, getInput('context') || '.');
     const dockerfileInput = getInput('dockerfile') || 'Dockerfile';
@@ -102914,7 +98256,6 @@ async function runDockerRestore(plan, inputs) {
     const noCache = parseBooleanInput(getInput('no-cache'), 'no-cache', false);
     const provenance = parseBooleanInput(getInput('provenance'), 'provenance', false);
     const sbom = parseBooleanInput(getInput('sbom'), 'sbom', false);
-    const cacheMode = normalizeDockerCacheMode(getInput('cache-mode'));
     const driver = getInput('driver') || 'docker-container';
     const driverOpts = parseMultiline(getInput('driver-opts') || '');
     const buildkitdConfigInline = getInput('buildkitd-config-inline') || '';
@@ -102928,16 +98269,14 @@ async function runDockerRestore(plan, inputs) {
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
     }
-    const localCacheTag = inputs.cacheTag || slugify(image);
+    const requestedCacheTag = '';
     let buildKitVerification = null;
     let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
-    let resolvedCacheTag = localCacheTag;
+    let resolvedCacheTag = '';
     saveModeState('workspace', plan.workspace);
-    saveModeState('cache-tag', localCacheTag);
     saveModeState('verbose', String(inputs.verbose));
-    saveModeState('exclude', inputs.exclude);
     let builderName = '';
     if (cliOwnsManagedBuild) {
         if (driver !== 'docker-container') {
@@ -102970,7 +98309,7 @@ async function runDockerRestore(plan, inputs) {
         // a free runner port instead of assuming the conventional setup-only
         // port is unused. Setup-only keeps 5000 for its externally consumed refs.
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', cliOwnsManagedBuild ? undefined : 5000);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, localCacheTag, requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, cacheMode, inputs.metadataHints, dockerToolCache);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const usesCliWrappedBuild = cliOwnsManagedBuild || dockerToolCaches.length > 0;
@@ -102980,24 +98319,7 @@ async function runDockerRestore(plan, inputs) {
             resolvedCacheTag = planState.resolvedCacheTag;
             buildKitVerification = planState.buildKitVerification;
             buildKitCacheState = planState.buildKitCacheState;
-            let readinessProxy;
-            if (cliOwnsManagedBuild && inputs.requireOciImportReady) {
-                readinessProxy = await proxy_startRegistryProxy(actionProxyOptions({
-                    command: 'cache-registry',
-                    workspace: dockerPlan.workspace,
-                    tag: cacheTag,
-                    host: dockerPlan.proxy.host || '127.0.0.1',
-                    port: dockerPlan.proxy.port,
-                    noGit: dockerPlan.proxy.no_git,
-                    noPlatform: dockerPlan.proxy.no_platform,
-                    verbose: inputs.verbose,
-                    readOnly: true,
-                    ociRequiredReadableRefs: requestedImportRefTags,
-                    requireOciImportReady: true,
-                }, dockerPlan.proxy, true));
-                await proxy_stopRegistryProxy(readinessProxy.pid, readinessProxy.port);
-            }
-            const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, readinessProxy);
+            const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, undefined);
             setBuildKitCacheOutputs({
                 ref: dockerPlan.buildkit_cache.cache_ref,
                 from: effectiveImports.importSpecs,
@@ -103008,7 +98330,7 @@ async function runDockerRestore(plan, inputs) {
                 importReady: effectiveImports.importReady,
             });
             if (shouldBuild) {
-                await runDockerBuildOperation(() => buildDockerImageWithCliAdapter(dockerPlan.workspace, localCacheTag, requestedPort, proxyBindHost, refHost, inputs, cacheMode, {
+                await runDockerBuildOperation(() => buildDockerImageWithCliAdapter(dockerPlan.workspace, dockerPlan.tag, requestedPort, proxyBindHost, refHost, inputs, {
                     dockerfile,
                     context,
                     image,
@@ -103023,7 +98345,6 @@ async function runDockerRestore(plan, inputs) {
                     provenance,
                     sbom,
                     builder: cliOwnsManagedBuild ? '' : builderName,
-                    cacheMode,
                 }));
             }
             modeEvidence = buildKitCacheEvidence('docker', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
@@ -103040,7 +98361,6 @@ async function runDockerRestore(plan, inputs) {
                 verbose: inputs.verbose,
                 readOnly: dockerPlan.proxy.read_only,
                 ociRequiredReadableRefs: requestedImportRefTags,
-                requireOciImportReady: inputs.requireOciImportReady,
                 ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
             }, dockerPlan.proxy));
             saveModeState('proxy-pid', String(proxy.pid));
@@ -103081,7 +98401,6 @@ async function runDockerRestore(plan, inputs) {
                     provenance,
                     sbom,
                     builder: builderName,
-                    cacheMode,
                     cacheFrom: effectiveImports.importSpecs,
                     cacheTo: dockerPlan.buildkit_cache.cache_to,
                 }));
@@ -103131,7 +98450,6 @@ async function runDockerSave(options = {}) {
         addLocalBinPaths();
         await saveSimpleCache(workspace, cacheTag, cacheDir, {
             verbose: getModeState('verbose') === 'true',
-            exclude: getModeState('exclude'),
         });
     }
     finally {
@@ -103162,22 +98480,19 @@ async function runBuildkitRestore(plan, inputs) {
     const target = getInput('target') || '';
     const platforms = getInput('platforms') || '';
     const noCache = parseBooleanInput(getInput('no-cache'), 'no-cache', false);
-    const cacheMode = normalizeDockerCacheMode(getInput('cache-mode'));
     const buildkitHost = getInput('buildkit-host', { required: true });
     const tlsCaInput = getInput('buildkit-tls-ca') || '';
     const tlsCertInput = getInput('buildkit-tls-cert') || '';
     const tlsKeyInput = getInput('buildkit-tls-key') || '';
     const tlsSkipVerify = parseBooleanInput(getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
-    const localCacheTag = inputs.cacheTag || slugify(image);
+    const requestedCacheTag = '';
     let buildKitVerification = null;
     let buildKitCacheState;
     let modeEvidence;
     let resolvedWorkspace = plan.workspace;
-    let resolvedCacheTag = localCacheTag;
+    let resolvedCacheTag = '';
     saveModeState('workspace', plan.workspace);
-    saveModeState('cache-tag', localCacheTag);
     saveModeState('verbose', String(inputs.verbose));
-    saveModeState('exclude', inputs.exclude);
     if (external_fs_namespaceObject.existsSync(BUILDKIT_METADATA_FILE)) {
         external_fs_namespaceObject.rmSync(BUILDKIT_METADATA_FILE);
     }
@@ -103194,7 +98509,7 @@ async function runBuildkitRestore(plan, inputs) {
             }
         }
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 5000);
-        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, localCacheTag, requestedPort, proxyBindHost, refHost, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, cacheMode, inputs.metadataHints);
+        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const proxy = await proxy_startRegistryProxy(actionProxyOptions({
@@ -103208,7 +98523,6 @@ async function runBuildkitRestore(plan, inputs) {
             verbose: inputs.verbose,
             readOnly: dockerPlan.proxy.read_only,
             ociRequiredReadableRefs: requestedImportRefTags,
-            requireOciImportReady: inputs.requireOciImportReady,
             ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
@@ -103244,7 +98558,6 @@ async function runBuildkitRestore(plan, inputs) {
             sshSpecs,
             target,
             platforms,
-            cacheMode,
             importCache: effectiveImports.importSpecs,
             exportCache: dockerPlan.buildkit_cache.cache_to,
             output,
@@ -103289,7 +98602,6 @@ async function runBuildkitSave(options = {}) {
     addLocalBinPaths();
     await saveSimpleCache(workspace, cacheTag, cacheDir, {
         verbose: getModeState('verbose') === 'true',
-        exclude: getModeState('exclude'),
     });
 }
 async function runBazelRestore(plan, inputs) {
@@ -103298,7 +98610,7 @@ async function runBazelRestore(plan, inputs) {
     const runtimeVersion = plan.runtimeTools.find((tool) => tool.name === 'bazel')?.version || '';
     const bazelVersion = inputVersion || runtimeVersion;
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
         bazelrcLines,
     });
@@ -103350,7 +98662,7 @@ function goCacheProgForProxy(proxyPlan, port) {
 }
 async function runGoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
     const workspace = proxyPlan.workspace;
@@ -103382,7 +98694,7 @@ async function runGradleRestore(plan, inputs) {
     const gradleHome = getInput('gradle-home') || '';
     const enableBuildCache = parseBooleanInput(getInput('enable-build-cache'), 'enable-build-cache', true);
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
         gradleHome,
         enableGradleBuildCache: enableBuildCache,
@@ -103419,7 +98731,7 @@ async function runMavenRestore(plan, inputs) {
     const mavenLocalRepo = getInput('maven-local-repo') || '';
     const mavenBuildCacheExtensionVersion = getInput('maven-build-cache-extension-version') || '';
     const mavenBuildCacheId = getInput('maven-build-cache-id') || '';
-    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, inputs.cacheTag, requestedPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
         mavenExtensionsPath,
         mavenBuildCacheConfigPath,
@@ -103459,12 +98771,8 @@ async function runMavenRestore(plan, inputs) {
     };
 }
 async function runTurboProxyRestore(plan, inputs) {
-    const turboApiUrl = getInput('turbo-api-url') || '';
-    const turboToken = getInput('turbo-token') || 'boringcache';
-    const turboTeam = getInput('turbo-team') || '';
-    const turboPortInput = getInput('turbo-port');
-    const preferredPort = await resolvePreferredPort(turboPortInput || inputs.proxyPort, turboPortInput ? 'turbo-port' : 'proxy-port', 4227);
-    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+    const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 4227);
+    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
     const workspace = turboPlan.workspace;
@@ -103475,13 +98783,6 @@ async function runTurboProxyRestore(plan, inputs) {
         setOutput('package-manager', packageManager.name);
         setOutput('package-manager-cache-dir', plannedNodePackageManagerCacheDir(packageManager, turboPlan) || packageManager.cacheDir);
     }
-    if (turboApiUrl) {
-        exportEnvVars(plannedNodePackageManagerEnv(packageManager, turboPlan));
-        configureTurboRemoteEnv(turboApiUrl, turboToken, turboTeam);
-        setOutput('workspace', workspace);
-        setOutput('cache-tag', cacheTag);
-        return { cacheTag, verificationSpecs: [] };
-    }
     let proxy;
     try {
         proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
@@ -103491,7 +98792,7 @@ async function runTurboProxyRestore(plan, inputs) {
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
-    exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port, turboToken, turboTeam));
+    exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port));
     setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
     setOutput('workspace', workspace);
@@ -103501,10 +98802,8 @@ async function runTurboProxyRestore(plan, inputs) {
     };
 }
 async function runNxProxyRestore(plan, inputs) {
-    const nxAccessToken = getInput('nx-access-token');
-    const nxPortInput = getInput('nx-port');
-    const preferredPort = await resolvePreferredPort(nxPortInput || inputs.proxyPort, nxPortInput ? 'nx-port' : 'proxy-port', 4228);
-    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, inputs.cacheTag, preferredPort, inputs.proxyNoPlatform, inputs.proxyNoGit, proxyPlanningReadOnly(inputs.readOnly), {
+    const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', 4228);
+    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
         metadataHintsInput: inputs.metadataHints,
     });
     const workspace = nxPlan.workspace;
@@ -103518,7 +98817,7 @@ async function runNxProxyRestore(plan, inputs) {
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
-    exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port, nxAccessToken));
+    exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port));
     setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
     setOutput('workspace', workspace);
@@ -103527,339 +98826,109 @@ async function runNxProxyRestore(plan, inputs) {
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, nxPlan.proxy, plan.workingDirectory)],
     };
 }
-async function runRustRestore(plan, inputs) {
-    const cacheTagPrefix = (inputs.cacheTag || plan.cacheTagPrefix || '').trim();
-    const inputVersion = getInput('rust-version') || getInput('toolchain');
-    const workingDir = plan.workingDirectory;
-    const cacheCargo = parseBooleanInput(getInput('cache-cargo'), 'cache-cargo', true);
-    const cacheCargoBin = parseBooleanInput(getInput('cache-cargo-bin'), 'cache-cargo-bin', false);
-    const cacheTarget = parseBooleanInput(getInput('cache-target'), 'cache-target', true);
-    const useSccache = parseBooleanInput(getInput('sccache'), 'sccache', false);
+async function runSccacheRestore(plan, inputs) {
+    const workingDirectory = plan.workingDirectory;
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const sccacheVersion = getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
-    const sccacheMode = normalizeSccacheMode(getInput('sccache-mode'));
-    const sccacheCacheSize = getInput('sccache-cache-size') || '5G';
-    const targets = getInput('targets');
-    const components = getInput('components');
-    const profile = normalizeRustupProfile(getInput('profile'));
-    const rustVersion = await mode_handlers_detectRustVersion(workingDir, inputVersion);
-    configureCargoEnv();
-    const rustMajorMinor = rustVersion.match(/^(\d+\.\d+)/)?.[1] || rustVersion;
-    const rustToolTagSuffix = `rust${rustMajorMinor}`;
-    const lockPath = external_path_.join(workingDir, 'Cargo.lock');
-    const hasGitDeps = cacheCargo && await hasGitDependencies(lockPath);
-    const rustEntryIds = [];
-    if (cacheCargo) {
-        rustEntryIds.push('cargo-registry');
-        if (hasGitDeps) {
-            rustEntryIds.push('cargo-git');
-        }
-    }
-    if (cacheCargoBin) {
-        rustEntryIds.push('cargo-bin');
-    }
-    if (cacheTarget) {
-        rustEntryIds.push('target');
-    }
-    if (useSccache) {
-        rustEntryIds.push('sccache-dir');
-    }
-    const rustEntriesPlan = rustEntryIds.length > 0
-        ? await resolveCliArchiveEntries(workingDir, {
-            workspaceInput: inputs.workspace.trim(),
-            entryIds: rustEntryIds,
-            cacheTag: cacheTagPrefix,
-            toolTagSuffix: rustToolTagSuffix,
-            readOnly: inputs.readOnly,
-            fallbackWorkspace: plan.workspace,
-        })
-        : { workspace: plan.workspace, entries: [], envVars: {} };
-    exportEnvVars(rustEntriesPlan.envVars);
-    const rustEntries = new Map(rustEntriesPlan.entries.map((entry) => [entry.requested, entry]));
-    const workspace = rustEntriesPlan.workspace || plan.workspace;
-    const cargoRegistryEntry = cacheCargo
-        ? getRustArchiveEntry(rustEntries, 'cargo-registry', 'cargo registry cache')
-        : null;
-    const cargoGitEntry = cacheCargo && hasGitDeps
-        ? getRustArchiveEntry(rustEntries, 'cargo-git', 'cargo git cache')
-        : null;
-    const cargoBinEntry = cacheCargoBin
-        ? getRustArchiveEntry(rustEntries, 'cargo-bin', 'cargo bin cache')
-        : null;
-    const targetEntry = cacheTarget
-        ? getRustArchiveEntry(rustEntries, 'target', 'Rust target cache')
-        : null;
-    const sccacheEntry = useSccache
-        ? getRustArchiveEntry(rustEntries, 'sccache-dir', 'sccache cache')
-        : null;
-    if (useSccache && sccacheMode !== 'proxy') {
-        configureSccacheEnv(sccacheCacheSize, sccacheEntry?.path || getSccacheDir());
-    }
-    setOutput('workspace', workspace);
-    setOutput('rust-version', rustVersion);
-    setOutput('cache-tag', cacheTagPrefix);
-    setOutput('cargo-tag', cargoRegistryEntry?.tag || '');
-    setOutput('cargo-git-tag', cargoGitEntry?.tag || '');
-    setOutput('cargo-bin-tag', cargoBinEntry?.tag || '');
-    setOutput('target-tag', targetEntry?.tag || '');
-    setOutput('sccache-tag', sccacheEntry?.tag || '');
-    saveModeState('workspace', workspace);
-    saveModeState('cache-tag-prefix', cacheTagPrefix);
-    saveModeState('rust-version', rustVersion);
-    saveModeState('working-dir', workingDir);
-    saveModeState('cache-cargo', String(cacheCargo));
-    saveModeState('cache-cargo-bin', String(cacheCargoBin));
-    saveModeState('cache-target', String(cacheTarget));
-    saveModeState('use-sccache', String(useSccache));
-    saveModeState('sccache-mode', sccacheMode);
-    saveModeState('verbose', String(inputs.verbose));
-    saveModeState('skipped-verify-tags', '');
-    let registryRestored = false;
-    let cargoGitRestored = false;
-    let cargoBinRestored = false;
-    let targetRestored = false;
-    let sccacheRestored = false;
-    if (cargoRegistryEntry) {
-        registryRestored = await restoreRustArchiveEntry(workspace, cargoRegistryEntry, inputs.verbose, inputs.failOnCacheError);
-        saveRustArchiveEntryState('cargo-registry', cargoRegistryEntry);
-    }
-    if (cargoGitEntry) {
-        cargoGitRestored = await restoreRustArchiveEntry(workspace, cargoGitEntry, inputs.verbose, inputs.failOnCacheError);
-        saveRustArchiveEntryState('cargo-git', cargoGitEntry);
-    }
-    if (cargoBinEntry) {
-        cargoBinRestored = await restoreRustArchiveEntry(workspace, cargoBinEntry, inputs.verbose, inputs.failOnCacheError);
-        saveRustArchiveEntryState('cargo-bin', cargoBinEntry);
-    }
-    if (targetEntry) {
-        targetRestored = await restoreRustArchiveEntry(workspace, targetEntry, inputs.verbose, inputs.failOnCacheError);
-        saveRustArchiveEntryState('target', targetEntry);
-    }
-    if (useSccache && sccacheEntry) {
-        await installSccache(sccacheVersion);
-        if (sccacheMode === 'proxy') {
-            const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-            const proxyPlan = await resolveAdapterCliPlan('sccache', workspace, workingDir, sccacheEntry.tag, requestedPort, true, true, proxyPlanningReadOnly(inputs.readOnly), {
-                metadataHintsInput: inputs.metadataHints,
-            });
-            const sccachePreflightStatus = await checkRustProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
-                noPlatform: proxyPlan.proxy.no_platform,
-                noGit: proxyPlan.proxy.no_git,
-            });
-            sccacheRestored = sccachePreflightStatus.kvHit;
-            const proxy = await proxy_startRegistryProxy(actionProxyOptions({
-                command: 'cache-registry',
-                workspace: proxyPlan.workspace,
-                tag: proxyPlan.tag,
-                host: proxyPlan.proxy.host || '127.0.0.1',
-                port: proxyPlan.proxy.port,
-                noGit: proxyPlan.proxy.no_git,
-                noPlatform: proxyPlan.proxy.no_platform,
-                verbose: inputs.verbose,
-                readOnly: proxyPlan.proxy.read_only,
-            }, proxyPlan.proxy));
-            exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
-            await startSccacheServer();
-            saveModeState('proxy-pid', String(proxy.pid));
-            saveProxyModeState(proxy.port);
-            saveRustArchiveEntryState('sccache', {
-                ...sccacheEntry,
-                tag: proxyPlan.tag,
-                tagPathPair: `${proxyPlan.tag}:${sccacheEntry.path}`,
-            });
-            saveModeState('sccache-preflight-hit', String(sccachePreflightStatus.hit));
-            saveModeState('sccache-preflight-cache-entry-hit', String(sccachePreflightStatus.cacheEntryHit));
-            saveModeState('sccache-preflight-kv-hit', String(sccachePreflightStatus.kvHit));
-            saveModeState('sccache-preflight-kv-checked', String(sccachePreflightStatus.kvChecked));
-            setProxyOutputs(proxy.port);
-        }
-        else {
-            sccacheRestored = await restoreRustArchiveEntry(workspace, sccacheEntry, inputs.verbose, inputs.failOnCacheError);
-            await startSccacheServer();
-            saveRustArchiveEntryState('sccache', sccacheEntry);
-            saveModeState('sccache-preflight-hit', String(sccacheRestored));
-            saveModeState('sccache-preflight-cache-entry-hit', String(sccacheRestored));
-            saveModeState('sccache-preflight-kv-hit', 'false');
-            saveModeState('sccache-preflight-kv-checked', 'false');
-        }
-    }
-    if (!(plan.setup === 'mise' && toolEnabled(plan, 'rust'))) {
-        await setupRustToolchain(rustVersion, { profile, targets, components });
-    }
-    const cacheHit = registryRestored || cargoGitRestored || cargoBinRestored || targetRestored || sccacheRestored;
-    setOutput('cache-hit', String(cacheHit));
-    setOutput('sccache-hit', String(sccacheRestored));
-    const verificationSpecs = [];
-    if (cargoRegistryEntry) {
-        verificationSpecs.push({
-            tag: cargoRegistryEntry.tag,
-            noPlatform: false,
-            noGit: false,
-            pathHint: cargoRegistryEntry.path,
-            saveExpected: true,
-        });
-    }
-    if (cargoGitEntry) {
-        verificationSpecs.push({
-            tag: cargoGitEntry.tag,
-            noPlatform: false,
-            noGit: false,
-            pathHint: cargoGitEntry.path,
-            saveExpected: true,
-        });
-    }
-    if (cargoBinEntry) {
-        verificationSpecs.push({
-            tag: cargoBinEntry.tag,
-            noPlatform: false,
-            noGit: false,
-            pathHint: cargoBinEntry.path,
-            saveExpected: true,
-        });
-    }
-    if (targetEntry) {
-        verificationSpecs.push({
-            tag: targetEntry.tag,
-            noPlatform: false,
-            noGit: false,
-            pathHint: targetEntry.path,
-            saveExpected: true,
-        });
-    }
-    if (sccacheEntry) {
-        verificationSpecs.push({
-            tag: readRustArchiveEntryState('sccache')?.tag || sccacheEntry.tag,
-            noPlatform: sccacheMode === 'proxy',
-            noGit: sccacheMode === 'proxy',
-            pathHint: sccacheMode === 'proxy' ? workingDir : sccacheEntry.path,
-            saveExpected: sccacheMode !== 'proxy' || !inputs.readOnly,
-        });
-    }
-    return { cacheHit, cacheTag: cacheTagPrefix, verificationSpecs };
+    await installSccache(sccacheVersion);
+    const proxyPlan = await resolveAdapterCliPlan('sccache', plan.workspace, workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const preflight = await checkSccacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
+        noPlatform: proxyPlan.proxy.no_platform,
+        noGit: proxyPlan.proxy.no_git,
+    });
+    const proxy = await proxy_startRegistryProxy(actionProxyOptions({
+        command: 'cache-registry',
+        workspace: proxyPlan.workspace,
+        tag: proxyPlan.tag,
+        host: proxyPlan.proxy.host || '127.0.0.1',
+        port: proxyPlan.proxy.port,
+        noGit: proxyPlan.proxy.no_git,
+        noPlatform: proxyPlan.proxy.no_platform,
+        verbose: inputs.verbose,
+        readOnly: proxyPlan.proxy.read_only,
+    }, proxyPlan.proxy, inputs.failOnCacheError));
+    exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
+    await startSccacheServer();
+    saveModeState('workspace', proxyPlan.workspace);
+    saveModeState('sccache-tag', proxyPlan.tag);
+    saveModeState('sccache-no-platform', String(proxyPlan.proxy.no_platform));
+    saveModeState('sccache-no-git', String(proxyPlan.proxy.no_git));
+    saveModeState('sccache-preflight-cache-entry-hit', String(preflight.cacheEntryHit));
+    saveModeState('sccache-preflight-kv-hit', String(preflight.kvHit));
+    saveModeState('sccache-preflight-kv-checked', String(preflight.kvChecked));
+    saveModeState('proxy-pid', String(proxy.pid));
+    saveProxyModeState(proxy.port);
+    setOutput('workspace', proxyPlan.workspace);
+    setOutput('cache-tag', proxyPlan.tag);
+    setOutput('sccache-tag', proxyPlan.tag);
+    setOutput('cache-hit', String(preflight.kvHit));
+    setOutput('sccache-hit', String(preflight.kvHit));
+    setProxyOutputs(proxy.port);
+    return {
+        cacheHit: preflight.kvHit,
+        cacheTag: proxyPlan.tag,
+        verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, workingDirectory)],
+    };
 }
-async function runRustSave(options = {}) {
+async function runSccacheSave(options = {}) {
     const workspace = getModeState('workspace');
-    const cacheCargo = getModeState('cache-cargo') === 'true';
-    const cacheCargoBin = getModeState('cache-cargo-bin') === 'true';
-    const cacheTarget = getModeState('cache-target') === 'true';
-    const useSccache = getModeState('use-sccache') === 'true';
-    const sccacheMode = getModeState('sccache-mode') || 'local';
-    const verbose = getModeState('verbose') === 'true';
-    const exclude = core.getInput('exclude');
-    const allowSaves = options.allowSaves !== false;
-    if (!workspace) {
-        return;
-    }
-    if (!allowSaves) {
-        if (useSccache) {
-            await stopSccacheServer();
-            if (sccacheMode === 'proxy') {
-                await stopProxyFromState();
-            }
-        }
+    const sccacheTag = getModeState('sccache-tag');
+    const preflightCacheEntryHit = getModeState('sccache-preflight-cache-entry-hit') === 'true';
+    const preflightKvHit = getModeState('sccache-preflight-kv-hit') === 'true';
+    const preflightKvChecked = getModeState('sccache-preflight-kv-checked') === 'true';
+    const noPlatform = getModeState('sccache-no-platform') === 'true';
+    const noGit = getModeState('sccache-no-git') === 'true';
+    const sccacheStats = await stopSccacheServer();
+    await stopProxyFromState();
+    if (!workspace || !sccacheTag || options.allowSaves === false) {
         return;
     }
     if (!hasSaveToken()) {
-        if (useSccache && sccacheMode === 'proxy') {
-            await stopSccacheServer();
-            await stopProxyFromState();
-        }
         core.notice(`Save skipped: ${missingSaveTokenMessage()}`);
         return;
     }
-    if (cacheCargo) {
-        const cargoRegistryEntry = readRustArchiveEntryState('cargo-registry');
-        const cargoGitEntry = readRustArchiveEntryState('cargo-git');
-        if (cargoRegistryEntry) {
-            await execRustBoringCache(buildRustCacheArgs('save', workspace, cargoRegistryEntry, verbose, exclude));
+    if (!sccacheStats || sccacheStats.compileRequests === 0) {
+        markModeVerifyTagSkipped(sccacheTag);
+        if (preflightKvHit) {
+            core.info(`Skipping sccache post-save verification for ${sccacheTag}: no compile requests were observed.`);
         }
-        if (cargoGitEntry) {
-            await execRustBoringCache(buildRustCacheArgs('save', workspace, cargoGitEntry, verbose, exclude));
-        }
-    }
-    if (cacheCargoBin) {
-        const cargoBinEntry = readRustArchiveEntryState('cargo-bin');
-        if (cargoBinEntry) {
-            await execRustBoringCache(buildRustCacheArgs('save', workspace, cargoBinEntry, verbose, exclude));
-        }
-    }
-    if (cacheTarget) {
-        const targetEntry = readRustArchiveEntryState('target');
-        if (targetEntry) {
-            await execRustBoringCache(buildRustCacheArgs('save', workspace, targetEntry, verbose, exclude));
-        }
-    }
-    if (useSccache) {
-        if (sccacheMode === 'proxy') {
-            const sccacheTag = getModeState('sccache-tag');
-            const preflightCacheEntryHit = getModeState('sccache-preflight-cache-entry-hit') === 'true';
-            const preflightKvHit = getModeState('sccache-preflight-kv-hit') === 'true';
-            const preflightKvChecked = getModeState('sccache-preflight-kv-checked') === 'true';
-            const sccacheStats = await stopSccacheServer();
-            await stopProxyFromState();
-            if (sccacheTag && (!sccacheStats || sccacheStats.compileRequests === 0)) {
-                markModeVerifyTagSkipped(sccacheTag);
-                if (preflightKvHit) {
-                    core.info(`Skipping sccache post-save verification for ${sccacheTag}: no compile requests were observed.`);
-                }
-                else if (preflightCacheEntryHit) {
-                    core.info(`Skipping sccache post-save verification for ${sccacheTag}: signed cache entry existed, but no compile requests were observed.`);
-                }
-                else {
-                    core.info(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
-                }
-                return;
-            }
-            if (sccacheTag && sccacheStats && sccacheStats.compileRequests > 0) {
-                const postShutdownStatus = await checkRustProxyTagStatus(workspace, sccacheTag, {
-                    noPlatform: true,
-                    noGit: true,
-                });
-                const rustHitRate = sccacheStats.rustHitRate || 'unknown';
-                core.info(`sccache proxy stats for ${sccacheTag}: compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`);
-                if (sccacheStats.cacheHits === 0) {
-                    if (preflightKvHit) {
-                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests even though direct KV rows existed for '${sccacheTag}' before startup. Check sccache key churn, emitted tag semantics, and proxy read logs.`);
-                    }
-                    else if (preflightCacheEntryHit && postShutdownStatus.kvHit) {
-                        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
-                    }
-                    else if (preflightCacheEntryHit && preflightKvChecked && postShutdownStatus.kvChecked) {
-                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`);
-                    }
-                    else if (preflightCacheEntryHit) {
-                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`);
-                    }
-                    else if (postShutdownStatus.kvHit) {
-                        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests, but '${sccacheTag}' published successfully. This looks like a cold fill.`);
-                    }
-                    else if (postShutdownStatus.cacheEntryHit) {
-                        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' had a signed cache entry after shutdown, but direct KV rows were not visible. Check boringcache/one cli-version alignment and proxy KV publish logs.`);
-                    }
-                    else {
-                        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
-                    }
-                }
-            }
+        else if (preflightCacheEntryHit) {
+            core.info(`Skipping sccache post-save verification for ${sccacheTag}: signed cache entry existed, but no compile requests were observed.`);
         }
         else {
-            const sccacheEntry = readRustArchiveEntryState('sccache');
-            const sccacheTag = sccacheEntry?.tag || '';
-            const preflightHit = getModeState('sccache-preflight-hit') === 'true';
-            if (sccacheEntry) {
-                const sccacheStats = await stopSccacheServer();
-                if (!sccacheStats || sccacheStats.compileRequests === 0) {
-                    markModeVerifyTagSkipped(sccacheTag);
-                    if (preflightHit) {
-                        core.info(`Skipping sccache post-save verification for ${sccacheTag}: no compile requests were observed.`);
-                    }
-                    else {
-                        core.info(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
-                    }
-                    return;
-                }
-                await execRustBoringCache(buildRustCacheArgs('save', workspace, sccacheEntry, verbose, exclude));
-            }
+            core.info(`Skipping sccache save for ${sccacheTag}: no compile requests were observed.`);
         }
+        return;
+    }
+    const postShutdownStatus = await checkSccacheProxyTagStatus(workspace, sccacheTag, {
+        noPlatform,
+        noGit,
+    });
+    const rustHitRate = sccacheStats.rustHitRate || 'unknown';
+    core.info(`sccache proxy stats for ${sccacheTag}: compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`);
+    if (sccacheStats.cacheHits > 0) {
+        return;
+    }
+    if (preflightKvHit) {
+        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests even though direct KV rows existed for '${sccacheTag}' before startup. Check sccache key churn, emitted tag semantics, and proxy read logs.`);
+    }
+    else if (preflightCacheEntryHit && postShutdownStatus.kvHit) {
+        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
+    }
+    else if (preflightCacheEntryHit && preflightKvChecked && postShutdownStatus.kvChecked) {
+        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`);
+    }
+    else if (preflightCacheEntryHit) {
+        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests for '${sccacheTag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`);
+    }
+    else if (postShutdownStatus.kvHit) {
+        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests, but '${sccacheTag}' published successfully. This looks like a cold fill.`);
+    }
+    else if (postShutdownStatus.cacheEntryHit) {
+        core.warning(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' had a signed cache entry after shutdown, but direct KV rows were not visible. Check boringcache/one cli-version alignment and proxy KV publish logs.`);
+    }
+    else {
+        core.notice(`sccache proxy saw 0 cache hits across ${sccacheStats.compileRequests} compile requests and '${sccacheTag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
     }
 }
 async function stopProxyFromState() {
@@ -103883,22 +98952,6 @@ function restoreFailureDetail(stdout, stderr, entries) {
     const cliDetail = stderr.trim() || stdout.trim();
     return actionErrorMessage(cliDetail || `Cache restore failed for ${entries.join(', ')}`);
 }
-function buildRuntimeRestoreFlagArgs(inputs) {
-    const flagArgs = [];
-    if (inputs.enableCrossOsArchive || inputs.noPlatform) {
-        flagArgs.push('--no-platform');
-    }
-    if (inputs.verbose) {
-        flagArgs.push('--verbose');
-    }
-    if (inputs.failOnCacheError) {
-        flagArgs.push('--fail-on-cache-error');
-    }
-    if (inputs.allowExternalSymlinks) {
-        flagArgs.push('--allow-external-symlinks');
-    }
-    return flagArgs;
-}
 function buildCliSetupOptions(inputs, cliPlatform) {
     return {
         version: inputs.cliVersion,
@@ -103908,23 +98961,20 @@ function buildCliSetupOptions(inputs, cliPlatform) {
             : {}),
     };
 }
-async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeHit, trustState) {
+async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState) {
     const diagnostics = loadDiagnosticsConfig(inputs);
     await runDiagnosticsGroup(diagnostics, 'BoringCache Diagnostics', async () => {
         info(`workspace: ${plan.workspace}`);
         info(`setup: ${plan.setup}`);
         info(`mode: ${plan.mode}`);
-        info(`preset: ${plan.preset}`);
         info(`working-directory: ${plan.workingDirectory}`);
         info(`cache-tag: ${plan.cacheTagPrefix || '(none)'}`);
-        info(`runtime-cache-tag: ${plan.runtimeTag || '(none)'}`);
         info(`resolved-entries: ${plan.archiveEntries || '(none)'}`);
         info(`resolved-tags: ${resolvedTags.join(',') || '(none)'}`);
         info(`cache-hit: ${String(overallHit)}`);
-        info(`runtime-cache-hit: ${String(runtimeHit)}`);
         info(`verify-mode: ${inputs.verify}`);
         info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} save-policy=${trustState.save_policy} save-on-pull-request=${String(trustState.save_on_pull_request)}`);
-        info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} save=${String(trustState.token_capabilities.save)} legacy-api-only=${String(trustState.token_capabilities.legacy_api_only)}`);
+        info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} save=${String(trustState.token_capabilities.save)}`);
         if (diagnostics.includeLogs) {
             const proxyLogPath = getState('proxy-log-path');
             if (proxyLogPath) {
@@ -103940,12 +98990,11 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, ru
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs, restoreCandidates = [], portableArchiveArgs = true) {
+async function restoreEntries(workspace, entriesString, flagArgs) {
     if (!entriesString.trim()) {
         return { hit: false, saveEntries: '' };
     }
     const parsedEntries = parseEntries(entriesString, 'restore', {
-        resolvePaths: false,
         separatorMode: 'newline',
     });
     if (parsedEntries.length === 0) {
@@ -103960,22 +99009,6 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
             entries: primaryRestoreEntries,
             tags: parsedEntries.map((entry) => entry.tag),
         }];
-    for (const candidate of restoreCandidates) {
-        if (!candidate.entries.trim()) {
-            continue;
-        }
-        const candidateEntries = parseEntries(candidate.entries, 'restore', {
-            resolvePaths: false,
-            separatorMode: 'newline',
-        });
-        if (candidateEntries.length > 0) {
-            attempts.push({
-                entries: candidateEntries.map((entry) => `${entry.tag}:${entry.restorePath}`),
-                tags: candidateEntries.map((entry) => entry.tag),
-                tagPrefix: candidate.tagPrefix,
-            });
-        }
-    }
     const failedAttempts = [];
     for (const attempt of attempts) {
         const remotelyPresent = await checkEntries(workspace, attempt.tags, flagArgs);
@@ -103988,18 +99021,11 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
         const restoreFlagArgs = flagArgs.includes('--fail-on-cache-error')
             ? [...flagArgs]
             : [...flagArgs, '--fail-on-cache-error'];
-        let restoreArgs;
-        if (portableArchiveArgs) {
-            restoreArgs = [
-                'restore', workspace,
-                ...attempt.entries.flatMap((entry) => ['--entry', entry]),
-                ...restoreFlagArgs,
-            ];
-        }
-        else {
-            assertLegacyArchiveEntriesAreLossless(attempt.entries, 'restore');
-            restoreArgs = ['restore', workspace, attempt.entries.join(','), ...restoreFlagArgs];
-        }
+        const restoreArgs = [
+            'restore', workspace,
+            ...attempt.entries.flatMap((entry) => ['--entry', entry]),
+            ...restoreFlagArgs,
+        ];
         let stdout = '';
         let stderr = '';
         const restoreExitCode = await execBoringCache(restoreArgs, {
@@ -104014,17 +99040,11 @@ async function restoreEntries(workspace, entriesString, flagArgs, restoreCandida
             },
         });
         if (restoreExitCode === 0) {
-            if (attempt.tagPrefix) {
-                info(`Cache hit with restore key ${attempt.tagPrefix}`);
-            }
             return { hit: true, saveEntries };
         }
         const detail = restoreFailureDetail(stdout, stderr, attempt.entries);
         failedAttempts.push(detail);
-        const candidateLabel = attempt.tagPrefix
-            ? `restore key ${attempt.tagPrefix}`
-            : 'primary key';
-        warning(`Cache ${candidateLabel} was found but could not be restored: ${detail}`);
+        warning(`Cache entry was found but could not be restored: ${detail}`);
     }
     if (failedAttempts.length > 0) {
         const detail = failedAttempts[failedAttempts.length - 1];
@@ -104112,32 +99132,25 @@ async function run() {
         const cliCapabilityVersion = await resolveCliCapabilityVersion(inputs.cliVersion);
         const capabilityInputs = { ...effectiveInputs, cliVersion: cliCapabilityVersion };
         const plan = await buildPlan(capabilityInputs);
-        const portableArchiveArgs = supportsPortableArchiveArgs(cliCapabilityVersion);
         restoreFailureContext = {
             ...restoreFailureContext,
             workspace: plan.workspace,
             setup: plan.setup,
             mode: plan.mode,
-            preset: plan.preset,
             working_directory: plan.workingDirectory,
             cache_tag: plan.cacheTagPrefix || '',
-            runtime_cache_tag: plan.runtimeTag || '',
             trust_state: trustState,
         };
         process.chdir(plan.workingDirectory);
-        await applyPresetCacheEnv(plan);
-        const runtimeRestore = await restoreEntries(plan.workspace, plan.runtimeEntry || '', buildRuntimeRestoreFlagArgs(inputs), [], portableArchiveArgs);
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), plan.archiveRestoreCandidates, portableArchiveArgs);
-        let usedMiseRuntime = false;
+        await applyCliPlanEnv(plan);
+        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs));
         if (plan.setup === 'mise') {
-            usedMiseRuntime = await applyMiseSetup(plan.runtimeTools, runtimeRestore.hit, plan.workingDirectory);
+            await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
         }
         const modeRestore = await runModeRestore(plan, effectiveInputs);
-        const genericSaveEntries = [usedMiseRuntime ? runtimeRestore.saveEntries : '', archiveRestore.saveEntries]
-            .filter(Boolean)
-            .join('\n');
+        const genericSaveEntries = archiveRestore.saveEntries;
         const verificationSpecs = [
-            ...buildGenericVerificationSpecs(plan, inputs, usedMiseRuntime),
+            ...buildGenericVerificationSpecs(plan),
             ...(modeRestore.verificationSpecs || []),
         ];
         const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
@@ -104146,37 +99159,31 @@ async function run() {
         const deferredVerifySpecs = saveCapable ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
-        const overallHit = modeRestore.cacheHit ?? (runtimeRestore.hit || archiveRestore.hit);
+        const overallHit = modeRestore.cacheHit ?? archiveRestore.hit;
         const diagnostics = loadDiagnosticsConfig(inputs);
         setOutput('cache-hit', String(overallHit));
-        setOutput('runtime-cache-hit', String(runtimeRestore.hit));
         setOutput('diagnostics-level', diagnostics.level);
         setOutput('resolved-mode', plan.mode);
         setOutput('resolved-tools', serializeTools(plan.runtimeTools));
         setOutput('workspace', plan.workspace);
         setOutput('cache-tag', modeRestore.cacheTag || plan.cacheTagPrefix);
-        setOutput('runtime-cache-tag', plan.runtimeTag || '');
         setOutput('resolved-entries', plan.archiveEntries);
         setOutput('resolved-tags', resolvedTags.join(','));
         writeActionEvidence('restore', {
             phase_status: 'completed',
             phase_summary: restorePhaseSummary({
                 cacheHit: overallHit,
-                runtimeCacheHit: runtimeRestore.hit,
                 trustState,
                 saveCapable,
             }),
             workspace: plan.workspace,
             setup: plan.setup,
             mode: plan.mode,
-            preset: plan.preset,
             working_directory: plan.workingDirectory,
             cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
-            runtime_cache_tag: plan.runtimeTag || '',
             resolved_entries: plan.archiveEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
-            runtime_cache_hit: runtimeRestore.hit,
             mode_evidence: modeRestore.evidence || {},
             diagnostics_level: diagnostics.level,
             trust_state: trustState,
@@ -104195,7 +99202,6 @@ async function run() {
             resolved_entries: plan.archiveEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
-            runtime_cache_hit: runtimeRestore.hit,
             mode_evidence: modeRestore.evidence || {},
             trust_state: trustState,
             save_configured: saveEnabled,
@@ -104210,10 +99216,6 @@ async function run() {
         saveState('working-directory', plan.workingDirectory);
         saveState('generic-cache-entries', genericSaveEntries);
         saveState('generic-cache-workspace', plan.workspace);
-        saveState('runtime-mise-used', String(usedMiseRuntime));
-        saveState('generic-cache-excludes', JSON.stringify(plan.archiveExcludes));
-        saveState('no-platform', String(inputs.noPlatform));
-        saveState('enableCrossOsArchive', String(inputs.enableCrossOsArchive));
         saveState('force', String(inputs.force));
         saveState('verbose', String(inputs.verbose));
         saveState('diagnostics-level', diagnostics.level);
@@ -104237,7 +99239,7 @@ async function run() {
                 verbose: inputs.verbose,
             });
         }
-        await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, runtimeRestore.hit, trustState);
+        await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState);
         if (!saveEnabled) {
             info('Post step save is disabled by save-policy: off.');
         }

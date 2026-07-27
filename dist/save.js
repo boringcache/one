@@ -1,14 +1,13 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { hasSaveToken, missingSaveTokenMessage } from './core';
-import { actionErrorMessage, appendSaveExcludeArgs, assertCrossOsArchiveTransportSupported, assertExternalSymlinkRoundTripSupported, assertLegacyArchiveEntriesAreLossless, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyPullRequestSaveScopeEnv, isPullRequestEvent, loadDiagnosticsConfig, readLogTail, readSavedSaveAllowance, readSavedSaveConfiguration, resolveCliCapabilityVersion, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, saveSkippedByConfigurationMessage, saveSkippedByPolicyMessage, supportsPortableArchiveArgs, splitExcludeInput, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, execBoringCache, getInputs, applyPullRequestSaveScopeEnv, isPullRequestEvent, loadDiagnosticsConfig, readLogTail, readSavedSaveAllowance, readSavedSaveConfiguration, resolveCliCapabilityVersion, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, saveSkippedByConfigurationMessage, saveSkippedByPolicyMessage, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { runModeSave } from './mode-handlers';
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
         return '';
     }
     return parseEntries(entriesString, 'restore', {
-        resolvePaths: false,
         separatorMode: 'newline',
     })
         .map((entry) => `${entry.tag}:${entry.savePath}`)
@@ -42,22 +41,6 @@ function parseSavedVerificationSpecs(raw) {
 function filterVerifiableSpecs(specs) {
     return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
 }
-function parseSavedExcludes(raw, legacy) {
-    if (raw.trim()) {
-        let parsed;
-        try {
-            parsed = JSON.parse(raw);
-        }
-        catch {
-            throw new Error('Saved BoringCache exclusion state is invalid JSON; refusing to save a cache with dropped or changed exclusions.');
-        }
-        if (!Array.isArray(parsed) || !parsed.every((pattern) => typeof pattern === 'string')) {
-            throw new Error('Saved BoringCache exclusion state is not a string array; refusing to save a cache with dropped or changed exclusions.');
-        }
-        return parsed;
-    }
-    return splitExcludeInput(legacy);
-}
 function buildCliSetupOptions(inputs, cliVersion, cliPlatform) {
     return {
         version: cliVersion,
@@ -82,7 +65,6 @@ function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDire
         }));
     }
     const entrySpecs = parseEntries(entriesString, 'restore', {
-        resolvePaths: false,
         separatorMode: 'newline',
     })
         .map((entry) => ({
@@ -161,9 +143,6 @@ export async function run() {
         let workingDirectory = core.getState('working-directory');
         let genericEntries = core.getState('generic-cache-entries');
         let genericWorkspace = core.getState('generic-cache-workspace');
-        let excludes = parseSavedExcludes(core.getState('generic-cache-excludes'), core.getState('generic-cache-exclude'));
-        let noPlatform = core.getState('no-platform') === 'true';
-        let enableCrossOsArchive = core.getState('enableCrossOsArchive') === 'true';
         let force = core.getState('force') === 'true';
         let verbose = core.getState('verbose') === 'true';
         const verifyMode = (core.getState('verify-mode') || inputs.verify);
@@ -214,13 +193,8 @@ export async function run() {
                 genericWorkspace = plan.workspace;
             }
             if (!genericEntries) {
-                genericEntries = [plan.runtimeEntry, toSaveEntries(plan.archiveEntries)]
-                    .filter(Boolean)
-                    .join('\n');
+                genericEntries = toSaveEntries(plan.archiveEntries);
             }
-            excludes = plan.archiveExcludes;
-            noPlatform = inputs.noPlatform;
-            enableCrossOsArchive = inputs.enableCrossOsArchive;
             force = inputs.force;
             verbose = inputs.verbose;
         }
@@ -232,7 +206,7 @@ export async function run() {
             generic_entries: genericEntries || '',
         };
         if (verifySaveSpecs.length === 0 && verifySaveTags.length > 0) {
-            verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags, genericEntries || '', workingDirectory || process.cwd(), enableCrossOsArchive || noPlatform);
+            verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags, genericEntries || '', workingDirectory || process.cwd(), false);
         }
         if (workingDirectory) {
             process.chdir(workingDirectory);
@@ -289,43 +263,21 @@ export async function run() {
             return;
         }
         const saveEntries = parseEntries(genericEntries, 'save', {
-            resolvePaths: false,
             separatorMode: 'newline',
         })
             .map((entry) => `${entry.tag}:${entry.savePath}`);
-        const portableArchiveArgs = supportsPortableArchiveArgs(cliCapabilityVersion);
-        if (enableCrossOsArchive) {
-            assertCrossOsArchiveTransportSupported(cliCapabilityVersion);
-        }
         const args = ['save', genericWorkspace];
-        if (portableArchiveArgs) {
-            for (const entry of saveEntries) {
-                args.push('--entry', entry);
-            }
-        }
-        else {
-            assertLegacyArchiveEntriesAreLossless(saveEntries, 'save');
-            args.push(saveEntries.join(','));
+        for (const entry of saveEntries) {
+            args.push('--entry', entry);
         }
         if (force) {
             args.push('--force');
         }
-        if (enableCrossOsArchive || noPlatform) {
-            args.push('--no-platform');
-        }
-        if (enableCrossOsArchive) {
-            args.push('--archive-transport');
-        }
         if (verbose) {
             args.push('--verbose');
         }
-        appendSaveExcludeArgs(args, excludes, cliCapabilityVersion);
         if (inputs.failOnCacheError) {
             args.push('--fail-on-cache-error');
-        }
-        if (inputs.allowExternalSymlinks) {
-            assertExternalSymlinkRoundTripSupported(cliCapabilityVersion);
-            args.push('--allow-external-symlinks');
         }
         await execBoringCache(args);
         const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);

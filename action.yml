@@ -1,5 +1,5 @@
 name: 'BoringCache One'
-description: 'Maintained GitHub Action entrypoint for the BoringCache suite across archive caches, proxy-backed modes, and build adapters.'
+description: 'GitHub lifecycle for one CLI-owned BoringCache plan across archive, native tool, Docker, and BuildKit modes.'
 author: 'BoringCache'
 inputs:
   cli-version:
@@ -7,28 +7,15 @@ inputs:
     default: 'v1.13.105'
     required: false
   cli-platform:
-    description: 'Optional CLI target/platform override for advanced diagnostics and compatibility cases (for example linux-amd64 or linux-musl-amd64). Legacy distro aliases are normalized to the generic release asset names.'
+    description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
     required: false
   setup:
-    description: 'Runtime setup owner: mise, external, or none. mise auto-detects project tools from mise.toml, .tool-versions, and common version files.'
-    default: 'mise'
-    required: false
-  mode:
-    description: 'Primary cache behavior: auto or archive for portable caches, or a proxy/build adapter mode such as docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy. Proxy/build modes are pure remote by default; add entries when you want explicit local archive caches too.'
-    default: 'auto'
-    required: false
-  preset:
-    description: 'Workflow preset for archive-oriented defaults and tool detection: none, rails, ruby, node, node-turbo, python-uv, go, or php-composer. Presets add archive caches; use mode for pure remote adapter flows.'
+    description: 'Optional runtime setup: none or mise. mise auto-detects project tools from mise.toml, .tool-versions, and common version files; it never defines cache policy.'
     default: 'none'
     required: false
-  workspace:
-    description: 'Workspace identifier in format namespace/workspace (e.g., my-org/my-project). If not provided, uses repo config workspace or BORINGCACHE_DEFAULT_WORKSPACE/CLI defaults.'
-    required: false
-  cache-tag:
-    description: 'Human-readable cache tag or prefix. Generated archive entries, runtime caches, and proxy tags derive deterministic names from this when you do not set exact overrides.'
-    required: false
-  runtime-cache-tag:
-    description: 'Optional exact tag for the mise installs cache. Use this when you want the same runtime cache tag across GitHub Actions, local CLI, and Docker workflows.'
+  mode:
+    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, go, gradle, maven, nx, sccache, or turbo.'
+    default: 'archive'
     required: false
   working-directory:
     description: 'Project root used for tool detection and relative cache paths.'
@@ -36,14 +23,6 @@ inputs:
     required: false
   tools:
     description: 'Explicit mise tools to install, one per line (for example ruby@3.3, node@22). Overrides auto-detected project tools for the same names.'
-    required: false
-  tool-version-scope:
-    description: 'How generated runtime and archive tags encode tool versions: patch, minor, or major.'
-    default: 'patch'
-    required: false
-  cache-runtime:
-    description: 'Cache mise tool installs when setup is mise. Shims are regenerated after restore.'
-    default: 'true'
     required: false
   read-only:
     description: 'Proxy-backed modes: run without writes when supported.'
@@ -85,14 +64,6 @@ inputs:
     required: false
   proxy-port:
     description: 'Proxy-backed modes: explicit TCP port from 1 to 65535. Leave blank to use the mode default or an automatically selected port.'
-    required: false
-  proxy-no-git:
-    description: 'Proxy-backed modes: disable git scoping.'
-    default: 'false'
-    required: false
-  proxy-no-platform:
-    description: 'Proxy-backed modes: disable platform scoping.'
-    default: 'false'
     required: false
   context:
     description: 'Docker or BuildKit build context path.'
@@ -162,10 +133,6 @@ inputs:
     description: 'Managed BoringCache BuildKit image. Defaults to the signed release digest; pass an explicit digest for canaries.'
     default: 'ghcr.io/boringcache/buildkit@sha256:9b44a5426d7e32db41584c8d7d9f5251b0ad8348427e15849b541418030e7dab'
     required: false
-  cache-mode:
-    description: 'Build cache mode for Docker or BuildKit. Must be min or max.'
-    default: 'max'
-    required: false
   buildkit-host:
     description: 'BuildKit address for buildctl mode, for example tcp://host:1234 or unix:///run/buildkit/buildkitd.sock.'
     required: false
@@ -206,14 +173,6 @@ inputs:
     description: 'Maven version to install when setup=mise and the project does not already pin it.'
     default: '3.9.9'
     required: false
-  uv-version:
-    description: 'uv version to install for preset=python-uv when the project does not already pin it through mise.'
-    default: '0.9.21'
-    required: false
-  composer-version:
-    description: 'Composer version to install for preset=php-composer when the project does not already pin it through mise.'
-    default: '2.9.5'
-    required: false
   maven-local-repo:
     description: 'Local Maven repository path. Used for archive defaults in Maven mode.'
     default: '~/.m2/repository'
@@ -234,107 +193,24 @@ inputs:
     description: 'Logical Maven remote build-cache id for the generated config.'
     default: 'boringcache'
     required: false
-  rust-version:
-    description: 'Rust version or channel to install when not handled by mise.'
-    required: false
-  toolchain:
-    description: 'Alias for rust-version.'
-    required: false
-  targets:
-    description: 'Rust target triples to install, comma-separated.'
-    required: false
-  components:
-    description: 'Rust components to install, comma-separated.'
-    required: false
-  profile:
-    description: 'Rustup profile. Must be minimal, default, or complete.'
-    default: 'minimal'
-    required: false
-  cache-cargo:
-    description: 'Whether to cache cargo registry and git directories. Must be true or false.'
-    default: 'true'
-    required: false
-  cache-cargo-bin:
-    description: 'Whether to cache cargo bin directory. Must be true or false.'
-    default: 'false'
-    required: false
-  cache-target:
-    description: 'Whether to cache the Rust target directory. Must be true or false.'
-    default: 'true'
-    required: false
-  sccache:
-    description: 'Whether to enable sccache for Rust builds. Must be true or false.'
-    default: 'false'
-    required: false
   sccache-version:
     description: 'sccache version to install when the binary is not already available. Explicit versions require the matching publisher .sha256 release asset.'
     default: '0.16.0'
     required: false
-  sccache-cache-size:
-    description: 'Maximum local sccache cache size.'
-    default: '5G'
-    required: false
-  sccache-mode:
-    description: 'sccache storage mode. Must be local or proxy.'
-    default: 'local'
-    required: false
-  turbo-api-url:
-    description: 'Explicit Turbo remote cache endpoint. When omitted, boringcache/one starts a local proxy.'
-    required: false
-  turbo-token:
-    description: 'Turbo remote cache token.'
-    required: false
-  turbo-team:
-    description: 'Turbo remote cache team slug.'
-    required: false
-  turbo-port:
-    description: 'Preferred TCP port for a local Turbo proxy, from 1 to 65535.'
-    required: false
-  nx-access-token:
-    description: 'Nx self-hosted remote cache access token. Defaults to the proxy-internal token.'
-    required: false
-  nx-port:
-    description: 'Preferred TCP port for a local Nx self-hosted remote cache proxy, from 1 to 65535.'
-    required: false
   cache-profiles:
-    description: 'Optional repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). These resolve through the CLI source of truth before any extra raw entries are appended.'
-    required: false
-  entries:
-    description: 'Optional archive entries. Accepts repo/built-in entry ids such as bundler or node_modules, or raw tag:path pairs (one per line; legacy comma lists remain supported and literal commas can be written as \,). Semantic entries resolve through the CLI source of truth. Use this to opt into hybrid local archive caches alongside proxy/build modes.'
-    required: false
-  path:
-    description: 'Newline-separated exact paths and deterministic directory/** roots (actions/cache migration compatibility). Lines use actions/glob trimming and # remains a literal path prefix. Leading-! exclusions support only literal !directory/subdirectory/** subtrees under one directory/** root and cannot share a save with cache-runtime. Commas and internal spaces are literal.'
-    required: false
-  key:
-    description: 'An explicit key for restoring and saving the cache (actions/cache compatible)'
-    required: false
-  restore-keys:
-    description: 'An ordered list of prefix-matched keys for restoring stale cache if no cache hit occurred'
-    required: false
-  # GitHub Actions specific features (handled at action level)
-  enableCrossOsArchive:
-    description: 'Share one tag across operating systems by disabling platform suffixes and forcing canonical tar archive transport. Equivalent representable content can reuse one tar root; BoringCache does not translate filesystem semantics. Requires CLI v1.13.100+.'
-    default: 'false'
+    description: 'Repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). Required for archive mode.'
     required: false
   save-always:
     description: 'Run the post step to save the cache even if another step fails. Supports the same true spellings as GitHub boolean inputs.'
     default: 'false'
     required: false
   # CLI flags (passed directly to boringcache CLI)
-  no-platform:
-    description: 'Disable automatic platform suffix for tags (CLI --no-platform flag)'
-    default: 'false'
-    required: false
   fail-on-cache-miss:
     description: 'Fail the workflow if cache entry is not found (CLI --fail-on-cache-miss flag)'
     default: 'false'
     required: false
   fail-on-cache-error:
     description: 'Fail the workflow when cache restore, save, or proxy work fails. Defaults to false so a successful build remains successful; GitHub continue-on-error may still soften an explicitly strict step.'
-    default: 'false'
-    required: false
-  require-oci-import-ready:
-    description: 'Deprecated v1 compatibility input. Fail Docker or BuildKit setup when any planned managed cache ref is unreadable.'
     default: 'false'
     required: false
   lookup-only:
@@ -349,21 +225,9 @@ inputs:
     description: 'Enable detailed output (CLI --verbose flag)'
     default: 'false'
     required: false
-  exclude:
-    description: 'Legacy comma-separated glob patterns to exclude from cache (for example "*.out,*.log").'
-    required: false
-  exclude-patterns:
-    description: 'Tar exclusion patterns, one per line. Preserves commas and significant whitespace. Requires CLI v1.13.100+ for writable steps.'
-    required: false
-  allow-external-symlinks:
-    description: 'Allow external symlinks in content-addressed layouts (CLI --allow-external-symlinks flag). Tar archive transport leaves symlink handling to tar. Requires CLI v1.13.100+.'
-    default: 'false'
-    required: false
 outputs:
   cache-hit:
     description: 'A boolean value indicating an archive or mode-specific cache hit was found'
-  runtime-cache-hit:
-    description: 'A boolean value indicating the mise runtime cache was restored'
   diagnostics-level:
     description: 'Effective diagnostics level used by the action: off, summary, or verbose'
   evidence-path:
@@ -376,10 +240,8 @@ outputs:
     description: 'Resolved BoringCache workspace'
   cache-tag:
     description: 'Resolved cache tag or prefix'
-  runtime-cache-tag:
-    description: 'Resolved mise runtime cache tag'
   resolved-entries:
-    description: 'Resolved archive cache entries after deterministic tool scoping'
+    description: 'Resolved archive cache entries from the CLI plan'
   resolved-tags:
     description: 'Resolved exact cache tags used by boringcache/one for verification and follow-up checks'
   proxy-port:
@@ -428,20 +290,10 @@ outputs:
     description: 'Docker buildx builder name'
   buildx-platforms:
     description: 'Available platforms for the Docker buildx builder'
-  rust-version:
-    description: 'Resolved Rust version'
-  cargo-tag:
-    description: 'Resolved cargo registry cache tag'
-  cargo-git-tag:
-    description: 'Resolved cargo git cache tag'
-  target-tag:
-    description: 'Resolved Rust target cache tag'
-  cargo-bin-tag:
-    description: 'Resolved cargo bin cache tag'
   sccache-tag:
     description: 'Resolved sccache cache tag'
   sccache-hit:
-    description: 'Whether the sccache cache was restored'
+    description: 'Whether remote sccache KV rows existed before the build'
   package-manager:
     description: 'Detected Node.js package manager for Turbo mode'
   package-manager-cache-dir:

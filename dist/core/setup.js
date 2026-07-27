@@ -6,7 +6,6 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { warnIfUsingLegacyApiToken } from './auth';
 import { saveImmutableToolCache } from './action-cache';
 const TOOL_NAME = 'boringcache';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
@@ -68,42 +67,29 @@ export async function exposeBoringCacheCli(toolPath, binaryName = process.platfo
 function getPlatformInfo(platformOverride) {
     if (platformOverride) {
         const normalizedPlatform = platformOverride.trim().toLowerCase();
-        const isWindows = normalizedPlatform.includes('windows');
-        const arch = normalizedPlatform.includes('arm64') ? 'arm64' : 'amd64';
-        const legacyAssetName = `boringcache-${normalizedPlatform}${isWindows && !normalizedPlatform.endsWith('.exe') ? '.exe' : ''}`;
-        if (isWindows) {
-            const assetName = `boringcache-windows-${arch}.exe`;
+        const match = normalizedPlatform.match(/^(linux(?:-musl)?|windows)-(amd64|arm64)$/);
+        if (match) {
+            const [, platformOs, arch] = match;
+            const isWindows = platformOs === 'windows';
+            const usesMusl = platformOs === 'linux-musl';
             return {
-                os: 'windows',
+                os: isWindows ? 'windows' : 'linux',
                 arch,
-                assetName,
-                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
-                isWindows: true,
-                cacheKey: arch,
+                assetName: `boringcache-${normalizedPlatform}${isWindows ? '.exe' : ''}`,
+                isWindows,
+                cacheKey: usesMusl ? `musl-${arch}` : arch,
             };
         }
-        if (normalizedPlatform.includes('macos') || normalizedPlatform.includes('darwin')) {
-            const assetName = 'boringcache-macos-universal';
+        if (normalizedPlatform === 'macos-universal') {
             return {
                 os: 'macos',
-                arch,
-                assetName,
-                fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
+                arch: 'universal',
+                assetName: 'boringcache-macos-universal',
                 isWindows: false,
                 cacheKey: 'universal',
             };
         }
-        const usesMusl = normalizedPlatform.includes('alpine') || normalizedPlatform.includes('musl');
-        const genericPlatform = `linux${usesMusl ? '-musl' : ''}-${arch}`;
-        const assetName = `boringcache-${genericPlatform}`;
-        return {
-            os: 'linux',
-            arch,
-            assetName,
-            fallbackAssetName: legacyAssetName === assetName ? undefined : legacyAssetName,
-            isWindows: false,
-            cacheKey: usesMusl ? `musl-${arch}` : arch,
-        };
+        throw new Error(`Unsupported cli-platform "${platformOverride}". Expected linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.`);
     }
     const runnerOS = process.env.RUNNER_OS || os.platform();
     const runnerArch = process.env.RUNNER_ARCH || os.arch();
@@ -222,8 +208,8 @@ async function verifyChecksum(filePath, expectedChecksum, assetName) {
     core.info(`Checksum verified for ${assetName}`);
 }
 async function downloadAndInstall(version, platform, verify) {
-    let resolvedAssetName = platform.assetName;
-    let downloadUrl = getDownloadUrl(version, resolvedAssetName);
+    const resolvedAssetName = platform.assetName;
+    const downloadUrl = getDownloadUrl(version, resolvedAssetName);
     core.info(`Downloading BoringCache CLI from: ${downloadUrl}`);
     let downloadedPath;
     try {
@@ -231,23 +217,7 @@ async function downloadAndInstall(version, platform, verify) {
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        if (platform.fallbackAssetName) {
-            resolvedAssetName = platform.fallbackAssetName;
-            downloadUrl = getDownloadUrl(version, resolvedAssetName);
-            core.info(`Primary CLI asset ${platform.assetName} unavailable (${msg}); trying legacy fallback: ${resolvedAssetName}`);
-            try {
-                downloadedPath = await tc.downloadTool(downloadUrl);
-            }
-            catch (fallbackError) {
-                const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-                if (fallbackMsg.includes('404')) {
-                    throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ` +
-                        'release asset not found. The requested cli-version may not be published yet.');
-                }
-                throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}, fallback ${resolvedAssetName}): ${fallbackMsg}`);
-            }
-        }
-        else if (msg.includes('404')) {
+        if (msg.includes('404')) {
             throw new Error(`Failed to download BoringCache CLI ${version} (${platform.assetName}) from ${downloadUrl}: ` +
                 'release asset not found. The requested cli-version may not be published yet.');
         }
@@ -292,12 +262,10 @@ export async function isCliAvailable() {
     }
 }
 export async function ensureBoringCache(options) {
-    warnIfUsingLegacyApiToken();
     const secrets = new Set([
         options.token,
         process.env.BORINGCACHE_RESTORE_TOKEN,
         process.env.BORINGCACHE_SAVE_TOKEN,
-        process.env.BORINGCACHE_API_TOKEN,
     ].filter((value) => Boolean(value)));
     for (const secret of secrets) {
         core.setSecret(secret);

@@ -2,7 +2,7 @@ const MODE_SPECS = {
     archive: {
         resolved: 'archive',
         implemented: true,
-        description: 'Opaque tar archive caching and actions/cache compatibility.',
+        description: 'Opaque tar archive caching from a CLI-owned repo profile.',
     },
     docker: {
         resolved: 'docker',
@@ -34,26 +34,25 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Maven build cache proxy integration.',
     },
-    'nx-proxy': {
-        resolved: 'nx-proxy',
+    nx: {
+        resolved: 'nx',
         implemented: true,
         description: 'Nx self-hosted remote cache proxy integration.',
     },
-    'rust-sccache': {
-        resolved: 'rust-sccache',
+    sccache: {
+        resolved: 'sccache',
         implemented: true,
         description: 'Rust sccache proxy integration.',
     },
-    'turbo-proxy': {
-        resolved: 'turbo-proxy',
+    turbo: {
+        resolved: 'turbo',
         implemented: true,
         description: 'Turbo remote cache proxy integration.',
     },
 };
 export function normalizeMode(value) {
-    const normalized = (value || 'auto').trim().toLowerCase();
+    const normalized = (value || 'archive').trim().toLowerCase();
     switch (normalized) {
-        case 'auto':
         case 'archive':
         case 'docker':
         case 'buildkit':
@@ -61,17 +60,16 @@ export function normalizeMode(value) {
         case 'go':
         case 'gradle':
         case 'maven':
-        case 'nx-proxy':
-        case 'rust-sccache':
-        case 'turbo-proxy':
+        case 'nx':
+        case 'sccache':
+        case 'turbo':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected auto, archive, docker, buildkit, bazel, go, gradle, maven, nx-proxy, rust-sccache, or turbo-proxy.`);
+            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, go, gradle, maven, nx, sccache, or turbo.`);
     }
 }
 export function resolveModeSpec(mode) {
-    const resolved = mode === 'auto' ? 'archive' : mode;
-    const spec = MODE_SPECS[resolved];
+    const spec = MODE_SPECS[mode];
     return {
         requested: mode,
         ...spec,

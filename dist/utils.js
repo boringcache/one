@@ -1,21 +1,19 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
-import * as glob from '@actions/glob';
 import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as timers from 'timers';
-import { activateMiseTool, buildMiseRuntimeTag, buildMiseToolTag, ensureBoringCache, exportMiseEnv, execBoringCache, getInputsWorkspace, getMiseInstallsDir, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, isUsingLegacyApiTokenOnly, parseEntries, readProjectMiseTools, readMiseTomlVersion, readToolVersionsValue, reshimMise, } from './core';
+import { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, readProjectMiseTools, readMiseTomlVersion, readToolVersionsValue, reshimMise, } from './core';
 import { assertImplementedMode, normalizeMode, resolveModeSpec, } from './modes';
-export { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, getMiseInstallsDir, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, };
+export { activateMiseTool, ensureBoringCache, exportMiseEnv, execBoringCache, hasMiseToolVersion, hasToolVersionOnPath, installMise, installMiseTool, parseEntries, };
 export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 export const MAX_DIAGNOSTICS_LOG_LINES = 500;
 export const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
 export const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
 export const MAX_VERIFY_TIMEOUT_SECONDS = 900;
 export const MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
-export const PORTABLE_ARCHIVE_ARGS_MIN_VERSION = '1.13.100';
 const TOOL_LABELS = {
     bazel: 'Bazel',
     bun: 'Bun',
@@ -44,17 +42,9 @@ export function getInputs() {
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
-        preset: normalizePreset(core.getInput('preset')),
-        workspace: core.getInput('workspace'),
-        cacheTag: core.getInput('cache-tag'),
-        runtimeCacheTag: core.getInput('runtime-cache-tag'),
         workingDirectory: path.resolve(core.getInput('working-directory') || '.'),
         tools: core.getInput('tools'),
-        toolVersionScope: normalizeToolVersionScope(core.getInput('tool-version-scope')),
-        cacheRuntime: core.getBooleanInput('cache-runtime'),
         mavenVersion: core.getInput('maven-version') || '3.9.9',
-        uvVersion: core.getInput('uv-version') || '0.9.21',
-        composerVersion: core.getInput('composer-version') || '2.9.5',
         mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
         readOnly: core.getBooleanInput('read-only'),
         savePolicy: normalizeSavePolicy(core.getInput('save-policy') || 'auto'),
@@ -68,26 +58,14 @@ export function getInputs() {
         diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
         metadataHints: core.getInput('metadata-hints'),
         proxyPort: core.getInput('proxy-port'),
-        proxyNoGit: core.getBooleanInput('proxy-no-git'),
-        proxyNoPlatform: core.getBooleanInput('proxy-no-platform'),
         managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:9b44a5426d7e32db41584c8d7d9f5251b0ad8348427e15849b541418030e7dab',
         dockerToolCache: core.getInput('docker-tool-cache'),
         cacheProfiles: core.getInput('cache-profiles'),
-        entries: core.getInput('entries', { trimWhitespace: false }),
-        path: core.getInput('path'),
-        key: core.getInput('key'),
-        restoreKeys: core.getInput('restore-keys'),
-        enableCrossOsArchive: core.getBooleanInput('enableCrossOsArchive'),
-        noPlatform: core.getBooleanInput('no-platform'),
         failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
         failOnCacheError: core.getBooleanInput('fail-on-cache-error'),
-        requireOciImportReady: core.getBooleanInput('require-oci-import-ready'),
         lookupOnly: core.getBooleanInput('lookup-only'),
         force: core.getBooleanInput('force'),
         verbose: core.getBooleanInput('verbose'),
-        exclude: core.getInput('exclude'),
-        excludePatterns: core.getInput('exclude-patterns', { trimWhitespace: false }),
-        allowExternalSymlinks: core.getBooleanInput('allow-external-symlinks'),
     };
 }
 export function isPullRequestEvent() {
@@ -113,14 +91,12 @@ export function applyPullRequestSaveScopeEnv() {
 }
 export function applyRestoreOnlyTokenPolicy() {
     const restoreFallback = process.env.BORINGCACHE_RESTORE_TOKEN ||
-        process.env.BORINGCACHE_SAVE_TOKEN ||
-        process.env.BORINGCACHE_API_TOKEN;
-    const hadSaveCapableToken = Boolean(process.env.BORINGCACHE_SAVE_TOKEN || process.env.BORINGCACHE_API_TOKEN);
+        process.env.BORINGCACHE_SAVE_TOKEN;
+    const hadSaveCapableToken = Boolean(process.env.BORINGCACHE_SAVE_TOKEN);
     if (restoreFallback) {
         process.env.BORINGCACHE_RESTORE_TOKEN = restoreFallback;
     }
     delete process.env.BORINGCACHE_SAVE_TOKEN;
-    delete process.env.BORINGCACHE_API_TOKEN;
     return hadSaveCapableToken;
 }
 export function applySaveTokenPolicy(inputs) {
@@ -181,15 +157,12 @@ export function buildActionTrustState(inputs, options) {
         token_capabilities: {
             restore: hasRestoreToken(),
             save: hasSaveToken(),
-            legacy_api_only: isUsingLegacyApiTokenOnly(),
         },
     };
 }
 export function restorePhaseSummary(options) {
     if (options.cacheHit) {
-        const hitDetail = options.runtimeCacheHit
-            ? 'BoringCache restored at least one requested cache for this step, including the runtime cache.'
-            : 'BoringCache restored at least one requested cache for this step.';
+        const hitDetail = 'BoringCache restored at least one requested cache for this step.';
         if (options.saveCapable) {
             return {
                 status: 'cache_hit',
@@ -596,48 +569,13 @@ function parsePositiveIntegerInput(value, inputName) {
     return parsed;
 }
 export function normalizeSetup(value) {
-    switch ((value || 'mise').trim().toLowerCase()) {
-        case 'mise':
-        case 'external':
-        case 'none':
-            return (value || 'mise').trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported setup "${value}". Expected mise, external, or none.`);
-    }
-}
-export function normalizePreset(value) {
     switch ((value || 'none').trim().toLowerCase()) {
+        case 'mise':
         case 'none':
-        case 'rails':
-        case 'ruby':
-        case 'node':
-        case 'node-turbo':
-        case 'python-uv':
-        case 'go':
-        case 'php-composer':
             return (value || 'none').trim().toLowerCase();
         default:
-            throw new Error(`Unsupported preset "${value}". Expected none, rails, ruby, node, node-turbo, python-uv, go, or php-composer.`);
+            throw new Error(`Unsupported setup "${value}". Expected mise or none.`);
     }
-}
-export function normalizeToolVersionScope(value) {
-    switch ((value || 'patch').trim().toLowerCase()) {
-        case 'major':
-        case 'minor':
-        case 'patch':
-            return (value || 'patch').trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported tool-version-scope "${value}". Expected major, minor, or patch.`);
-    }
-}
-export function resolveWorkspace(workspace) {
-    const resolved = workspace
-        ? workspace.includes('/') ? workspace : `default/${workspace}`
-        : (process.env.BORINGCACHE_DEFAULT_WORKSPACE || getInputsWorkspace({}));
-    if (!resolved.includes('/')) {
-        return `default/${resolved}`;
-    }
-    return resolved;
 }
 function expandUserPath(value) {
     if (value.startsWith('~/')) {
@@ -944,13 +882,9 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
         });
     }
 }
-export function buildGenericVerificationSpecs(plan, inputs, includeRuntime) {
+export function buildGenericVerificationSpecs(plan) {
     const specs = [];
-    const noPlatform = inputs.noPlatform || inputs.enableCrossOsArchive;
-    if (includeRuntime && plan.runtimeEntry) {
-        appendVerificationSpecsFromEntries(specs, plan.runtimeEntry, noPlatform, false);
-    }
-    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, noPlatform, false);
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, false);
     return specs;
 }
 function envWithOverrides(overrides) {
@@ -1219,15 +1153,14 @@ export function parseToolSpecs(input) {
         };
     });
 }
-export async function resolveRuntimeTools(setup, preset, mode, toolsInput, workingDirectory, uvVersion, composerVersion) {
+export async function resolveRuntimeTools(setup, mode, toolsInput, workingDirectory) {
     if (setup !== 'mise') {
         return [];
     }
     const explicitTools = parseToolSpecs(toolsInput);
     const projectTools = await detectProjectTools(workingDirectory);
-    const presetTools = await detectPresetTools(preset, workingDirectory, uvVersion, composerVersion);
     const modeTools = await detectModeTools(mode, workingDirectory);
-    return mergeTools(explicitTools, projectTools, presetTools, modeTools);
+    return mergeTools(explicitTools, projectTools, modeTools);
 }
 async function detectProjectTools(workingDirectory) {
     const tools = new Map();
@@ -1261,30 +1194,10 @@ async function detectProjectTools(workingDirectory) {
     }
     return Array.from(tools.values());
 }
-async function detectPresetTools(preset, workingDirectory, uvVersion, composerVersion) {
-    switch (preset) {
-        case 'rails':
-            return detectRailsTools(workingDirectory);
-        case 'ruby':
-            return detectRubyTools(workingDirectory);
-        case 'node':
-            return detectNodeTools(workingDirectory);
-        case 'node-turbo':
-            return detectNodeTurboTools(workingDirectory);
-        case 'python-uv':
-            return detectPythonUvTools(workingDirectory, uvVersion);
-        case 'go':
-            return detectGoTools(workingDirectory);
-        case 'php-composer':
-            return detectPhpComposerTools(workingDirectory, composerVersion);
-        default:
-            return [];
-    }
-}
 async function detectModeTools(mode, workingDirectory) {
     switch (mode) {
-        case 'turbo-proxy':
-        case 'nx-proxy':
+        case 'turbo':
+        case 'nx':
             return detectNodeTurboTools(workingDirectory);
         case 'bazel':
             return detectBazelTools(workingDirectory);
@@ -1294,40 +1207,19 @@ async function detectModeTools(mode, workingDirectory) {
             return detectGradleTools(workingDirectory);
         case 'maven':
             return detectMavenTools(workingDirectory);
-        case 'rust-sccache':
+        case 'sccache':
             return detectRustTools(workingDirectory);
         default:
             return [];
     }
 }
-async function detectRubyTools(workingDirectory) {
-    const rubyVersion = await detectRubyVersion(workingDirectory);
-    if (!rubyVersion) {
-        return [];
-    }
-    return [{ name: 'ruby', version: rubyVersion, label: 'Ruby', source: 'preset' }];
-}
-async function detectRailsTools(workingDirectory) {
-    const tools = await detectRubyTools(workingDirectory);
-    if (await needsNodeRuntime(workingDirectory)) {
-        const nodeVersion = await detectNodeVersion(workingDirectory);
-        if (nodeVersion) {
-            tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
-        }
-    }
-    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
-    if (packageManagerTool) {
-        tools.push(packageManagerTool);
-    }
-    return tools;
-}
 async function detectNodeTools(workingDirectory) {
     const tools = [];
     const nodeVersion = await detectNodeVersion(workingDirectory);
     if (nodeVersion) {
-        tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'preset' });
+        tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'mode' });
     }
-    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'preset');
+    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'mode');
     if (packageManagerTool) {
         tools.push(packageManagerTool);
     }
@@ -1336,40 +1228,12 @@ async function detectNodeTools(workingDirectory) {
 async function detectNodeTurboTools(workingDirectory) {
     return detectNodeTools(workingDirectory);
 }
-async function detectPythonUvTools(workingDirectory, defaultUvVersion) {
-    const tools = [];
-    const pythonVersion = await detectPythonVersion(workingDirectory);
-    if (pythonVersion) {
-        tools.push({ name: 'python', version: pythonVersion, label: 'Python', source: 'preset' });
-    }
-    tools.push({
-        name: 'uv',
-        version: (await detectUvVersion(workingDirectory)) || defaultUvVersion,
-        label: 'uv',
-        source: 'preset',
-    });
-    return tools;
-}
 async function detectGoTools(workingDirectory) {
     const goVersion = await detectGoVersion(workingDirectory);
     if (!goVersion) {
         return [];
     }
-    return [{ name: 'go', version: goVersion, label: 'Go', source: 'preset' }];
-}
-async function detectPhpComposerTools(workingDirectory, defaultComposerVersion) {
-    const tools = [];
-    const phpVersion = await detectPhpVersion(workingDirectory);
-    if (phpVersion) {
-        tools.push({ name: 'php', version: phpVersion, label: 'PHP', source: 'preset' });
-    }
-    tools.push({
-        name: 'composer',
-        version: (await detectComposerVersion(workingDirectory)) || defaultComposerVersion,
-        label: 'Composer',
-        source: 'preset',
-    });
-    return tools;
+    return [{ name: 'go', version: goVersion, label: 'Go', source: 'mode' }];
 }
 async function detectBazelTools(workingDirectory) {
     const bazelVersion = await detectBazelVersion(workingDirectory);
@@ -1467,31 +1331,6 @@ async function detectGoVersion(workingDirectory) {
     return (await readMiseTomlVersion(workingDirectory, 'go'))
         || (await readMiseTomlVersion(workingDirectory, 'golang'));
 }
-async function detectUvVersion(workingDirectory) {
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'uv');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'uv');
-}
-async function detectPhpVersion(workingDirectory) {
-    const phpVersion = await readFirstLine(path.join(workingDirectory, '.php-version'));
-    if (phpVersion) {
-        return phpVersion;
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'php');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'php');
-}
-async function detectComposerVersion(workingDirectory) {
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'composer');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'composer');
-}
 async function detectJavaVersion(workingDirectory) {
     const javaVersion = await readFirstLine(path.join(workingDirectory, '.java-version'));
     if (javaVersion) {
@@ -1576,15 +1415,6 @@ async function readFile(filePath) {
     catch {
         return null;
     }
-}
-async function needsNodeRuntime(workingDirectory) {
-    const markers = ['package.json', 'yarn.lock', 'pnpm-lock.yaml', 'package-lock.json', 'turbo.json'];
-    for (const marker of markers) {
-        if (await pathExists(path.join(workingDirectory, marker))) {
-            return true;
-        }
-    }
-    return false;
 }
 async function readPackageJson(workingDirectory) {
     const packageJson = await readFile(path.join(workingDirectory, 'package.json'));
@@ -1697,22 +1527,6 @@ function normalizeToolName(name) {
     }
     return normalized;
 }
-export function buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
-    if (tools.length === 0) {
-        return null;
-    }
-    if (runtimeCacheTag.trim()) {
-        return runtimeCacheTag.trim();
-    }
-    return buildMiseRuntimeTag(cacheTagPrefix, tools, versionScope);
-}
-export function buildRuntimeCacheEntry(cacheTagPrefix, runtimeCacheTag, tools, versionScope) {
-    const runtimeTag = buildRuntimeCacheTag(cacheTagPrefix, runtimeCacheTag, tools, versionScope);
-    if (!runtimeTag) {
-        return null;
-    }
-    return `${runtimeTag}:${getMiseInstallsDir()}`;
-}
 function splitEntriesInput(entries) {
     const values = [];
     let current = '';
@@ -1768,285 +1582,15 @@ export async function resolveCliCapabilityVersion(version) {
     }
     return match[1];
 }
-export function supportsPortableArchiveArgs(version) {
-    const parsed = parseCliVersion(version);
-    const minimum = parseCliVersion(PORTABLE_ARCHIVE_ARGS_MIN_VERSION);
-    if (!parsed) {
-        return false;
-    }
-    for (let index = 0; index < parsed.length; index += 1) {
-        if (parsed[index] !== minimum[index]) {
-            return parsed[index] > minimum[index];
-        }
-    }
-    return true;
-}
-export function assertCrossOsArchiveTransportSupported(version) {
-    if (supportsPortableArchiveArgs(version)) {
-        return;
-    }
-    throw new Error(`enableCrossOsArchive requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so the Action can force tar archive transport. Update cli-version before sharing this tag across operating systems.`);
-}
-export function assertExternalSymlinkRoundTripSupported(version) {
-    if (supportsPortableArchiveArgs(version)) {
-        return;
-    }
-    throw new Error(`allow-external-symlinks requires BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ for content-addressed layouts. Tar archive transport leaves symlink handling to tar. Update cli-version before enabling this input.`);
-}
-export function assertLegacyArchiveEntriesAreLossless(entries, operation) {
-    const incompatible = entries.find((entry) => {
-        const separator = entry.indexOf(':');
-        if (separator <= 0) {
-            return true;
-        }
-        const tag = entry.slice(0, separator);
-        const selectedPath = entry.slice(separator + 1);
-        return entry.includes(',')
-            || tag !== tag.trim()
-            || selectedPath !== selectedPath.trim();
-    });
-    if (!incompatible) {
-        return;
-    }
-    throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to ${operation} cache paths containing commas or significant leading/trailing whitespace. Update cli-version instead of allowing a lossy legacy invocation.`);
-}
-export function splitExcludeInput(input) {
-    if (!input) {
-        return [];
-    }
-    return input.split(',').filter((pattern) => pattern.length > 0);
-}
-export function splitLiteralExcludeInput(input) {
-    if (!input) {
-        return [];
-    }
-    return input.split(/\r?\n/).filter((pattern) => pattern.length > 0);
-}
-export function appendSaveExcludeArgs(args, excludes, version) {
-    if (supportsPortableArchiveArgs(version)) {
-        for (const pattern of excludes) {
-            args.push('--exclude-pattern', pattern);
-        }
-        return;
-    }
-    const incompatible = excludes.find((pattern) => pattern.includes(',') || pattern.startsWith('./'));
-    if (incompatible !== undefined) {
-        throw new Error(`BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ is required to preserve exclusion patterns and exclusion names containing commas. Update cli-version instead of allowing a lossy legacy invocation.`);
-    }
-    for (const pattern of excludes) {
-        args.push('--exclude', pattern);
-    }
-}
-function splitActionsCachePathInput(input) {
-    return input
-        .split(/\r?\n/)
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-}
-function absoluteGlobPattern(pattern, workingDirectory) {
-    let value = pattern;
-    let negate = '';
-    while (value.startsWith('!')) {
-        negate += '!';
-        value = value.slice(1);
-    }
-    const selectedPath = value.trim();
-    if (selectedPath === '~' || selectedPath.startsWith('~/')) {
-        const expanded = selectedPath === '~'
-            ? os.homedir()
-            : path.join(os.homedir(), selectedPath.slice(2));
-        return `${negate}${expanded}`;
-    }
-    if (path.isAbsolute(selectedPath)) {
-        return `${negate}${selectedPath}`;
-    }
-    return `${negate}${path.join(workingDirectory, selectedPath)}`;
-}
-function hasUnescapedGlob(pattern) {
-    for (let index = 0; index < pattern.length; index += 1) {
-        if (pattern[index] === '\\' && process.platform !== 'win32') {
-            index += 1;
-            continue;
-        }
-        if (pattern[index] === '*' || pattern[index] === '?' || pattern[index] === '[') {
-            return true;
-        }
-    }
-    return false;
-}
-function hasInvalidGlobDotSegments(pattern) {
-    const normalized = process.platform === 'win32'
-        ? pattern.replace(/\\/g, '/')
-        : pattern;
-    return normalized
-        .split('/')
-        .some((segment, index) => segment === '..' || (segment === '.' && index !== 0));
-}
-function resolveLiteralActionsCachePath(pattern, workingDirectory) {
-    const selectedPath = pattern.trim();
-    const expanded = selectedPath === '~'
-        ? os.homedir()
-        : selectedPath.startsWith('~/')
-            ? path.join(os.homedir(), selectedPath.slice(2))
-            : selectedPath;
-    return path.isAbsolute(expanded) ? expanded : path.join(workingDirectory, expanded);
-}
-function pathIsWithin(parent, candidate) {
-    const relative = path.relative(parent, candidate);
-    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-}
-function coalesceCacheRoots(paths) {
-    const roots = [];
-    for (const candidate of paths) {
-        if (roots.some((root) => pathIsWithin(root, candidate))) {
-            continue;
-        }
-        for (let index = roots.length - 1; index >= 0; index -= 1) {
-            if (pathIsWithin(candidate, roots[index])) {
-                roots.splice(index, 1);
-            }
-        }
-        roots.push(candidate);
-    }
-    return roots;
-}
-export async function resolveActionsCachePaths(input, workingDirectory) {
-    const patterns = splitActionsCachePathInput(input);
-    if (patterns.length === 0) {
-        return { paths: [], excludes: [] };
-    }
-    const roots = [];
-    const exclusions = [];
-    let sawExclusion = false;
-    for (const pattern of patterns) {
-        if (pattern.startsWith('!')) {
-            sawExclusion = true;
-            exclusions.push(pattern.slice(1));
-            continue;
-        }
-        if (sawExclusion) {
-            throw new Error('BoringCache path compatibility requires all include roots before exclusion patterns. Move leading-! exclusions after the paths they filter.');
-        }
-        if (process.platform !== 'win32' && pattern.includes('\\')) {
-            throw new Error(`Unsupported actions/cache path pattern "${pattern}". Escaped glob characters cannot be translated to a literal CLI cache root without changing their meaning; use an exact path with no escapes.`);
-        }
-        const absolutePattern = absoluteGlobPattern(pattern, workingDirectory);
-        const globber = await glob.create(absolutePattern, {
-            followSymbolicLinks: true,
-            implicitDescendants: false,
-        });
-        if (!hasUnescapedGlob(pattern)) {
-            roots.push({
-                requested: pattern.trim(),
-                absolute: resolveLiteralActionsCachePath(pattern, workingDirectory),
-                descendantGlob: false,
-            });
-            continue;
-        }
-        if (!/\/\*\*\/?$/.test(pattern) || hasUnescapedGlob(pattern.replace(/\/\*\*\/?$/, ''))) {
-            throw new Error(`Unsupported actions/cache path pattern "${pattern}". BoringCache preserves one deterministic archive root per tag, so wildcard roots must use the form directory/**. Use exact paths or BoringCache entries for other shapes.`);
-        }
-        roots.push({
-            requested: pattern.replace(/\/\*\*\/?$/, ''),
-            absolute: globber.getSearchPaths()[0],
-            descendantGlob: true,
-        });
-    }
-    if (exclusions.length > 0 && (roots.length !== 1 || !roots[0].descendantGlob)) {
-        throw new Error('actions/cache exclusion patterns require exactly one directory/** include root. Exact roots and multiple roots cannot safely scope exclusions in a shared save batch.');
-    }
-    const selectedRootPaths = coalesceCacheRoots(roots.map((root) => root.absolute));
-    const selectedRoots = selectedRootPaths.map((absolute) => roots.find((root) => root.absolute === absolute));
-    if (exclusions.length > 0 && selectedRoots.length !== 1) {
-        throw new Error('actions/cache exclusion patterns require exactly one deterministic directory/** root. Split multiple roots into separate BoringCache entries so exclusions cannot affect the wrong cache.');
-    }
-    const excludePatterns = exclusions.map((pattern) => {
-        if (pattern.startsWith('!')) {
-            throw new Error('Repeated ! path negation is not supported. Use one leading ! exclusion after the include root.');
-        }
-        if (process.platform !== 'win32' && pattern.includes('\\')) {
-            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". Escaped glob characters cannot be translated to the CLI matcher without changing their meaning; use a literal descendant subtree with no escapes.`);
-        }
-        if (!/\/\*\*\/?$/.test(pattern) || hasUnescapedGlob(pattern.replace(/\/\*\*\/?$/, ''))) {
-            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". BoringCache currently supports only a literal descendant subtree in the form !directory/subdirectory/** so its root scope can be preserved exactly. Split other glob shapes into separate BoringCache entries.`);
-        }
-        const subtree = pattern.replace(/\/\*\*\/?$/, '');
-        if (hasInvalidGlobDotSegments(subtree)) {
-            throw new Error(`Unsupported actions/cache exclusion pattern "!${pattern}". Internal . segments and all .. segments are rejected by actions/glob and cannot be normalized into a different cache exclusion.`);
-        }
-        const absolutePattern = resolveLiteralActionsCachePath(subtree, workingDirectory);
-        const root = selectedRoots[0].absolute;
-        const relativePattern = path.relative(root, absolutePattern);
-        if (!relativePattern || relativePattern === '..' || relativePattern.startsWith(`..${path.sep}`)) {
-            throw new Error(`actions/cache exclusion pattern "!${pattern}" must stay inside its directory/** cache root.`);
-        }
-        const normalized = relativePattern.split(path.sep).join('/');
-        return `./${normalized}/`;
-    });
-    return { paths: selectedRoots.map((root) => root.requested), excludes: excludePatterns };
-}
 function appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
 }
-const PROJECT_CONFIG_FILE_NAMES = ['.boringcache.toml', 'boringcache.toml'];
-function findNearestRepoConfigPath(workingDirectory) {
-    let current = path.resolve(workingDirectory);
-    while (true) {
-        for (const fileName of PROJECT_CONFIG_FILE_NAMES) {
-            const candidate = path.join(current, fileName);
-            if (fs.existsSync(candidate)) {
-                return candidate;
-            }
-        }
-        const parent = path.dirname(current);
-        if (parent === current) {
-            return null;
-        }
-        current = parent;
-    }
-}
 async function runDryRunPlan(workingDirectory, options) {
-    const { workspaceInput, entryIds = [], profileNames = [], manualTagPathPairs = [], archivePaths = [], archiveTagPrefix = '', archiveRestorePrefixes = [], cacheTag = '', toolTagSuffix = '', noPlatform = false, readOnly = false, fallbackWorkspace, portableArchiveArgs = true, } = options;
-    const executePlan = async (candidateWorkspace) => {
+    const { profileNames = [], readOnly = false, } = options;
+    const executePlan = async () => {
         const args = ['run'];
-        const trimmedWorkspace = candidateWorkspace.trim();
-        if (trimmedWorkspace) {
-            args.push(trimmedWorkspace);
-        }
-        if (manualTagPathPairs.length > 0) {
-            if (portableArchiveArgs) {
-                for (const pair of manualTagPathPairs) {
-                    args.push('--manual-entry', pair);
-                }
-            }
-            else {
-                assertLegacyArchiveEntriesAreLossless(manualTagPathPairs, 'save');
-                args.push(manualTagPathPairs.join(','));
-            }
-        }
         for (const profileName of profileNames) {
             args.push('--profile', profileName);
-        }
-        for (const entryId of entryIds) {
-            args.push('--entry', entryId);
-        }
-        for (const archivePath of archivePaths) {
-            args.push('--archive-path', archivePath);
-        }
-        if (archiveTagPrefix.trim()) {
-            args.push('--archive-tag-prefix', archiveTagPrefix.trim());
-        }
-        for (const archiveRestorePrefix of archiveRestorePrefixes) {
-            args.push('--archive-restore-prefix', archiveRestorePrefix);
-        }
-        if (cacheTag.trim()) {
-            args.push('--cache-tag', cacheTag.trim());
-        }
-        if (toolTagSuffix?.trim()) {
-            args.push('--tool-tag-suffix', toolTagSuffix.trim());
-        }
-        if (noPlatform) {
-            args.push('--no-platform');
         }
         appendCliPublicationPolicy(args, readOnly);
         args.push('--dry-run', '--json');
@@ -2075,310 +1619,50 @@ async function runDryRunPlan(workingDirectory, options) {
             throw new Error(`Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
         }
     };
-    try {
-        return await executePlan(workspaceInput);
-    }
-    catch (error) {
-        if (!workspaceInput.trim()
-            && fallbackWorkspace
-            && error instanceof Error
-            && /No workspace specified/i.test(error.message)) {
-            return executePlan(fallbackWorkspace);
-        }
-        throw error;
-    }
+    return executePlan();
 }
-export async function resolveCliArchiveEntries(workingDirectory, options) {
+async function maybeResolveWorkspaceViaCli(workingDirectory, readOnly) {
     const plan = await runDryRunPlan(workingDirectory, {
-        workspaceInput: options.workspaceInput,
-        entryIds: options.entryIds,
-        cacheTag: options.cacheTag,
-        toolTagSuffix: options.toolTagSuffix,
-        readOnly: options.readOnly,
-        fallbackWorkspace: options.fallbackWorkspace,
-    });
-    const workspace = plan.workspace?.trim()
-        || options.fallbackWorkspace?.trim()
-        || resolveWorkspace(options.workspaceInput);
-    return {
-        workspace,
-        envVars: plan.env_vars,
-        entries: (plan.archive_entries || [])
-            .filter((entry) => Boolean(entry.path))
-            .map((entry) => ({
-            requested: entry.requested,
-            tag: entry.tag,
-            path: entry.path,
-            tagPathPair: entry.tag_path_pair,
-        })),
-    };
-}
-function isUnknownEntryResolutionError(error) {
-    return error instanceof Error && /Unknown cache entry/i.test(error.message);
-}
-async function maybeResolveRawEntryViaCli(workingDirectory, workspaceInput, rawTag, cacheTag, toolTagSuffix, readOnly, fallbackWorkspace, portableArchiveArgs = true) {
-    try {
-        return await runDryRunPlan(workingDirectory, {
-            workspaceInput,
-            entryIds: [rawTag],
-            cacheTag,
-            toolTagSuffix,
-            readOnly,
-            fallbackWorkspace,
-            portableArchiveArgs,
-        });
-    }
-    catch (error) {
-        if (isUnknownEntryResolutionError(error)) {
-            return null;
-        }
-        throw error;
-    }
-}
-async function maybeResolveWorkspaceViaCli(workingDirectory, workspaceInput, fallbackWorkspace, readOnly) {
-    const plan = await runDryRunPlan(workingDirectory, {
-        workspaceInput,
         readOnly,
-        fallbackWorkspace,
     });
     return plan.workspace?.trim() || null;
 }
-function cliPlanHasProvenance(plan) {
-    return Boolean(plan.workspace_source || plan.repo_config_path || plan.archive_entries);
-}
-function cliPlanUsesRepoConfigResolution(plan) {
-    const firstEntry = plan.archive_entries?.[0];
-    if (firstEntry) {
-        return firstEntry.resolution_source === 'repo-config';
-    }
-    return Boolean(plan.repo_config_path);
-}
-async function detectDefaultArchiveEntries(inputs) {
-    if (inputs.preset === 'ruby') {
-        return 'bundler';
-    }
-    if (inputs.preset === 'rails') {
-        return joinDefaultEntries('bundler', await detectNodeDefaultArchiveEntries(inputs.workingDirectory));
-    }
-    if (inputs.preset === 'node' || inputs.preset === 'node-turbo') {
-        return await detectNodeDefaultArchiveEntries(inputs.workingDirectory);
-    }
-    if (inputs.preset === 'python-uv') {
-        return 'uv-cache';
-    }
-    if (inputs.preset === 'go') {
-        return joinDefaultEntries('go-mod-cache', 'go-build-cache');
-    }
-    if (inputs.preset === 'php-composer') {
-        return joinDefaultEntries('composer-cache', 'vendor');
-    }
-    return '';
-}
-function joinDefaultEntries(...groups) {
-    return groups
-        .flatMap((group) => group.split(/\r?\n/))
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .join('\n');
-}
-async function detectNodeDefaultArchiveEntries(workingDirectory) {
-    const packageManager = await detectNodePackageManager(workingDirectory);
-    if (!packageManager) {
-        return '';
-    }
-    switch (packageManager.name) {
-        case 'pnpm':
-            return 'pnpm-store\nnode-modules';
-        case 'yarn':
-            return 'yarn-cache\nnode-modules';
-        case 'npm':
-            return 'npm-cache\nnode-modules';
-    }
-}
-export async function buildArchiveEntries(inputs, runtimeTools) {
-    let archiveEntries = [];
-    let restoreCandidates = [];
-    let archiveExcludes = [];
-    let usesCacheFormat = false;
-    const envVars = {};
-    let cacheTagPrefix;
-    let resolvedWorkspace;
-    let sourceEntries = inputs.entries;
+export async function buildArchiveEntries(inputs) {
     const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
-    const repoConfigPath = findNearestRepoConfigPath(inputs.workingDirectory);
-    const fallbackWorkspace = resolveWorkspace(inputs.workspace);
-    const cliWorkspaceInput = inputs.workspace.trim();
-    const cliToolTagSuffix = inputs.setup === 'mise'
-        ? buildMiseToolTag(runtimeTools, inputs.toolVersionScope)
-        : null;
-    const portableArchiveArgs = supportsPortableArchiveArgs(inputs.cliVersion);
-    const mergeCliPlan = (plan) => {
-        archiveEntries.push(...plan.tag_path_pairs);
-        if (!cacheTagPrefix) {
-            const firstEntry = plan.archive_entries?.[0];
-            const firstPair = plan.tag_path_pairs[0];
-            cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
-                || (firstPair ? parseEntries(firstPair, 'restore', {
-                    resolvePaths: false,
-                    separatorMode: 'single',
-                })[0]?.tag : undefined);
-        }
-        Object.assign(envVars, plan.env_vars);
-        if (!resolvedWorkspace && plan.workspace) {
-            resolvedWorkspace = plan.workspace;
-        }
-    };
-    if (cacheProfiles.length > 0 || sourceEntries.trim()) {
-        const semanticEntries = [];
-        const rawEntries = [];
-        for (const entry of splitEntriesInput(sourceEntries)) {
-            if (entry.includes(':')) {
-                rawEntries.push(entry);
-            }
-            else {
-                semanticEntries.push(entry.trim());
-            }
-        }
-        if (cacheProfiles.length > 0 || semanticEntries.length > 0) {
-            mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
-                workspaceInput: cliWorkspaceInput,
-                entryIds: semanticEntries,
-                profileNames: cacheProfiles,
-                cacheTag: inputs.cacheTag,
-                toolTagSuffix: cliToolTagSuffix,
-                readOnly: inputs.readOnly,
-                fallbackWorkspace,
-            }));
-        }
-        for (const entryToken of rawEntries) {
-            const parsedEntry = parseEntries(entryToken, 'restore', {
-                resolvePaths: false,
-                separatorMode: 'single',
-            })[0];
-            if (!parsedEntry) {
-                continue;
-            }
-            if (repoConfigPath && parsedEntry.restorePath === parsedEntry.savePath) {
-                const resolved = await maybeResolveRawEntryViaCli(inputs.workingDirectory, cliWorkspaceInput, parsedEntry.tag, inputs.cacheTag, cliToolTagSuffix, inputs.readOnly, fallbackWorkspace, portableArchiveArgs);
-                const shouldUpgrade = resolved
-                    && resolved.tag_path_pairs.length > 0
-                    && (cliPlanUsesRepoConfigResolution(resolved)
-                        || (!cliPlanHasProvenance(resolved) && Boolean(repoConfigPath)));
-                if (shouldUpgrade) {
-                    mergeCliPlan(resolved);
-                    continue;
-                }
-            }
-            if (!inputs.cacheTag.trim() && !cliToolTagSuffix?.trim()) {
-                if (!cacheTagPrefix) {
-                    cacheTagPrefix = parsedEntry.tag;
-                }
-                archiveEntries.push(entryToken);
-                continue;
-            }
-            mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
-                workspaceInput: cliWorkspaceInput,
-                manualTagPathPairs: [entryToken],
-                cacheTag: inputs.cacheTag,
-                toolTagSuffix: cliToolTagSuffix,
-                readOnly: inputs.readOnly,
-                fallbackWorkspace,
-                portableArchiveArgs,
-            }));
-        }
+    if (cacheProfiles.length === 0) {
+        return {
+            entries: '',
+            envVars: {},
+        };
     }
-    else if (inputs.path || inputs.key) {
-        if (!inputs.path || !inputs.key) {
-            throw new Error('actions/cache compatibility mode requires both path and key');
-        }
-        const resolvedArchivePaths = await resolveActionsCachePaths(inputs.path, inputs.workingDirectory);
-        archiveExcludes = resolvedArchivePaths.excludes;
-        if (!inputs.readOnly && archiveExcludes.length > 0 && !portableArchiveArgs) {
-            throw new Error(`actions/cache path exclusions require BoringCache CLI v${PORTABLE_ARCHIVE_ARGS_MIN_VERSION}+ so their cache-root scope is preserved exactly. Update cli-version, or use a restore-only step with read-only: true.`);
-        }
-        const archivePathPlan = await runDryRunPlan(inputs.workingDirectory, {
-            workspaceInput: cliWorkspaceInput,
-            archivePaths: resolvedArchivePaths.paths,
-            archiveTagPrefix: inputs.key,
-            archiveRestorePrefixes: getRestoreKeyCandidates(inputs),
-            noPlatform: inputs.noPlatform || inputs.enableCrossOsArchive,
-            readOnly: inputs.readOnly,
-            fallbackWorkspace,
-            portableArchiveArgs,
-        });
-        archiveEntries = archivePathPlan.tag_path_pairs;
-        restoreCandidates = (archivePathPlan.archive_restore_candidates || []).map((candidate) => ({
-            tagPrefix: candidate.tag_prefix,
-            entries: candidate.tag_path_pairs.join('\n'),
-        }));
-        usesCacheFormat = true;
-        cacheTagPrefix = inputs.key.trim() || undefined;
-    }
-    else {
-        sourceEntries = await detectDefaultArchiveEntries(inputs);
-        const defaultEntryIds = splitEntriesInput(sourceEntries).map((entry) => entry.trim());
-        if (defaultEntryIds.length > 0) {
-            mergeCliPlan(await runDryRunPlan(inputs.workingDirectory, {
-                workspaceInput: cliWorkspaceInput,
-                entryIds: defaultEntryIds,
-                cacheTag: inputs.cacheTag,
-                toolTagSuffix: cliToolTagSuffix,
-                readOnly: inputs.readOnly,
-                fallbackWorkspace,
-            }));
-        }
-    }
+    const plan = await runDryRunPlan(inputs.workingDirectory, {
+        profileNames: cacheProfiles,
+        readOnly: inputs.readOnly,
+    });
+    const firstEntry = plan.archive_entries?.[0];
+    const firstPair = plan.tag_path_pairs[0];
+    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
+        || (firstPair ? parseEntries(firstPair, 'restore', { separatorMode: 'single' })[0]?.tag : undefined);
     return {
-        entries: archiveEntries.join('\n'),
-        excludes: archiveExcludes,
-        restoreCandidates,
-        usesCacheFormat,
-        envVars,
+        entries: plan.tag_path_pairs.join('\n'),
+        envVars: plan.env_vars,
         cacheTagPrefix,
-        workspace: resolvedWorkspace,
+        workspace: plan.workspace,
     };
 }
-export function validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries, pathExcludes) {
-    if (inputs.enableCrossOsArchive) {
-        assertCrossOsArchiveTransportSupported(inputs.cliVersion);
-    }
-    if (inputs.allowExternalSymlinks) {
-        assertExternalSymlinkRoundTripSupported(inputs.cliVersion);
-    }
-    if ((inputs.entries || inputs.cacheProfiles.trim()) && (inputs.path || inputs.key)) {
-        core.warning('Both explicit entries/cache-profiles and actions/cache compatibility inputs were provided. Using entries/cache-profiles.');
-    }
-    if ((inputs.path && !inputs.key) || (!inputs.path && inputs.key)) {
-        throw new Error('actions/cache compatibility mode requires both path and key');
-    }
-    if (pathExcludes.length > 0 && runtimeEntry) {
-        throw new Error('actions/cache path exclusions cannot share a save batch with the Mise runtime cache. Set cache-runtime: false or move the path cache to a separate boringcache/one step so exclusions remain scoped to their directory/** root.');
-    }
+export function validateOneInputs(inputs, modeSpec, archiveEntries) {
     if (inputs.setup !== 'mise' && inputs.tools.trim()) {
         core.warning(`Ignoring tools because setup=${inputs.setup}`);
     }
-    if (inputs.setup !== 'mise' && inputs.cacheRuntime) {
-        core.warning(`Ignoring cache-runtime because setup=${inputs.setup}`);
-    }
-    if (inputs.setup === 'mise' && inputs.cacheRuntime && runtimeTools.length === 0) {
-        core.warning('cache-runtime requested but no mise tools were resolved');
-    }
-    const hasArchiveInputs = Boolean(archiveEntries || runtimeEntry);
-    if (modeSpec.resolved === 'archive' && !hasArchiveInputs) {
-        if (inputs.cliVersion.trim().toLowerCase() !== 'skip') {
-            core.notice('No cache entries resolved; boringcache/one will install the CLI only.');
-            return;
-        }
-        throw new Error('No cache entries resolved. Provide entries, path+key, or enable cache-runtime with setup=mise.');
+    if (modeSpec.resolved === 'archive' && !archiveEntries) {
+        throw new Error('Archive mode requires cache-profiles from the committed .boringcache.toml plan.');
     }
 }
 export async function buildPlan(inputs) {
     const modeSpec = resolveModeSpec(inputs.mode);
     assertImplementedMode(modeSpec);
     const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
-    const fallbackWorkspace = resolveWorkspace(inputs.workspace);
-    const explicitWorkspace = inputs.workspace.trim();
-    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.preset, inputs.mode, inputs.tools, inputs.workingDirectory, inputs.uvVersion, inputs.composerVersion);
+    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.mode, inputs.tools, inputs.workingDirectory);
     if (inputs.setup === 'mise'
         && modeSpec.resolved === 'maven'
         && resolvedMavenVersion
@@ -2390,64 +1674,34 @@ export async function buildPlan(inputs) {
             source: 'mode',
         });
     }
-    const archiveEntries = await buildArchiveEntries(inputs, runtimeTools);
-    const workspace = explicitWorkspace
-        ? fallbackWorkspace
-        : archiveEntries.workspace
-            || (!archiveEntries.usesCacheFormat
-                ? await maybeResolveWorkspaceViaCli(inputs.workingDirectory, explicitWorkspace, fallbackWorkspace, inputs.readOnly)
-                : null)
-            || fallbackWorkspace;
-    const cacheTagPrefix = getCacheTagPrefix(inputs, runtimeTools, archiveEntries.cacheTagPrefix);
-    const runtimeTag = inputs.setup === 'mise' && inputs.cacheRuntime
-        ? buildRuntimeCacheTag(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
-        : null;
-    const runtimeEntry = inputs.setup === 'mise' && inputs.cacheRuntime
-        ? buildRuntimeCacheEntry(cacheTagPrefix, inputs.runtimeCacheTag, runtimeTools, inputs.toolVersionScope)
-        : null;
-    validateOneInputs(inputs, modeSpec, runtimeTools, runtimeEntry, archiveEntries.entries, archiveEntries.excludes);
+    const archiveEntries = await buildArchiveEntries(inputs);
+    const workspace = archiveEntries.workspace
+        || await maybeResolveWorkspaceViaCli(inputs.workingDirectory, inputs.readOnly);
+    if (!workspace) {
+        throw new Error('The BoringCache CLI plan did not resolve a workspace. Set workspace in .boringcache.toml.');
+    }
+    const cacheTagPrefix = getCacheTagPrefix(archiveEntries.cacheTagPrefix);
+    validateOneInputs(inputs, modeSpec, archiveEntries.entries);
     return {
         workspace,
         workingDirectory: inputs.workingDirectory,
         setup: inputs.setup,
         mode: modeSpec.resolved,
         modeSpec,
-        preset: inputs.preset,
         cacheTagPrefix,
         runtimeTools,
-        runtimeTag,
-        runtimeEntry,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
-        archiveExcludes: [
-            ...splitExcludeInput(inputs.exclude),
-            ...splitLiteralExcludeInput(inputs.excludePatterns),
-            ...archiveEntries.excludes,
-        ],
-        archiveRestoreCandidates: archiveEntries.restoreCandidates,
-        usesCacheFormat: archiveEntries.usesCacheFormat,
     };
 }
-export function getCacheTagPrefix(inputs, runtimeTools, resolvedArchivePrefix) {
-    if (inputs.cacheTag) {
-        return inputs.cacheTag;
-    }
+export function getCacheTagPrefix(resolvedArchivePrefix) {
     if (resolvedArchivePrefix?.trim()) {
         return resolvedArchivePrefix.trim();
-    }
-    if (inputs.key) {
-        return inputs.key;
-    }
-    if (runtimeTools.length > 0) {
-        return runtimeTools.map((tool) => tool.name).join('-');
     }
     return 'one';
 }
 export function buildFlagArgs(inputs) {
     const flagArgs = [];
-    if (inputs.enableCrossOsArchive || inputs.noPlatform) {
-        flagArgs.push('--no-platform');
-    }
     if (inputs.failOnCacheMiss) {
         flagArgs.push('--fail-on-cache-miss');
     }
@@ -2460,13 +1714,9 @@ export function buildFlagArgs(inputs) {
     if (inputs.verbose) {
         flagArgs.push('--verbose');
     }
-    if (inputs.allowExternalSymlinks) {
-        flagArgs.push('--allow-external-symlinks');
-    }
     return flagArgs;
 }
-export async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
-    void _runtimeCacheHit;
+export async function applyMiseSetup(runtimeTools, cwd) {
     if (runtimeTools.length === 0) {
         return false;
     }
@@ -2495,17 +1745,11 @@ export async function applyMiseSetup(runtimeTools, _runtimeCacheHit, cwd) {
     await exportMiseEnv(cwd);
     return true;
 }
-export async function applyPresetCacheEnv(plan) {
+export async function applyCliPlanEnv(plan) {
     for (const [key, value] of Object.entries(plan.envVars)) {
         core.exportVariable(key, value);
     }
 }
 export function serializeTools(runtimeTools) {
     return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');
-}
-export function getRestoreKeyCandidates(inputs) {
-    return inputs.restoreKeys
-        .split('\n')
-        .map((value) => value.trim())
-        .filter(Boolean);
 }
