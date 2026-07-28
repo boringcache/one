@@ -345,6 +345,12 @@ export async function startRegistryProxy(options) {
     if (options.onDemand) {
         args.push('--on-demand');
     }
+    else if (options.startupMode?.trim()) {
+        args.push('--startup-mode', options.startupMode.trim());
+    }
+    if (options.warmupStrategy?.trim()) {
+        args.push('--warmup-strategy', options.warmupStrategy.trim());
+    }
     for (const ref of options.ociPrefetchRefs || []) {
         const trimmed = ref.trim();
         if (trimmed) {
@@ -375,6 +381,9 @@ export async function startRegistryProxy(options) {
     }
     if (options.xcodeUpstreamPlugin?.trim()) {
         args.push('--xcode-upstream-plugin', options.xcodeUpstreamPlugin.trim());
+    }
+    if (options.xcodeCasPath?.trim()) {
+        args.push('--xcode-cas-path', options.xcodeCasPath.trim());
     }
     if (options.xcodeEvidenceJson?.trim()) {
         args.push('--xcode-evidence-json', options.xcodeEvidenceJson.trim());
