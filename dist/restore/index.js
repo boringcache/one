@@ -94007,6 +94007,12 @@ async function proxy_startRegistryProxy(options) {
     if (options.onDemand) {
         args.push('--on-demand');
     }
+    else if (options.startupMode?.trim()) {
+        args.push('--startup-mode', options.startupMode.trim());
+    }
+    if (options.warmupStrategy?.trim()) {
+        args.push('--warmup-strategy', options.warmupStrategy.trim());
+    }
     for (const ref of options.ociPrefetchRefs || []) {
         const trimmed = ref.trim();
         if (trimmed) {
@@ -94037,6 +94043,9 @@ async function proxy_startRegistryProxy(options) {
     }
     if (options.xcodeUpstreamPlugin?.trim()) {
         args.push('--xcode-upstream-plugin', options.xcodeUpstreamPlugin.trim());
+    }
+    if (options.xcodeCasPath?.trim()) {
+        args.push('--xcode-cas-path', options.xcodeCasPath.trim());
     }
     if (options.xcodeEvidenceJson?.trim()) {
         args.push('--xcode-evidence-json', options.xcodeEvidenceJson.trim());
@@ -96969,10 +96978,17 @@ async function runDockerBuildOperation(operation) {
     }
 }
 function actionProxyOptions(options, proxyPlan, failOnCacheError = false) {
+    // CLI <=1.14 reported "warm" but did not support --startup-mode. Omitting
+    // the new flag preserves that CLI's default while newer plans are explicit.
+    const plannedStartupMode = proxyPlan?.startup_mode;
     return {
         ...options,
         failOnCacheError,
-        onDemand: proxyPlan?.startup_mode === 'on-demand',
+        onDemand: plannedStartupMode === 'on-demand',
+        startupMode: plannedStartupMode === 'warm'
+            ? options.startupMode
+            : plannedStartupMode || options.startupMode,
+        warmupStrategy: proxyPlan?.warmup_strategy,
         ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
         ociRequiredReadableRefs: options.ociRequiredReadableRefs || [],
         ociHydration: proxyPlan?.oci_hydration || options.ociHydration || utils_DEFAULT_OCI_HYDRATION_POLICY,
@@ -98373,6 +98389,14 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false, p
     }, proxyPlan));
     return proxy;
 }
+async function startPortableCacheProxyWithFallback(workspace, preferredPort, tag, readOnly, proxyPlan) {
+    try {
+        return await startPortableCacheProxy(workspace, preferredPort, tag, readOnly, proxyPlan);
+    }
+    catch {
+        return startPortableCacheProxy(workspace, await findAvailablePort(), tag, readOnly, proxyPlan);
+    }
+}
 function parseSccacheIntegerStat(output, label) {
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const match = output.match(new RegExp(`^${escaped}\\s+(\\d+)$`, 'm'));
@@ -99185,9 +99209,10 @@ async function runXcodeRestore(plan, inputs) {
     const env = setup.env_vars || {};
     const socketPath = env.BORINGCACHE_XCODE_PROXY_SOCKET?.trim() || '';
     const upstreamPlugin = env.BORINGCACHE_XCODE_UPSTREAM_PLUGIN?.trim() || '';
+    const casPath = env.BORINGCACHE_XCODE_CAS_PATH?.trim() || '';
     const evidencePath = env.BORINGCACHE_XCODE_EVIDENCE_JSON?.trim() || '';
-    if (!socketPath || !upstreamPlugin) {
-        throw new Error('boringcache xcode setup plan did not include its Unix bridge paths');
+    if (!socketPath || !upstreamPlugin || !casPath) {
+        throw new Error('boringcache xcode setup plan did not include its Apple CAS bridge paths');
     }
     applyAdapterSetupPlan(setup);
     const proxy = await proxy_startRegistryProxy(actionProxyOptions({
@@ -99202,6 +99227,7 @@ async function runXcodeRestore(plan, inputs) {
         readOnly: proxyPlan.proxy.read_only,
         xcodeSocket: socketPath,
         xcodeUpstreamPlugin: upstreamPlugin,
+        xcodeCasPath: casPath,
         xcodeEvidenceJson: evidencePath,
     }, proxyPlan.proxy, inputs.failOnCacheError));
     saveModeState('proxy-pid', String(proxy.pid));
@@ -99233,17 +99259,24 @@ async function runTurboProxyRestore(plan, inputs) {
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
     const packageManager = await detectNodePackageManager(plan.workingDirectory);
-    await ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools);
+    const proxyPromise = startPortableCacheProxyWithFallback(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
+    const [proxyResult, corepackResult] = await Promise.allSettled([
+        proxyPromise,
+        ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools),
+    ]);
+    if (corepackResult.status === 'rejected') {
+        if (proxyResult.status === 'fulfilled') {
+            await proxy_stopRegistryProxy(proxyResult.value.pid, proxyResult.value.port);
+        }
+        throw corepackResult.reason;
+    }
+    if (proxyResult.status === 'rejected') {
+        throw proxyResult.reason;
+    }
+    const proxy = proxyResult.value;
     if (packageManager) {
         setOutput('package-manager', packageManager.name);
         setOutput('package-manager-cache-dir', plannedNodePackageManagerCacheDir(packageManager, turboPlan) || packageManager.cacheDir);
-    }
-    let proxy;
-    try {
-        proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
-    }
-    catch {
-        proxy = await startPortableCacheProxy(workspace, await findAvailablePort(), cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     }
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
@@ -99263,13 +99296,7 @@ async function runNxProxyRestore(plan, inputs) {
     });
     const workspace = nxPlan.workspace;
     const cacheTag = nxPlan.tag;
-    let proxy;
-    try {
-        proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
-    }
-    catch {
-        proxy = await startPortableCacheProxy(workspace, await findAvailablePort(), cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
-    }
+    const proxy = await startPortableCacheProxyWithFallback(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy.port);
     exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port));
@@ -99450,6 +99477,20 @@ async function stopProxyFromState() {
 
 
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
+const ARCHIVE_OVERLAP_MODES = new Set([
+    'bazel',
+    'ccache',
+    'go',
+    'gradle',
+    'maven',
+    'nx',
+    'sccache',
+    'turbo',
+    'xcode',
+]);
+function modeRestoreCanOverlapArchive(mode) {
+    return ARCHIVE_OVERLAP_MODES.has(mode);
+}
 function appendRestoreDiagnostic(current, data) {
     return `${current}${data.toString()}`.slice(-MAX_RESTORE_DIAGNOSTIC_CHARS);
 }
@@ -99495,7 +99536,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs) {
+async function restoreEntries(workspace, entriesString, flagArgs, onRestoreStart) {
     if (!entriesString.trim()) {
         return { hit: false, saveEntries: '' };
     }
@@ -99533,7 +99574,7 @@ async function restoreEntries(workspace, entriesString, flagArgs) {
         ];
         let stdout = '';
         let stderr = '';
-        const restoreExitCode = await execBoringCache(restoreArgs, {
+        const restoreProcess = execBoringCache(restoreArgs, {
             ignoreReturnCode: true,
             listeners: {
                 stdout: (data) => {
@@ -99544,6 +99585,8 @@ async function restoreEntries(workspace, entriesString, flagArgs) {
                 },
             },
         });
+        onRestoreStart?.();
+        const restoreExitCode = await restoreProcess;
         if (restoreExitCode === 0) {
             return { hit: true, saveEntries };
         }
@@ -99661,11 +99704,39 @@ async function run() {
         };
         process.chdir(plan.workingDirectory);
         await applyCliPlanEnv(plan);
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs));
-        if (plan.setup === 'mise') {
-            await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
+        let signalArchiveRestoreStarted = () => { };
+        const archiveRestoreStarted = new Promise((resolve) => {
+            let signaled = false;
+            signalArchiveRestoreStarted = () => {
+                if (!signaled) {
+                    signaled = true;
+                    resolve();
+                }
+            };
+        });
+        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), signalArchiveRestoreStarted);
+        void archiveRestorePromise.then(signalArchiveRestoreStarted, signalArchiveRestoreStarted);
+        await archiveRestoreStarted;
+        try {
+            if (plan.setup === 'mise') {
+                await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
+            }
         }
-        const modeRestore = await runModeRestore(plan, effectiveInputs);
+        catch (error) {
+            // The archive restore was already in flight so mise could benefit from
+            // restored package-manager state. Settle it before preserving the setup error.
+            await archiveRestorePromise.catch(() => undefined);
+            throw error;
+        }
+        const [archiveRestore, modeRestore] = modeRestoreCanOverlapArchive(plan.mode)
+            ? await Promise.all([
+                archiveRestorePromise,
+                runModeRestore(plan, effectiveInputs),
+            ])
+            : [
+                await archiveRestorePromise,
+                await runModeRestore(plan, effectiveInputs),
+            ];
         const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
         const genericSaveEntries = archiveRestore.saveEntries;
         const verificationSpecs = [

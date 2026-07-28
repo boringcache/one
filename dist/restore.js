@@ -2,6 +2,20 @@ import * as core from '@actions/core';
 import { applyTrustTokenPolicy, applyCliPlanEnv, applyMiseSetup, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
+const ARCHIVE_OVERLAP_MODES = new Set([
+    'bazel',
+    'ccache',
+    'go',
+    'gradle',
+    'maven',
+    'nx',
+    'sccache',
+    'turbo',
+    'xcode',
+]);
+function modeRestoreCanOverlapArchive(mode) {
+    return ARCHIVE_OVERLAP_MODES.has(mode);
+}
 function appendRestoreDiagnostic(current, data) {
     return `${current}${data.toString()}`.slice(-MAX_RESTORE_DIAGNOSTIC_CHARS);
 }
@@ -47,7 +61,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs) {
+async function restoreEntries(workspace, entriesString, flagArgs, onRestoreStart) {
     if (!entriesString.trim()) {
         return { hit: false, saveEntries: '' };
     }
@@ -85,7 +99,7 @@ async function restoreEntries(workspace, entriesString, flagArgs) {
         ];
         let stdout = '';
         let stderr = '';
-        const restoreExitCode = await execBoringCache(restoreArgs, {
+        const restoreProcess = execBoringCache(restoreArgs, {
             ignoreReturnCode: true,
             listeners: {
                 stdout: (data) => {
@@ -96,6 +110,8 @@ async function restoreEntries(workspace, entriesString, flagArgs) {
                 },
             },
         });
+        onRestoreStart?.();
+        const restoreExitCode = await restoreProcess;
         if (restoreExitCode === 0) {
             return { hit: true, saveEntries };
         }
@@ -213,11 +229,39 @@ export async function run() {
         };
         process.chdir(plan.workingDirectory);
         await applyCliPlanEnv(plan);
-        const archiveRestore = await restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs));
-        if (plan.setup === 'mise') {
-            await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
+        let signalArchiveRestoreStarted = () => { };
+        const archiveRestoreStarted = new Promise((resolve) => {
+            let signaled = false;
+            signalArchiveRestoreStarted = () => {
+                if (!signaled) {
+                    signaled = true;
+                    resolve();
+                }
+            };
+        });
+        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), signalArchiveRestoreStarted);
+        void archiveRestorePromise.then(signalArchiveRestoreStarted, signalArchiveRestoreStarted);
+        await archiveRestoreStarted;
+        try {
+            if (plan.setup === 'mise') {
+                await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
+            }
         }
-        const modeRestore = await runModeRestore(plan, effectiveInputs);
+        catch (error) {
+            // The archive restore was already in flight so mise could benefit from
+            // restored package-manager state. Settle it before preserving the setup error.
+            await archiveRestorePromise.catch(() => undefined);
+            throw error;
+        }
+        const [archiveRestore, modeRestore] = modeRestoreCanOverlapArchive(plan.mode)
+            ? await Promise.all([
+                archiveRestorePromise,
+                runModeRestore(plan, effectiveInputs),
+            ])
+            : [
+                await archiveRestorePromise,
+                await runModeRestore(plan, effectiveInputs),
+            ];
         const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
         const genericSaveEntries = archiveRestore.saveEntries;
         const verificationSpecs = [
