@@ -25,7 +25,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27 # v1.13.106
+- uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
   with:
     trust-policy: auto
     setup: none
@@ -56,7 +56,7 @@ and sparse representation; BoringCache does not verify files a second time. See
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27 # v1.13.106
+- uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
   with:
     trust-policy: auto
     setup: none
@@ -77,7 +77,7 @@ after the job.
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27 # v1.13.106
+- uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
   with:
     trust-policy: auto
     setup: none
@@ -100,7 +100,7 @@ inventory is contract-checked against it.
 
 ## Updates
 
-The examples pin the reviewed `v1.13.106` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.14.0` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
