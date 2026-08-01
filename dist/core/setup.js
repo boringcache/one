@@ -336,6 +336,9 @@ export async function ensureBoringCache(options) {
                 cachedPath = '';
             }
         }
+        else {
+            cachedPath = '';
+        }
     }
     if (cachedPath) {
         core.info(`Using cached BoringCache CLI`);

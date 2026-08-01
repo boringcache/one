@@ -46,12 +46,11 @@ An isolated trusted candidate job uses `trust-policy: stage` with
 `BORINGCACHE_STAGE_TOKEN`; a later trusted Docker or BuildKit build imports its
 exact `cache-candidates` output without adding another export.
 
-Archive entries are opaque tar round trips. GNU tar creates a canonical stream
-whose SHA-256 is the cache identity; zstd is only its transport encoding. On
-restore, BoringCache verifies the decoded tar and invokes GNU tar or
-libarchive/bsdtar for safe-root extraction. Tar owns member types, modes, links,
-and sparse representation; BoringCache does not verify files a second time. See
-[archive profiles](docs/cache-inputs.md) for the exact ownership contract.
+Archive handling is built into the CLI on every supported platform. BoringCache
+verifies archives before restore and preserves modification times needed for
+build freshness; no system tar installation is required. See
+[archive mode](https://boringcache.com/docs#cli-run) for the customer-facing
+ownership contract.
 
 Docker mode:
 
@@ -88,15 +87,17 @@ Xcode mode on any macOS runner:
     -derivedDataPath "$BORINGCACHE_XCODE_DERIVED_DATA_PATH" build
 ```
 
-The Action installs the signed, checksummed universal CAS adapter, starts the
-credential-free local bridge, and exports Xcode's cache settings. See
-[Xcode mode](docs/modes/xcode.md) for path-cohort semantics and evidence.
+The Action installs the checksum-verified universal CAS adapter covered by the
+release's Sigstore bundle, starts the credential-free local bridge, and exports
+Xcode's cache settings. See
+[the Xcode guide](https://github.com/boringcache/cli/blob/main/docs/tool-guides.md#xcode)
+for path-cohort semantics and setup.
 
 ## Inputs
 
-Start with the [interface ownership guide](docs/interface.md). The exact
-shipped input and output reference is [`action.yml`](action.yml); the grouped
-inventory is contract-checked against it.
+Start with the [GitHub Actions guide](https://boringcache.com/docs#action). The
+exact shipped input and output reference is [`action.yml`](action.yml); the
+grouped inventory is contract-checked against it.
 
 ## Updates
 

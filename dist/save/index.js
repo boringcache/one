@@ -93500,6 +93500,9 @@ async function ensureBoringCache(options) {
                 cachedPath = '';
             }
         }
+        else {
+            cachedPath = '';
+        }
     }
     if (cachedPath) {
         info(`Using cached BoringCache CLI`);
@@ -95099,7 +95102,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.15.0',
+        cliVersion: getInput('cli-version') || 'v1.16.2',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
