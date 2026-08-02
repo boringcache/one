@@ -25,7 +25,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+- uses: boringcache/one@b1d1e466317cde2d78a86f8cb94347deebb501e9 # v1.16.3
   with:
     trust-policy: auto
     setup: none
@@ -55,7 +55,7 @@ ownership contract.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+- uses: boringcache/one@b1d1e466317cde2d78a86f8cb94347deebb501e9 # v1.16.3
   with:
     trust-policy: auto
     setup: none
@@ -76,7 +76,7 @@ after the job.
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+- uses: boringcache/one@b1d1e466317cde2d78a86f8cb94347deebb501e9 # v1.16.3
   with:
     trust-policy: auto
     setup: none
@@ -101,7 +101,7 @@ grouped inventory is contract-checked against it.
 
 ## Updates
 
-The examples pin the reviewed `v1.15.0` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.16.3` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
