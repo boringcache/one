@@ -79,6 +79,9 @@ inputs:
   build-args:
     description: 'Build arguments as newline-separated KEY=VALUE pairs.'
     required: false
+  labels:
+    description: 'Docker mode only: image labels, one per line. Each non-empty line is passed as a separate docker buildx build --label argument.'
+    required: false
   target:
     description: 'Target build stage.'
     required: false

@@ -97842,6 +97842,9 @@ function dockerBuildxArgs(opts) {
     for (const buildArg of opts.buildArgs) {
         args.push('--build-arg', buildArg);
     }
+    for (const label of opts.labels) {
+        args.push('--label', label);
+    }
     for (const secret of opts.secrets) {
         args.push('--secret', secret);
     }
@@ -98689,6 +98692,7 @@ async function runDockerRestore(plan, inputs) {
         : (imageInput || 'boringcache/docker-setup');
     const tags = parseList(core.getInput('tags') || 'latest');
     const buildArgs = parseMultiline(core.getInput('build-args') || '');
+    const labels = parseMultiline(core.getInput('labels') || '');
     const secrets = parseMultiline(core.getInput('secrets') || '');
     const dockerToolCache = inputs.dockerToolCache;
     const dockerToolCaches = parseList(dockerToolCache);
@@ -98774,6 +98778,7 @@ async function runDockerRestore(plan, inputs) {
                     image,
                     tags,
                     buildArgs,
+                    labels,
                     secrets,
                     target,
                     platforms,
@@ -98830,6 +98835,7 @@ async function runDockerRestore(plan, inputs) {
                     image,
                     tags,
                     buildArgs,
+                    labels,
                     secrets,
                     target,
                     platforms,
