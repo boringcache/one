@@ -91,7 +91,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.16.4',
+        cliVersion: core.getInput('cli-version') || 'v1.16.5',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -112,7 +112,7 @@ export function getInputs() {
         diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
         metadataHints: core.getInput('metadata-hints'),
         proxyPort: core.getInput('proxy-port'),
-        managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:cbf9d9e945f955b6e886daeca059ae01be9807512c61260e33e25b1ee94c515e',
+        managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:67119df5c17e41488ae8ccca4668b81f6e20e831f13cafe3c6a3463ff6b661ca',
         dockerToolCache: core.getInput('docker-tool-cache'),
         cacheProfiles: core.getInput('cache-profiles'),
         failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),

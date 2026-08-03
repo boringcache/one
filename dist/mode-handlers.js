@@ -8,7 +8,7 @@ import { DEFAULT_OCI_HYDRATION_POLICY, detectNodePackageManager, normalizeVerify
 import { readSha256File, verifySha256 } from './core/integrity';
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
 const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-metadata.json');
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:cbf9d9e945f955b6e886daeca059ae01be9807512c61260e33e25b1ee94c515e';
+const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:67119df5c17e41488ae8ccca4668b81f6e20e831f13cafe3c6a3463ff6b661ca';
 const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
 const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
 const BUILDCTL_VERSION = 'v0.31.2';
@@ -1867,10 +1867,10 @@ async function runDockerRestore(plan, inputs) {
     const image = shouldBuild
         ? core.getInput('image', { required: true })
         : (imageInput || 'boringcache/docker-setup');
-    const tags = parseList(core.getInput('tags') || 'latest');
     const buildArgs = parseMultiline(core.getInput('build-args') || '');
     const labels = parseMultiline(core.getInput('labels') || '');
     const outputs = parseMultiline(core.getInput('outputs') || '');
+    const tags = parseList(core.getInput('tags') || (outputs.length === 0 ? 'latest' : ''));
     const secrets = parseMultiline(core.getInput('secrets') || '');
     const dockerToolCache = inputs.dockerToolCache;
     const dockerToolCaches = parseList(dockerToolCache);
