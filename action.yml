@@ -82,18 +82,25 @@ inputs:
   labels:
     description: 'Docker mode only: image labels, one per line. Each non-empty line is passed as a separate docker buildx build --label argument.'
     required: false
+  outputs:
+    description: 'Docker mode only: Buildx output destinations, one per line. Explicit outputs disable the default local load.'
+    required: false
   target:
     description: 'Target build stage.'
     required: false
   platforms:
-    description: 'Target platforms for multi-arch builds.'
+    description: 'Target platforms for Docker or BuildKit builds, comma-separated or newline-separated. This does not install QEMU; set qemu to true when emulation is required.'
+    required: false
+  qemu:
+    description: 'Docker mode only: install QEMU/binfmt for non-native Linux targets requested by platforms. Must be true or false.'
+    default: 'false'
     required: false
   push:
     description: 'Whether to push image output to the registry. Must be true or false.'
     default: 'false'
     required: false
   load:
-    description: 'Whether to load Docker image output into the local daemon when supported. Must be true or false.'
+    description: 'Whether to load Docker image output into the local daemon when supported. Automatically disabled for multi-platform builds or explicit outputs. Must be true or false.'
     default: 'true'
     required: false
   no-cache:

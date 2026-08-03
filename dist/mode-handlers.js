@@ -852,11 +852,34 @@ async function getContainerNetworkMode(containerName) {
     }
     return networkMode;
 }
-async function setupQemuIfNeeded(platforms) {
-    if (!platforms) {
+function qemuInstallArchitectures(platforms) {
+    const requestedPlatforms = parseList(platforms);
+    if (requestedPlatforms.length === 0) {
+        throw new Error('qemu=true requires at least one target in platforms.');
+    }
+    const nativeArchitecture = {
+        x64: 'amd64',
+        ia32: '386',
+        mips64el: 'mips64le',
+    }[process.arch] || process.arch;
+    const installArchitectures = [];
+    for (const platform of requestedPlatforms) {
+        const [operatingSystem, architecture] = platform.split('/');
+        if (operatingSystem !== 'linux' || !architecture) {
+            throw new Error(`qemu=true supports explicit Linux OCI platforms such as linux/arm64; received "${platform}".`);
+        }
+        if (architecture !== nativeArchitecture && !installArchitectures.includes(architecture)) {
+            installArchitectures.push(architecture);
+        }
+    }
+    return installArchitectures;
+}
+async function setupQemu(architectures) {
+    if (architectures.length === 0) {
+        core.info('QEMU setup skipped because every requested platform is native to this runner.');
         return;
     }
-    const result = await exec.exec('docker', ['run', '--privileged', '--rm', DEFAULT_BINFMT_IMAGE, '--install', 'all'], { ignoreReturnCode: true });
+    const result = await exec.exec('docker', ['run', '--privileged', '--rm', DEFAULT_BINFMT_IMAGE, '--install', architectures.join(',')], { ignoreReturnCode: true });
     if (result !== 0) {
         throw new Error(`Failed to set up QEMU for multi-platform builds (exit ${result})`);
     }
@@ -995,6 +1018,9 @@ function dockerBuildxArgs(opts) {
     }
     for (const label of opts.labels) {
         args.push('--label', label);
+    }
+    for (const output of opts.outputs) {
+        args.push('--output', output);
     }
     for (const secret of opts.secrets) {
         args.push('--secret', secret);
@@ -1844,13 +1870,18 @@ async function runDockerRestore(plan, inputs) {
     const tags = parseList(core.getInput('tags') || 'latest');
     const buildArgs = parseMultiline(core.getInput('build-args') || '');
     const labels = parseMultiline(core.getInput('labels') || '');
+    const outputs = parseMultiline(core.getInput('outputs') || '');
     const secrets = parseMultiline(core.getInput('secrets') || '');
     const dockerToolCache = inputs.dockerToolCache;
     const dockerToolCaches = parseList(dockerToolCache);
     const target = core.getInput('target') || '';
-    const platforms = core.getInput('platforms') || '';
+    const platforms = parseList(core.getInput('platforms') || '').join(',');
+    const qemu = parseBooleanInput(core.getInput('qemu'), 'qemu', false);
+    const qemuArchitectures = qemu ? qemuInstallArchitectures(platforms) : [];
     const push = parseBooleanInput(core.getInput('push'), 'push', false);
-    const load = parseBooleanInput(core.getInput('load'), 'load', true) && !platforms;
+    const load = parseBooleanInput(core.getInput('load'), 'load', true)
+        && parseList(platforms).length <= 1
+        && outputs.length === 0;
     const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
     const provenance = parseBooleanInput(core.getInput('provenance'), 'provenance', false);
     const sbom = parseBooleanInput(core.getInput('sbom'), 'sbom', false);
@@ -1861,7 +1892,7 @@ async function runDockerRestore(plan, inputs) {
     if (cliOwnsManagedBuild) {
         assertPrivilegedRunnerPolicy('Managed BoringCache BuildKit');
     }
-    if (platforms) {
+    if (qemuArchitectures.length > 0) {
         assertPrivilegedRunnerPolicy('QEMU/binfmt registration');
     }
     if (dockerToolCaches.length > 0 && !shouldBuild) {
@@ -1873,6 +1904,9 @@ async function runDockerRestore(plan, inputs) {
     let resolvedCacheTag = '';
     saveModeState('workspace', plan.workspace);
     saveModeState('verbose', String(inputs.verbose));
+    if (qemu) {
+        await setupQemu(qemuArchitectures);
+    }
     let builderName = '';
     if (cliOwnsManagedBuild) {
         if (driver !== 'docker-container') {
@@ -1889,7 +1923,6 @@ async function runDockerRestore(plan, inputs) {
     saveModeState('builder-name', builderName);
     core.setOutput('buildx-name', builderName);
     core.setOutput('buildx-platforms', builderName ? await getBuilderPlatforms(builderName) : platforms);
-    await setupQemuIfNeeded(platforms);
     {
         let proxyBindHost = cliOwnsManagedBuild ? '' : '127.0.0.1';
         let refHost = cliOwnsManagedBuild ? '' : '127.0.0.1';
@@ -1930,6 +1963,7 @@ async function runDockerRestore(plan, inputs) {
                     tags,
                     buildArgs,
                     labels,
+                    outputs,
                     secrets,
                     target,
                     platforms,
@@ -1987,6 +2021,7 @@ async function runDockerRestore(plan, inputs) {
                     tags,
                     buildArgs,
                     labels,
+                    outputs,
                     secrets,
                     target,
                     platforms,
@@ -2072,7 +2107,7 @@ async function runBuildkitRestore(plan, inputs) {
     const secrets = parseMultiline(core.getInput('secrets') || '');
     const sshSpecs = parseMultiline(core.getInput('ssh') || '');
     const target = core.getInput('target') || '';
-    const platforms = core.getInput('platforms') || '';
+    const platforms = parseList(core.getInput('platforms') || '').join(',');
     const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
     const buildkitHost = core.getInput('buildkit-host', { required: true });
     const tlsCaInput = core.getInput('buildkit-tls-ca') || '';

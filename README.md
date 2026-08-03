@@ -67,11 +67,11 @@ Docker mode:
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name != 'pull_request' && secrets.BORINGCACHE_SAVE_TOKEN || '' }}
 ```
 
-Managed BuildKit and multi-platform QEMU setup need host-level container
-privileges. They run normally on GitHub-hosted runners. On a self-hosted runner,
-the Action fails closed unless `BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER=1` is
-set; use that attestation only for a single-tenant runner that is destroyed
-after the job.
+Managed BuildKit and opt-in `qemu: true` setup need host-level container
+privileges. `platforms` alone never installs emulators. These operations run
+normally on GitHub-hosted runners. On a self-hosted runner, the Action fails
+closed unless `BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER=1` is set; use that
+attestation only for a single-tenant runner that is destroyed after the job.
 
 Xcode mode on any macOS runner:
 
