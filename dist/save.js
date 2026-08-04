@@ -191,6 +191,10 @@ export async function run() {
             : fallbackResolution.resolved;
         applyTrustTokenPolicy(resolvedTrustPolicy);
         const trustState = buildActionTrustState(requestedTrustPolicy, resolvedTrustPolicy, (savedTrustStatus || fallbackResolution.status));
+        if (resolvedMode === 'cargo') {
+            core.info('Post step skipped: mode cargo completed its synchronous CLI lifecycle in the main Action step.');
+            return;
+        }
         let candidateReceiptFile = core.getState('candidate-receipt-file');
         if (resolvedTrustPolicy === 'stage' && !candidateReceiptFile) {
             candidateReceiptFile = prepareCandidateReceiptFile();

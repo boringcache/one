@@ -1,5 +1,5 @@
 name: 'BoringCache One'
-description: 'GitHub lifecycle for one CLI-owned BoringCache plan across archive, native tool, Docker, and BuildKit modes.'
+description: 'GitHub lifecycle for one CLI-owned BoringCache plan across archive, Cargo, native tool, Docker, and BuildKit modes.'
 author: 'BoringCache'
 inputs:
   cli-version:
@@ -14,7 +14,7 @@ inputs:
     default: 'none'
     required: false
   mode:
-    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.'
+    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.'
     default: 'archive'
     required: false
   working-directory:
@@ -210,7 +210,7 @@ inputs:
     description: 'Repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). Required for archive mode.'
     required: false
   save-always:
-    description: 'Run the post step to save the cache even if another step fails. Supports the same true spellings as GitHub boolean inputs.'
+    description: 'Run the post step to save the cache even if a later workflow step fails. It does not save after an embedded synchronous command, including Cargo, fails. Supports the same true spellings as GitHub boolean inputs.'
     default: 'false'
     required: false
   # CLI flags (passed directly to boringcache CLI)

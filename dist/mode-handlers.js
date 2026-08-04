@@ -221,6 +221,8 @@ export async function runModeRestore(plan, inputs, options = {}) {
             return runBuildkitRestore(plan, inputs);
         case 'bazel':
             return runBazelRestore(plan, inputs, options);
+        case 'cargo':
+            return runCargoRestore(plan, inputs);
         case 'ccache':
             return runCcacheRestore(plan, inputs);
         case 'go':
@@ -252,6 +254,8 @@ export async function runModeSave(mode, options = {}) {
         case 'bazel':
             await shutdownBazelServer();
             await stopProxyFromState();
+            return;
+        case 'cargo':
             return;
         case 'ccache':
             await runCcacheSave(options);
@@ -2230,6 +2234,124 @@ async function runBuildkitSave(options = {}) {
     await saveSimpleCache(workspace, cacheTag, cacheDir, {
         verbose: getModeState('verbose') === 'true',
     });
+}
+function readBoundedJsonObject(filePath) {
+    try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile() || stat.size > 1024 * 1024) {
+            core.warning(`Ignoring invalid Cargo native-tool evidence file: ${filePath}`);
+            return null;
+        }
+        const value = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : null;
+    }
+    catch (error) {
+        core.warning(`Unable to read Cargo native-tool evidence: ${error instanceof Error ? error.message : error}`);
+        return null;
+    }
+}
+function cargoArchiveVerificationSpecs(cargoPlan, workingDirectory) {
+    const specs = (cargoPlan.archive_entries || []).map((entry) => ({
+        tag: entry.tag,
+        noPlatform: cargoPlan.proxy.no_platform,
+        noGit: cargoPlan.proxy.no_git,
+        pathHint: entry.path
+            ? (path.isAbsolute(entry.path) ? entry.path : path.resolve(workingDirectory, entry.path))
+            : undefined,
+        saveExpected: !cargoPlan.proxy.read_only,
+    }));
+    specs.push(adapterProxyVerificationSpec(cargoPlan.tag, cargoPlan.proxy, workingDirectory));
+    const unique = new Map();
+    for (const spec of specs) {
+        const key = `${spec.tag}\0${String(spec.noPlatform)}\0${String(spec.noGit)}`;
+        if (!unique.has(key)) {
+            unique.set(key, spec);
+        }
+    }
+    return [...unique.values()];
+}
+async function runCargoRestore(plan, inputs) {
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+    const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const command = cargoPlan.command || [];
+    const targetEntry = (cargoPlan.archive_entries || []).find((entry) => entry.kind === 'cargo-target' || entry.requested === 'cargo-target');
+    const targetPreflight = targetEntry
+        ? await checkCompilerCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
+            noPlatform: cargoPlan.proxy.no_platform,
+            noGit: cargoPlan.proxy.no_git,
+            requireServerSignature: true,
+        })
+        : emptyCompilerCacheTagCheckStatus();
+    if (inputs.failOnCacheMiss && !inputs.lookupOnly) {
+        throw new Error('mode=cargo does not support fail-on-cache-miss while executing yet; '
+            + 'the CLI adapter does not expose that lifecycle hook. Use lookup-only for a preflight check.');
+    }
+    if (inputs.lookupOnly && inputs.failOnCacheMiss && !targetPreflight.cacheEntryHit) {
+        throw new Error(`Cargo target cache miss for ${targetEntry?.tag || 'the CLI-owned target entry'}`);
+    }
+    const verificationSpecs = cargoArchiveVerificationSpecs(cargoPlan, plan.workingDirectory);
+    const resolvedEntries = (cargoPlan.archive_entries || [])
+        .map((entry) => entry.tag_path_pair)
+        .join('\n');
+    if (inputs.lookupOnly) {
+        return {
+            cacheHit: targetPreflight.cacheEntryHit,
+            cacheTag: cargoPlan.tag,
+            resolvedEntries,
+            verificationSpecs,
+            evidence: {
+                command,
+                command_executed: false,
+                lookup_only: true,
+                target_cache_hit: targetPreflight.cacheEntryHit,
+                archive_entries: cargoPlan.archive_entries || [],
+            },
+        };
+    }
+    const nativeEvidencePath = path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
+    const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
+    appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
+    appendMetadataHintArgs(args, inputs.metadataHints);
+    if (inputs.failOnCacheError) {
+        args.push('--fail-on-cache-error');
+    }
+    args.push('--native-tool-evidence-json', nativeEvidencePath);
+    const startedAt = Date.now();
+    let nativeToolEvidence = null;
+    try {
+        const exitCode = await execBoringCache(args, {
+            cwd: plan.workingDirectory,
+            ignoreReturnCode: true,
+        });
+        if (exitCode !== 0) {
+            throw new Error(`boringcache cargo exited with code ${exitCode}`);
+        }
+        nativeToolEvidence = readBoundedJsonObject(nativeEvidencePath);
+    }
+    finally {
+        fs.rmSync(nativeEvidencePath, { force: true });
+    }
+    const commandEvidence = {
+        command,
+        elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
+        native_tool: nativeToolEvidence,
+    };
+    core.setOutput('cache-tag', cargoPlan.tag);
+    core.setOutput('workspace', cargoPlan.workspace);
+    return {
+        cacheHit: targetPreflight.cacheEntryHit,
+        cacheTag: cargoPlan.tag,
+        resolvedEntries,
+        verificationSpecs,
+        evidence: {
+            ...commandEvidence,
+            command_executed: true,
+            target_cache_hit: targetPreflight.cacheEntryHit,
+            archive_entries: cargoPlan.archive_entries || [],
+        },
+    };
 }
 async function runBazelRestore(plan, inputs, options) {
     const inputVersion = core.getInput('bazel-version') || '';

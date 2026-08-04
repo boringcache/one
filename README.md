@@ -2,9 +2,9 @@
 
 `boringcache/one` is GitHub lifecycle for the same CLI-owned BoringCache plan
 used locally and on any runner. It installs the CLI, restores and saves named
-archive profiles, and orchestrates Docker, BuildKit, Bazel, Go, Gradle, Maven,
-Turbo, Nx, C/C++ `ccache`, Rust `sccache`, and Xcode compilation-cache modes
-without inventing a second cache interface.
+archive profiles, and orchestrates Docker, BuildKit, Bazel, Cargo, Go, Gradle,
+Maven, Turbo, Nx, C/C++ `ccache`, Rust `sccache`, and Xcode compilation-cache
+modes without inventing a second cache interface.
 
 ## Quick start
 
@@ -51,6 +51,28 @@ verifies archives before restore and preserves modification times needed for
 build freshness; no system tar installation is required. See
 [archive mode](https://boringcache.com/docs#cli-run) for the customer-facing
 ownership contract.
+
+Cargo mode runs one complete repo-owned Cargo command inside the CLI's target,
+dependency, and sccache lifecycle. Keep the command beside the cache plan:
+
+```toml
+[adapters.cargo]
+tag = "rust-compiler"
+profiles = ["cargo"]
+command = ["cargo", "build", "--release"]
+```
+
+Select `mode: cargo` in one Action step. The Action invokes `boringcache cargo`
+synchronously; it does not reconstruct target restore, source-freshness,
+compiler-cache, or save policy in workflow YAML.
+
+Repeated Cargo Action uses preserve populated local Cargo state and let the CLI
+decide restore and save reuse. Multi-phase jobs that would mutate and publish
+the target after every phase should use one combined Cargo invocation or the
+job-wide `sccache` mode described in the Cargo mode guide.
+
+`save-always: true` cannot publish an incomplete Cargo target when the embedded
+command fails; Cargo publication happens synchronously only after success.
 
 Docker mode:
 
