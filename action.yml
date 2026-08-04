@@ -1,5 +1,5 @@
 name: 'BoringCache One'
-description: 'GitHub lifecycle for one CLI-owned BoringCache plan across archive, native tool, Docker, and BuildKit modes.'
+description: 'GitHub lifecycle for one CLI-owned BoringCache plan across archive, Cargo, native tool, Docker, and BuildKit modes.'
 author: 'BoringCache'
 inputs:
   cli-version:
@@ -14,7 +14,7 @@ inputs:
     default: 'none'
     required: false
   mode:
-    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.'
+    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.'
     default: 'archive'
     required: false
   working-directory:

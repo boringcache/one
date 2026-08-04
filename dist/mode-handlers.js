@@ -221,6 +221,8 @@ export async function runModeRestore(plan, inputs, options = {}) {
             return runBuildkitRestore(plan, inputs);
         case 'bazel':
             return runBazelRestore(plan, inputs, options);
+        case 'cargo':
+            return runCargoRestore(plan, inputs);
         case 'ccache':
             return runCcacheRestore(plan, inputs);
         case 'go':
@@ -252,6 +254,8 @@ export async function runModeSave(mode, options = {}) {
         case 'bazel':
             await shutdownBazelServer();
             await stopProxyFromState();
+            return;
+        case 'cargo':
             return;
         case 'ccache':
             await runCcacheSave(options);
@@ -2230,6 +2234,188 @@ async function runBuildkitSave(options = {}) {
     await saveSimpleCache(workspace, cacheTag, cacheDir, {
         verbose: getModeState('verbose') === 'true',
     });
+}
+function lineObserver(onLine) {
+    let pending = '';
+    return {
+        write(data) {
+            pending += data.toString();
+            const lines = pending.split('\n');
+            pending = lines.pop() || '';
+            for (const line of lines) {
+                onLine(line.replace(/\r$/, ''));
+            }
+        },
+        finish() {
+            if (pending) {
+                onLine(pending.replace(/\r$/, ''));
+                pending = '';
+            }
+        },
+    };
+}
+function readBoundedJsonObject(filePath) {
+    try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile() || stat.size > 1024 * 1024) {
+            core.warning(`Ignoring invalid Cargo native-tool evidence file: ${filePath}`);
+            return null;
+        }
+        const value = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : null;
+    }
+    catch (error) {
+        core.warning(`Unable to read Cargo native-tool evidence: ${error instanceof Error ? error.message : error}`);
+        return null;
+    }
+}
+function cargoArchiveVerificationSpecs(cargoPlan, workingDirectory) {
+    const specs = (cargoPlan.archive_entries || []).map((entry) => ({
+        tag: entry.tag,
+        noPlatform: cargoPlan.proxy.no_platform,
+        noGit: cargoPlan.proxy.no_git,
+        pathHint: entry.path
+            ? (path.isAbsolute(entry.path) ? entry.path : path.resolve(workingDirectory, entry.path))
+            : undefined,
+        saveExpected: !cargoPlan.proxy.read_only,
+    }));
+    specs.push(adapterProxyVerificationSpec(cargoPlan.tag, cargoPlan.proxy, workingDirectory));
+    const unique = new Map();
+    for (const spec of specs) {
+        const key = `${spec.tag}\0${String(spec.noPlatform)}\0${String(spec.noGit)}`;
+        if (!unique.has(key)) {
+            unique.set(key, spec);
+        }
+    }
+    return [...unique.values()];
+}
+async function runCargoRestore(plan, inputs) {
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+    const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const command = cargoPlan.command || [];
+    const commandName = command[0] ? path.basename(command[0]).toLowerCase() : '';
+    if (!['cargo', 'cargo.exe'].includes(commandName)) {
+        throw new Error('mode=cargo requires [adapters.cargo].command to contain one direct Cargo command.');
+    }
+    const targetEntry = (cargoPlan.archive_entries || []).find((entry) => entry.kind === 'cargo-target' || entry.requested === 'cargo-target');
+    const targetPreflight = targetEntry
+        ? await checkCompilerCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
+            noPlatform: cargoPlan.proxy.no_platform,
+            noGit: cargoPlan.proxy.no_git,
+            requireServerSignature: true,
+        })
+        : emptyCompilerCacheTagCheckStatus();
+    if (inputs.failOnCacheMiss && !targetPreflight.cacheEntryHit) {
+        throw new Error(`Cargo target cache miss for ${targetEntry?.tag || 'the CLI-owned target entry'}`);
+    }
+    const verificationSpecs = cargoArchiveVerificationSpecs(cargoPlan, plan.workingDirectory);
+    const resolvedEntries = (cargoPlan.archive_entries || [])
+        .map((entry) => entry.tag_path_pair)
+        .join('\n');
+    if (inputs.lookupOnly) {
+        return {
+            cacheHit: targetPreflight.cacheEntryHit,
+            cacheTag: cargoPlan.tag,
+            resolvedEntries,
+            verificationSpecs,
+            evidence: {
+                command,
+                command_executed: false,
+                lookup_only: true,
+                target_cache_hit: targetPreflight.cacheEntryHit,
+                archive_entries: cargoPlan.archive_entries || [],
+            },
+        };
+    }
+    const nativeEvidencePath = path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
+    let cargoJsonLines = 0;
+    let compilerArtifacts = 0;
+    let freshCompilerArtifacts = 0;
+    let rebuiltCompilerArtifacts = 0;
+    let buildFinishedSuccess = null;
+    let restoredUnchangedSources = null;
+    let changedOrNewSources = null;
+    const stdout = lineObserver((line) => {
+        if (!line.trim().startsWith('{')) {
+            return;
+        }
+        try {
+            const message = JSON.parse(line);
+            cargoJsonLines += 1;
+            if (message.reason === 'compiler-artifact') {
+                compilerArtifacts += 1;
+                if (message.fresh === true) {
+                    freshCompilerArtifacts += 1;
+                }
+                else if (message.fresh === false) {
+                    rebuiltCompilerArtifacts += 1;
+                }
+            }
+            else if (message.reason === 'build-finished' && typeof message.success === 'boolean') {
+                buildFinishedSuccess = message.success;
+            }
+        }
+        catch {
+            // Ordinary Cargo text output remains supported. JSON evidence is populated
+            // only when the repo-owned command selects Cargo's message-format JSON.
+        }
+    });
+    const stderr = lineObserver((line) => {
+        const freshness = line.match(/restored:\s*([0-9,]+) unchanged,\s*([0-9,]+) changed\/new;/);
+        if (freshness) {
+            restoredUnchangedSources = Number.parseInt(freshness[1].replace(/,/g, ''), 10);
+            changedOrNewSources = Number.parseInt(freshness[2].replace(/,/g, ''), 10);
+        }
+    });
+    const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
+    appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
+    appendMetadataHintArgs(args, inputs.metadataHints);
+    if (inputs.failOnCacheError) {
+        args.push('--fail-on-cache-error');
+    }
+    args.push('--native-tool-evidence-json', nativeEvidencePath);
+    const startedAt = Date.now();
+    const exitCode = await execBoringCache(args, {
+        cwd: plan.workingDirectory,
+        ignoreReturnCode: true,
+        listeners: {
+            stdout: stdout.write,
+            stderr: stderr.write,
+        },
+    });
+    stdout.finish();
+    stderr.finish();
+    if (exitCode !== 0) {
+        throw new Error(`boringcache cargo exited with code ${exitCode}`);
+    }
+    const commandEvidence = {
+        command,
+        elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
+        cargo_json_lines: cargoJsonLines,
+        compiler_artifacts: compilerArtifacts,
+        fresh_compiler_artifacts: freshCompilerArtifacts,
+        rebuilt_compiler_artifacts: rebuiltCompilerArtifacts,
+        build_finished_success: buildFinishedSuccess,
+        restored_unchanged_sources: restoredUnchangedSources,
+        changed_or_new_sources: changedOrNewSources,
+        native_tool: readBoundedJsonObject(nativeEvidencePath),
+    };
+    core.setOutput('cache-tag', cargoPlan.tag);
+    core.setOutput('workspace', cargoPlan.workspace);
+    return {
+        cacheHit: targetPreflight.cacheEntryHit,
+        cacheTag: cargoPlan.tag,
+        resolvedEntries,
+        verificationSpecs,
+        evidence: {
+            ...commandEvidence,
+            command_executed: true,
+            target_cache_hit: targetPreflight.cacheEntryHit,
+            archive_entries: cargoPlan.archive_entries || [],
+        },
+    };
 }
 async function runBazelRestore(plan, inputs, options) {
     const inputVersion = core.getInput('bazel-version') || '';
