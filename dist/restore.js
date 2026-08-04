@@ -277,6 +277,7 @@ export async function run() {
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
         const overallHit = modeRestore.cacheHit ?? archiveRestore.hit;
+        const resolvedEntries = modeRestore.resolvedEntries ?? plan.archiveEntries;
         const diagnostics = loadDiagnosticsConfig(inputs);
         core.setOutput('cache-hit', String(overallHit));
         core.setOutput('diagnostics-level', diagnostics.level);
@@ -284,7 +285,7 @@ export async function run() {
         core.setOutput('resolved-tools', serializeTools(plan.runtimeTools));
         core.setOutput('workspace', plan.workspace);
         core.setOutput('cache-tag', modeRestore.cacheTag || plan.cacheTagPrefix);
-        core.setOutput('resolved-entries', plan.archiveEntries);
+        core.setOutput('resolved-entries', resolvedEntries);
         core.setOutput('resolved-tags', resolvedTags.join(','));
         writeActionEvidence('restore', {
             phase_status: 'completed',
@@ -298,7 +299,7 @@ export async function run() {
             mode: plan.mode,
             working_directory: plan.workingDirectory,
             cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
-            resolved_entries: plan.archiveEntries,
+            resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
             mode_evidence: modeRestore.evidence || {},
@@ -315,7 +316,7 @@ export async function run() {
         restoreFailureContext = {
             ...restoreFailureContext,
             cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
-            resolved_entries: plan.archiveEntries,
+            resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
             mode_evidence: modeRestore.evidence || {},

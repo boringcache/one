@@ -95105,6 +95105,11 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Bazel remote cache proxy integration.',
     },
+    cargo: {
+        resolved: 'cargo',
+        implemented: true,
+        description: 'Cargo target, dependency, and compiler cache lifecycle.',
+    },
     ccache: {
         resolved: 'ccache',
         implemented: true,
@@ -95153,6 +95158,7 @@ function normalizeMode(value) {
         case 'docker':
         case 'buildkit':
         case 'bazel':
+        case 'cargo':
         case 'ccache':
         case 'go':
         case 'gradle':
@@ -95163,7 +95169,7 @@ function normalizeMode(value) {
         case 'xcode':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.`);
+            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.`);
     }
 }
 function resolveModeSpec(mode) {
@@ -95626,7 +95632,12 @@ function actionEvidencePath() {
     if (configuredPath) {
         return configuredPath;
     }
-    return external_path_.join(process.env.RUNNER_TEMP || external_os_.tmpdir(), 'boringcache-one-evidence.json');
+    // Each Action invocation owns its own evidence envelope. GitHub runs the
+    // main and post entrypoints in separate processes, but carries the saved
+    // path into post through action state. Including the main process id keeps
+    // repeated Action uses—and parallel local test workers—from overwriting one
+    // another before that handoff.
+    return external_path_.join(process.env.RUNNER_TEMP || external_os_.tmpdir(), `boringcache-one-evidence-${process.pid}.json`);
 }
 function readActionEvidence(filePath) {
     try {
@@ -97243,6 +97254,8 @@ async function runModeRestore(plan, inputs, options = {}) {
             return runBuildkitRestore(plan, inputs);
         case 'bazel':
             return runBazelRestore(plan, inputs, options);
+        case 'cargo':
+            return runCargoRestore(plan, inputs);
         case 'ccache':
             return runCcacheRestore(plan, inputs);
         case 'go':
@@ -97274,6 +97287,8 @@ async function runModeSave(mode, options = {}) {
         case 'bazel':
             await shutdownBazelServer();
             await stopProxyFromState();
+            return;
+        case 'cargo':
             return;
         case 'ccache':
             await runCcacheSave(options);
@@ -99253,6 +99268,117 @@ async function runBuildkitSave(options = {}) {
         verbose: getModeState('verbose') === 'true',
     });
 }
+function readBoundedJsonObject(filePath) {
+    try {
+        const stat = external_fs_namespaceObject.statSync(filePath);
+        if (!stat.isFile() || stat.size > 1024 * 1024) {
+            warning(`Ignoring invalid Cargo native-tool evidence file: ${filePath}`);
+            return null;
+        }
+        const value = JSON.parse(external_fs_namespaceObject.readFileSync(filePath, 'utf8'));
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : null;
+    }
+    catch (error) {
+        warning(`Unable to read Cargo native-tool evidence: ${error instanceof Error ? error.message : error}`);
+        return null;
+    }
+}
+function cargoArchiveVerificationSpecs(cargoPlan, workingDirectory) {
+    const specs = (cargoPlan.archive_entries || []).map((entry) => ({
+        tag: entry.tag,
+        noPlatform: cargoPlan.proxy.no_platform,
+        noGit: cargoPlan.proxy.no_git,
+        pathHint: entry.path
+            ? (external_path_.isAbsolute(entry.path) ? entry.path : external_path_.resolve(workingDirectory, entry.path))
+            : undefined,
+        saveExpected: !cargoPlan.proxy.read_only,
+    }));
+    specs.push(adapterProxyVerificationSpec(cargoPlan.tag, cargoPlan.proxy, workingDirectory));
+    const unique = new Map();
+    for (const spec of specs) {
+        const key = `${spec.tag}\0${String(spec.noPlatform)}\0${String(spec.noGit)}`;
+        if (!unique.has(key)) {
+            unique.set(key, spec);
+        }
+    }
+    return [...unique.values()];
+}
+async function runCargoRestore(plan, inputs) {
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+    const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const command = cargoPlan.command || [];
+    const targetEntry = (cargoPlan.archive_entries || []).find((entry) => entry.kind === 'cargo-target' || entry.requested === 'cargo-target');
+    const targetPreflight = targetEntry
+        ? await checkCompilerCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
+            noPlatform: cargoPlan.proxy.no_platform,
+            noGit: cargoPlan.proxy.no_git,
+            requireServerSignature: true,
+        })
+        : emptyCompilerCacheTagCheckStatus();
+    if (inputs.failOnCacheMiss && !inputs.lookupOnly) {
+        throw new Error('mode=cargo does not support fail-on-cache-miss while executing yet; '
+            + 'the CLI adapter does not expose that lifecycle hook. Use lookup-only for a preflight check.');
+    }
+    if (inputs.lookupOnly && inputs.failOnCacheMiss && !targetPreflight.cacheEntryHit) {
+        throw new Error(`Cargo target cache miss for ${targetEntry?.tag || 'the CLI-owned target entry'}`);
+    }
+    const verificationSpecs = cargoArchiveVerificationSpecs(cargoPlan, plan.workingDirectory);
+    const resolvedEntries = (cargoPlan.archive_entries || [])
+        .map((entry) => entry.tag_path_pair)
+        .join('\n');
+    if (inputs.lookupOnly) {
+        return {
+            cacheHit: targetPreflight.cacheEntryHit,
+            cacheTag: cargoPlan.tag,
+            resolvedEntries,
+            verificationSpecs,
+            evidence: {
+                command,
+                command_executed: false,
+                lookup_only: true,
+                target_cache_hit: targetPreflight.cacheEntryHit,
+                archive_entries: cargoPlan.archive_entries || [],
+            },
+        };
+    }
+    const nativeEvidencePath = external_path_.join(external_os_.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
+    const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
+    mode_handlers_appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
+    appendMetadataHintArgs(args, inputs.metadataHints);
+    if (inputs.failOnCacheError) {
+        args.push('--fail-on-cache-error');
+    }
+    args.push('--native-tool-evidence-json', nativeEvidencePath);
+    const startedAt = Date.now();
+    const exitCode = await mode_handlers_execBoringCache(args, {
+        cwd: plan.workingDirectory,
+        ignoreReturnCode: true,
+    });
+    if (exitCode !== 0) {
+        throw new Error(`boringcache cargo exited with code ${exitCode}`);
+    }
+    const commandEvidence = {
+        command,
+        elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
+        native_tool: readBoundedJsonObject(nativeEvidencePath),
+    };
+    setOutput('cache-tag', cargoPlan.tag);
+    setOutput('workspace', cargoPlan.workspace);
+    return {
+        cacheHit: targetPreflight.cacheEntryHit,
+        cacheTag: cargoPlan.tag,
+        resolvedEntries,
+        verificationSpecs,
+        evidence: {
+            ...commandEvidence,
+            command_executed: true,
+            target_cache_hit: targetPreflight.cacheEntryHit,
+            archive_entries: cargoPlan.archive_entries || [],
+        },
+    };
+}
 async function runBazelRestore(plan, inputs, options) {
     const inputVersion = getInput('bazel-version') || '';
     const bazelrcLines = getInput('bazelrc-lines') || '';
@@ -99976,6 +100102,7 @@ async function run() {
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
         const overallHit = modeRestore.cacheHit ?? archiveRestore.hit;
+        const resolvedEntries = modeRestore.resolvedEntries ?? plan.archiveEntries;
         const diagnostics = loadDiagnosticsConfig(inputs);
         setOutput('cache-hit', String(overallHit));
         setOutput('diagnostics-level', diagnostics.level);
@@ -99983,7 +100110,7 @@ async function run() {
         setOutput('resolved-tools', serializeTools(plan.runtimeTools));
         setOutput('workspace', plan.workspace);
         setOutput('cache-tag', modeRestore.cacheTag || plan.cacheTagPrefix);
-        setOutput('resolved-entries', plan.archiveEntries);
+        setOutput('resolved-entries', resolvedEntries);
         setOutput('resolved-tags', resolvedTags.join(','));
         writeActionEvidence('restore', {
             phase_status: 'completed',
@@ -99997,7 +100124,7 @@ async function run() {
             mode: plan.mode,
             working_directory: plan.workingDirectory,
             cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
-            resolved_entries: plan.archiveEntries,
+            resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
             mode_evidence: modeRestore.evidence || {},
@@ -100014,7 +100141,7 @@ async function run() {
         restoreFailureContext = {
             ...restoreFailureContext,
             cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
-            resolved_entries: plan.archiveEntries,
+            resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
             mode_evidence: modeRestore.evidence || {},

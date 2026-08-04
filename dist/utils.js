@@ -442,7 +442,12 @@ function actionEvidencePath() {
     if (configuredPath) {
         return configuredPath;
     }
-    return path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'boringcache-one-evidence.json');
+    // Each Action invocation owns its own evidence envelope. GitHub runs the
+    // main and post entrypoints in separate processes, but carries the saved
+    // path into post through action state. Including the main process id keeps
+    // repeated Action uses—and parallel local test workers—from overwriting one
+    // another before that handoff.
+    return path.join(process.env.RUNNER_TEMP || os.tmpdir(), `boringcache-one-evidence-${process.pid}.json`);
 }
 function readActionEvidence(filePath) {
     try {

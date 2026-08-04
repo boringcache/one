@@ -19,6 +19,11 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Bazel remote cache proxy integration.',
     },
+    cargo: {
+        resolved: 'cargo',
+        implemented: true,
+        description: 'Cargo target, dependency, and compiler cache lifecycle.',
+    },
     ccache: {
         resolved: 'ccache',
         implemented: true,
@@ -67,6 +72,7 @@ export function normalizeMode(value) {
         case 'docker':
         case 'buildkit':
         case 'bazel':
+        case 'cargo':
         case 'ccache':
         case 'go':
         case 'gradle':
@@ -77,7 +83,7 @@ export function normalizeMode(value) {
         case 'xcode':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.`);
+            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.`);
     }
 }
 export function resolveModeSpec(mode) {
