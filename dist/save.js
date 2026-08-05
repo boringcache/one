@@ -30,6 +30,7 @@ function parseSavedVerificationSpecs(raw) {
             tag: spec.tag,
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            includePrTag: spec.includePrTag,
             pathHint: spec.pathHint,
             saveExpected: spec.saveExpected,
         }));
