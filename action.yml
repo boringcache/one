@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.16.5'
+    default: 'v1.16.6'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -120,6 +120,13 @@ inputs:
   docker-tool-cache:
     description: 'Docker mode only: expose session-only BoringCache remote-cache config for Turbo, Nx, Bazel, Gradle, Maven, sccache, or Go inside matching Dockerfile RUN steps. Accepts comma- or newline-separated TOOL:TAG values, or plain tool names backed by [adapters.<tool>].tag.'
     required: false
+  docker-tool-cache-target:
+    description: 'Docker mode only: limit docker-tool-cache injection to selected Bake targets or Compose services. Comma- or newline-separated. Requires docker-tool-cache.'
+    required: false
+  docker-mount-cache:
+    description: 'Docker build mode only: offload RUN --mount=type=cache directories (Cargo target, package-manager stores) to the CAS between builds. Requires docker-command=build. Opt-in; proves value on changed-lockfile or compile-heavy workloads. Must be true or false.'
+    default: 'false'
+    required: false
   driver:
     description: 'Buildx driver for Docker mode.'
     default: 'docker-container'
@@ -136,7 +143,7 @@ inputs:
     required: false
   managed-buildkit-image:
     description: 'Managed BoringCache BuildKit image. Defaults to the signed release digest; pass an explicit digest for canaries.'
-    default: 'ghcr.io/boringcache/buildkit@sha256:67119df5c17e41488ae8ccca4668b81f6e20e831f13cafe3c6a3463ff6b661ca'
+    default: 'ghcr.io/boringcache/buildkit@sha256:57bdd820fc830c8adb8f5de4e9b651a52b8dbf63695b028634dc27347a385b67'
     required: false
   buildkit-host:
     description: 'BuildKit address for buildctl mode, for example tcp://host:1234 or unix:///run/buildkit/buildkitd.sock.'
