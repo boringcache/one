@@ -174,6 +174,9 @@ function checkFlagArgs(restoreFlagArgs) {
     if (restoreFlagArgs.includes('--no-git')) {
         args.push('--no-git');
     }
+    if (restoreFlagArgs.includes('--include-pr-tag')) {
+        args.push('--include-pr-tag');
+    }
     return args;
 }
 export async function run() {
@@ -239,7 +242,7 @@ export async function run() {
                 }
             };
         });
-        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(inputs), signalArchiveRestoreStarted);
+        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(effectiveInputs), signalArchiveRestoreStarted);
         void archiveRestorePromise.then(signalArchiveRestoreStarted, signalArchiveRestoreStarted);
         await archiveRestoreStarted;
         try {
@@ -267,7 +270,7 @@ export async function run() {
         const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
         const genericSaveEntries = archiveRestore.saveEntries;
         const verificationSpecs = [
-            ...buildGenericVerificationSpecs(plan, effectiveInputs.stage),
+            ...buildGenericVerificationSpecs(plan, effectiveInputs.stage, trustResolution.resolved === 'publish'),
             ...(modeRestore.verificationSpecs || []),
         ];
         const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
