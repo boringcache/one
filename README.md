@@ -25,7 +25,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@bf810e34331db84f9f11930e83b8813b5ad31ba1 # v1.16.4
+- uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
   with:
     trust-policy: auto
     setup: none
@@ -52,8 +52,12 @@ build freshness; no system tar installation is required. See
 [archive mode](https://boringcache.com/docs#cli-run) for the customer-facing
 ownership contract.
 
-Cargo mode runs one complete repo-owned Cargo command inside the CLI's target,
-dependency, and sccache lifecycle. Keep the command beside the cache plan:
+### Cargo mode
+
+The reviewed `v1.16.8` Action runs one complete repo-owned Cargo command inside
+the CLI's target,
+dependency, and sccache lifecycle. It provisions the audited sccache version
+before execution. Keep the command beside the cache plan:
 
 ```toml
 [adapters.cargo]
@@ -62,9 +66,10 @@ profiles = ["cargo"]
 command = ["cargo", "build", "--release"]
 ```
 
-Select `mode: cargo` in one Action step. The Action invokes `boringcache cargo`
-synchronously; it does not reconstruct target restore, source-freshness,
-compiler-cache, or save policy in workflow YAML.
+Select `mode: cargo` in one Action step with the reviewed `v1.16.8`
+distribution SHA used by the examples in this README. The Action invokes
+`boringcache cargo` synchronously; it does not reconstruct target restore,
+source-freshness, compiler-cache, or save policy in workflow YAML.
 
 Repeated Cargo Action uses preserve populated local Cargo state and let the CLI
 decide restore and save reuse. Multi-phase jobs that would mutate and publish
@@ -77,7 +82,7 @@ command fails; Cargo publication happens synchronously only after success.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@bf810e34331db84f9f11930e83b8813b5ad31ba1 # v1.16.4
+- uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
   with:
     trust-policy: auto
     setup: none
@@ -89,20 +94,22 @@ Docker mode:
     BORINGCACHE_SAVE_TOKEN: ${{ github.event_name != 'pull_request' && secrets.BORINGCACHE_SAVE_TOKEN || '' }}
 ```
 
-Managed BuildKit and opt-in `qemu: true` setup need host-level container
-privileges. `platforms` alone never installs emulators. These operations run
-normally on GitHub-hosted runners. On a self-hosted runner, the Action fails
-closed unless `BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER=1` is set; use that
-attestation only for a single-tenant runner that is destroyed after the job.
+Managed BuildKit setup needs host-level container privileges. It runs normally
+on GitHub-hosted runners. On a self-hosted runner, the Action fails closed
+unless `BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER=1` is set; use that attestation
+only for a single-tenant runner that is destroyed after the job.
 
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@bf810e34331db84f9f11930e83b8813b5ad31ba1 # v1.16.4
+- uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
   with:
     trust-policy: auto
     setup: none
     mode: xcode
+  env:
+    BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+    BORINGCACHE_SAVE_TOKEN: ${{ github.event_name != 'pull_request' && secrets.BORINGCACHE_SAVE_TOKEN || '' }}
 
 - run: >-
     xcodebuild -workspace App.xcworkspace -scheme App
@@ -123,7 +130,11 @@ grouped inventory is contract-checked against it.
 
 ## Updates
 
-The examples pin the reviewed `v1.16.4` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.16.8` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
+
+The Action package version and installed CLI version are independent. This
+reviewed Action installs CLI `v1.16.5` by default; `cli-version` is an explicit
+override, not a value inferred from the Action version.

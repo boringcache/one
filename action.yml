@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.16.5'
+    default: 'v1.16.6'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -119,6 +119,13 @@ inputs:
     required: false
   docker-tool-cache:
     description: 'Docker mode only: expose session-only BoringCache remote-cache config for Turbo, Nx, Bazel, Gradle, Maven, sccache, or Go inside matching Dockerfile RUN steps. Accepts comma- or newline-separated TOOL:TAG values, or plain tool names backed by [adapters.<tool>].tag.'
+    required: false
+  docker-tool-cache-target:
+    description: 'Docker mode only: limit docker-tool-cache injection to selected Bake targets or Compose services. Comma- or newline-separated. Requires docker-tool-cache.'
+    required: false
+  docker-mount-cache:
+    description: 'Docker build mode only: offload RUN --mount=type=cache directories (Cargo target, package-manager stores) to the CAS between builds. Requires docker-command=build. Opt-in; proves value on changed-lockfile or compile-heavy workloads. Must be true or false.'
+    default: 'false'
     required: false
   driver:
     description: 'Buildx driver for Docker mode.'

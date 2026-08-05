@@ -17297,7 +17297,13 @@ function processHeader (request, key, val) {
       } else if (typeof val[i] === 'object') {
         throw new InvalidArgumentError(`invalid ${key} header`)
       } else {
-        arr.push(`${val[i]}`)
+        // Coerce primitives (and reject unsafe coercions such as functions
+        // with a crafted toString/Symbol.toPrimitive).
+        const str = `${val[i]}`
+        if (!isValidHeaderValue(str)) {
+          throw new InvalidArgumentError(`invalid ${key} header`)
+        }
+        arr.push(str)
       }
     }
     val = arr
@@ -17308,7 +17314,12 @@ function processHeader (request, key, val) {
   } else if (val === null) {
     val = ''
   } else {
+    // Coerce primitives (and reject unsafe coercions such as functions
+    // with a crafted toString/Symbol.toPrimitive).
     val = `${val}`
+    if (!isValidHeaderValue(val)) {
+      throw new InvalidArgumentError(`invalid ${key} header`)
+    }
   }
 
   if (headerName === 'host') {
@@ -18685,6 +18696,7 @@ const {
   RequestContentLengthMismatchError,
   ResponseContentLengthMismatchError,
   RequestAbortedError,
+  InvalidArgumentError,
   HeadersTimeoutError,
   HeadersOverflowError,
   SocketError,
@@ -19668,8 +19680,16 @@ function writeH1 (client, request) {
     }
     body = bodyStream.stream
     contentLength = bodyStream.length
-  } else if (util.isBlobLike(body) && request.contentType == null && body.type) {
-    headers.push('content-type', body.type)
+  } else if (util.isBlobLike(body) && request.contentType == null) {
+    const contentType = body.type
+    if (contentType) {
+      const contentTypeValue = `${contentType}`
+      if (!util.isValidHeaderValue(contentTypeValue)) {
+        util.errorRequest(client, request, new InvalidArgumentError('invalid content-type header'))
+        return false
+      }
+      headers.push('content-type', contentTypeValue)
+    }
   }
 
   if (body && typeof body.read === 'function') {
@@ -23156,6 +23176,28 @@ function calculateRetryAfterHeader (retryAfter) {
   return new Date(retryAfter).getTime() - current
 }
 
+function validatePartialResponseContentLength (headers, range, statusCode, retryCount) {
+  const contentLength = headers['content-length']
+  if (contentLength == null) {
+    return null
+  }
+
+  if (!Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+    return null
+  }
+
+  const length = Number(contentLength)
+  const expectedLength = range.end - range.start + 1
+  if (!Number.isFinite(length) || length !== expectedLength) {
+    return new RequestRetryError('Content-Length mismatch', statusCode, {
+      headers,
+      data: { count: retryCount }
+    })
+  }
+
+  return null
+}
+
 class RetryHandler {
   constructor (opts, handlers) {
     const { retryOptions, ...dispatchOpts } = opts
@@ -23370,6 +23412,12 @@ class RetryHandler {
         return false
       }
 
+      const contentLengthError = validatePartialResponseContentLength(headers, contentRange, statusCode, this.retryCount)
+      if (contentLengthError != null) {
+        this.abort(contentLengthError)
+        return false
+      }
+
       const { start, size, end = size - 1 } = contentRange
 
       assert(this.start === start, 'content-range mismatch')
@@ -23391,6 +23439,12 @@ class RetryHandler {
             resume,
             statusMessage
           )
+        }
+
+        const contentLengthError = validatePartialResponseContentLength(headers, range, statusCode, this.retryCount)
+        if (contentLengthError != null) {
+          this.abort(contentLengthError)
+          return false
         }
 
         const { start, size, end = size - 1 } = range
@@ -27664,7 +27718,7 @@ function validateCookiePath (path) {
 
     if (
       code < 0x20 || // exclude CTLs (0-31)
-      code === 0x7F || // DEL
+      code > 0x7E || // exclude DEL and non-ascii
       code === 0x3B // ;
     ) {
       throw new Error('Invalid cookie path')
@@ -27673,16 +27727,80 @@ function validateCookiePath (path) {
 }
 
 /**
- * I have no idea why these values aren't allowed to be honest,
- * but Deno tests these. - Khafra
+ * <let-dig> ::= <letter> | <digit>
+ *
+ * <letter> ::= any one of the 52 alphabetic characters A through Z in
+ * upper case and a through z in lower case
+ *
+ * <digit> ::= any one of the ten digits 0 through 9r
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+ * @param {number} code
+ */
+function isLetterOrDigit (code) {
+  return (
+    (code >= 0x30 && code <= 0x39) || // 0-9
+    (code >= 0x41 && code <= 0x5A) || // A-Z
+    (code >= 0x61 && code <= 0x7A) // a-z
+  )
+}
+
+/**
+ * Validates a cookie domain against the "preferred name syntax".
+ *
+ * <domain>      ::= <subdomain> | " "
+ * <subdomain>   ::= <label> | <subdomain> "." <label>
+ * <label>       ::= <let-dig> [ [ <ldh-str> ] <let-dig> ]
+ * <ldh-str>     ::= <let-dig-hyp> | <let-dig-hyp> <ldh-str>
+ * <let-dig-hyp> ::= <let-dig> | "-"
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+ * @see https://www.rfc-editor.org/rfc/rfc1123#section-2.1
+ * @see https://www.rfc-editor.org/rfc/rfc1035#section-2.3.4
  * @param {string} domain
  */
 function validateCookieDomain (domain) {
-  if (
-    domain.startsWith('-') ||
-    domain.endsWith('.') ||
-    domain.endsWith('-')
-  ) {
+  // <domain> ::= <subdomain> | " "
+  if (domain === ' ') {
+    return
+  }
+
+  if (domain.length > 255) {
+    throw new Error('Invalid cookie domain')
+  }
+
+  let labelLength = 0
+
+  for (let i = 0; i < domain.length; ++i) {
+    const code = domain.charCodeAt(i)
+
+    if (code === 0x2E) {
+      if (labelLength === 0) {
+        throw new Error('Invalid cookie domain')
+      }
+
+      if (domain.charCodeAt(i - 1) === 0x2D) { // "-"
+        throw new Error('Invalid cookie domain')
+      }
+
+      labelLength = 0
+      continue
+    }
+
+    if (labelLength === 0 && !isLetterOrDigit(code)) {
+      throw new Error('Invalid cookie domain')
+    }
+
+    if (!isLetterOrDigit(code) && code !== 0x2D) { // "-"
+      throw new Error('Invalid cookie domain')
+    }
+
+    if (++labelLength > 63) {
+      throw new Error('Invalid cookie domain')
+    }
+  }
+
+  if (labelLength === 0 || domain.charCodeAt(domain.length - 1) === 0x2D) { // "-"
     throw new Error('Invalid cookie domain')
   }
 }
@@ -27825,7 +27943,13 @@ function stringify (cookie) {
 
     const [key, ...value] = part.split('=')
 
-    out.push(`${key.trim()}=${value.join('=')}`)
+    const trimmedKey = key.trim()
+    const joinedValue = value.join('=')
+
+    validateCookieName(trimmedKey)
+    validateCookieValue(joinedValue)
+
+    out.push(`${trimmedKey}=${joinedValue}`)
   }
 
   return out.join('; ')
@@ -95281,7 +95405,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.16.5',
+        cliVersion: getInput('cli-version') || 'v1.16.6',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -95304,6 +95428,7 @@ function getInputs() {
         proxyPort: getInput('proxy-port'),
         managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:67119df5c17e41488ae8ccca4668b81f6e20e831f13cafe3c6a3463ff6b661ca',
         dockerToolCache: getInput('docker-tool-cache'),
+        dockerToolCacheTarget: getInput('docker-tool-cache-target'),
         cacheProfiles: getInput('cache-profiles'),
         failOnCacheMiss: getBooleanInput('fail-on-cache-miss'),
         failOnCacheError: getBooleanInput('fail-on-cache-error'),
@@ -95893,6 +96018,15 @@ function detectCiSha() {
     }
     return undefined;
 }
+function detectCiPullRequestNumber() {
+    const explicit = process.env.BORINGCACHE_CI_PR_NUMBER?.trim();
+    if (explicit && /^\d+$/.test(explicit)) {
+        return Number(explicit);
+    }
+    const githubRef = process.env.GITHUB_REF?.trim() || '';
+    const githubMatch = githubRef.match(/^refs\/pull\/(\d+)\//);
+    return githubMatch ? Number(githubMatch[1]) : undefined;
+}
 function envDefaultBranch() {
     const value = process.env.BORINGCACHE_DEFAULT_BRANCH?.trim();
     return value ? normalizeRef(value) : undefined;
@@ -95972,6 +96106,9 @@ function detectGitContext(pathHint, workingDirectory) {
     const startPath = resolveGitStartPath(pathHint, workingDirectory);
     const gitDir = findGitDir(startPath);
     const context = {};
+    if (isCiEnv()) {
+        context.prNumber = detectCiPullRequestNumber();
+    }
     if (gitDir) {
         const gitBranch = detectBranchFromHead(gitDir);
         if (gitBranch) {
@@ -95993,6 +96130,7 @@ function detectGitContext(pathHint, workingDirectory) {
 }
 function tagHasExplicitChannel(tag) {
     return tag.includes('-branch-')
+        || tag.includes('-pr-')
         || tag.includes('-sha-')
         || tag.endsWith('-main')
         || tag.endsWith('-master');
@@ -96078,7 +96216,10 @@ function resolveExactTag(spec, workingDirectory) {
         const gitContext = detectGitContext(spec.pathHint, workingDirectory);
         const branch = gitContext.branch ? normalizeRef(gitContext.branch) : undefined;
         const defaultBranch = gitContext.defaultBranch ? normalizeRef(gitContext.defaultBranch) : undefined;
-        if (branch && !isDefaultBranch(branch, defaultBranch)) {
+        if (spec.includePrTag && gitContext.prNumber) {
+            resolved = `${resolved}-pr-${gitContext.prNumber}`;
+        }
+        else if (branch && !isDefaultBranch(branch, defaultBranch)) {
             resolved = `${resolved}-branch-${branch}`;
         }
         else if (!branch && gitContext.commitSha) {
@@ -96102,7 +96243,7 @@ function resolveVerificationTags(specs, workingDirectory) {
     }
     return resolved;
 }
-function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
+function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit, includePrTag) {
     if (!entries.trim()) {
         return;
     }
@@ -96111,14 +96252,15 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
             tag: entry.tag,
             noPlatform,
             noGit,
+            includePrTag,
             pathHint: entry.savePath,
             saveExpected: true,
         });
     }
 }
-function buildGenericVerificationSpecs(plan, noGit = false) {
+function buildGenericVerificationSpecs(plan, noGit = false, includePrTag = false) {
     const specs = [];
-    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit);
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit, includePrTag);
     return specs;
 }
 function envWithOverrides(overrides) {
@@ -96133,11 +96275,12 @@ function envWithOverrides(overrides) {
 function groupVerificationSpecs(specs) {
     const grouped = new Map();
     for (const spec of specs) {
-        const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}`;
+        const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}:${spec.includePrTag ? '1' : '0'}`;
         const batch = grouped.get(key) || {
             tags: [],
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            includePrTag: Boolean(spec.includePrTag),
             saveExpectedTags: new Set(),
         };
         if (!batch.tags.includes(spec.tag)) {
@@ -96166,6 +96309,9 @@ async function runTagCheck(workspace, batch, options, timeoutSeconds) {
     }
     if (batch.noGit) {
         args.push('--no-git');
+    }
+    if (batch.includePrTag) {
+        args.push('--include-pr-tag');
     }
     args.push('--exact', '--fail-on-miss');
     if (shouldParseCheckJson) {
@@ -96954,6 +97100,9 @@ function buildFlagArgs(inputs) {
     if (inputs.verbose) {
         flagArgs.push('--verbose');
     }
+    if (!inputs.readOnly && !inputs.stage) {
+        flagArgs.push('--include-pr-tag');
+    }
     return flagArgs;
 }
 async function applyMiseSetup(runtimeTools, cwd) {
@@ -97640,7 +97789,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     assertSupportedCliDryRunSchema(adapter, plan);
     return plan;
 }
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
+async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
@@ -97671,6 +97820,12 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
         for (const tool of parseList(dockerToolCacheInput)) {
             args.push('--tool-cache', tool);
         }
+        for (const target of parseList(dockerToolCacheTargetInput)) {
+            args.push('--tool-cache-target', target);
+        }
+    }
+    if (mountCache) {
+        args.push('--mount-cache');
     }
     appendMetadataHintArgs(args, metadataHintsInput);
     args.push('--dry-run', '--json', '--', ...adapterCommand);
@@ -97717,11 +97872,11 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     }
     return plan;
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput);
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
+    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput, dockerToolCacheTargetInput, mountCache);
 }
 async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', stage = false, cacheCandidatesInput = '') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput);
+    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput, '');
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!auth_hasSaveToken()) {
@@ -98118,7 +98273,7 @@ async function buildDockerImage(opts) {
         throw new Error(`docker buildx build failed with exit code ${result}`);
     }
 }
-function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, command, commandArgs) {
+function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, command, commandArgs, mountCache) {
     const args = [
         adapter,
         '--workspace',
@@ -98150,18 +98305,24 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port
         for (const tool of parseList(inputs.dockerToolCache)) {
             args.push('--tool-cache', tool);
         }
+        for (const target of parseList(inputs.dockerToolCacheTarget)) {
+            args.push('--tool-cache-target', target);
+        }
+    }
+    if (mountCache) {
+        args.push('--mount-cache');
     }
     appendMetadataHintArgs(args, inputs.metadataHints);
     args.push('--', command, ...commandArgs);
     return args;
 }
-async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, opts) {
+async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, opts, mountCache) {
     const dockerBuildArgs = dockerBuildxArgs({
         ...opts,
         cacheFrom: undefined,
         cacheTo: undefined,
     });
-    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, 'docker', dockerBuildArgs);
+    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, 'docker', dockerBuildArgs, mountCache);
     const result = await mode_handlers_execBoringCache(args, {
         cwd: opts.context,
         env: {
@@ -98922,6 +99083,7 @@ async function runDockerRestore(plan, inputs) {
     const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
     const provenance = parseBooleanInput(core.getInput('provenance'), 'provenance', false);
     const sbom = parseBooleanInput(core.getInput('sbom'), 'sbom', false);
+    const dockerMountCache = parseBooleanInput(core.getInput('docker-mount-cache'), 'docker-mount-cache', false);
     const driver = core.getInput('driver') || 'docker-container';
     const driverOpts = parseMultiline(core.getInput('driver-opts') || '');
     const buildkitdConfigInline = core.getInput('buildkitd-config-inline') || '';
@@ -98934,6 +99096,9 @@ async function runDockerRestore(plan, inputs) {
     }
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
+    }
+    if (dockerMountCache && !shouldBuild) {
+        throw new Error('docker-mount-cache requires mode=docker with docker-command=build so boringcache docker can install and authenticate the cache-mount worker.');
     }
     const requestedCacheTag = '';
     let modeEvidence;
@@ -98974,7 +99139,7 @@ async function runDockerRestore(plan, inputs) {
         // Every surface starts from the same port. An explicit proxy-port remains
         // available when a workflow coordinates another process or has a conflict.
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', DEFAULT_PROXY_PORT);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates, inputs.dockerToolCacheTarget, dockerMountCache);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const usesCliWrappedBuild = cliOwnsManagedBuild || dockerToolCaches.length > 0;
@@ -99010,7 +99175,7 @@ async function runDockerRestore(plan, inputs) {
                     provenance,
                     sbom,
                     builder: cliOwnsManagedBuild ? '' : builderName,
-                }));
+                }, dockerMountCache));
             }
             modeEvidence = buildKitCacheEvidence('docker', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
         }
@@ -99146,6 +99311,11 @@ async function runBuildkitRestore(plan, inputs) {
     const target = core.getInput('target') || '';
     const platforms = parseList(core.getInput('platforms') || '').join(',');
     const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
+    const dockerMountCache = parseBooleanInput(core.getInput('docker-mount-cache'), 'docker-mount-cache', false);
+    if (dockerMountCache) {
+        throw new Error('docker-mount-cache requires mode=docker with docker-command=build; '
+            + 'BuildKit mode connects to a workflow-owned daemon and cannot install the cache-mount worker.');
+    }
     const buildkitHost = core.getInput('buildkit-host', { required: true });
     const tlsCaInput = core.getInput('buildkit-tls-ca') || '';
     const tlsCertInput = core.getInput('buildkit-tls-cert') || '';
@@ -99343,6 +99513,8 @@ async function runCargoRestore(plan, inputs) {
             },
         };
     }
+    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
+    await installSccache(sccacheVersion);
     const nativeEvidencePath = path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
     const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
     mode_handlers_appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
@@ -99862,6 +100034,7 @@ function parseSavedVerificationSpecs(raw) {
             tag: spec.tag,
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            includePrTag: spec.includePrTag,
             pathHint: spec.pathHint,
             saveExpected: spec.saveExpected,
         }));

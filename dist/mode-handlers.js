@@ -607,7 +607,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     assertSupportedCliDryRunSchema(adapter, plan);
     return plan;
 }
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
+async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
     const args = [adapter, '--workspace', workspace];
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
@@ -638,6 +638,12 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
         for (const tool of parseList(dockerToolCacheInput)) {
             args.push('--tool-cache', tool);
         }
+        for (const target of parseList(dockerToolCacheTargetInput)) {
+            args.push('--tool-cache-target', target);
+        }
+    }
+    if (mountCache) {
+        args.push('--mount-cache');
     }
     appendMetadataHintArgs(args, metadataHintsInput);
     args.push('--dry-run', '--json', '--', ...adapterCommand);
@@ -684,11 +690,11 @@ async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDire
     }
     return plan;
 }
-async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '') {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput);
+async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
+    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput, dockerToolCacheTargetInput, mountCache);
 }
 async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', stage = false, cacheCandidatesInput = '') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput);
+    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput, '');
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!hasSaveToken()) {
@@ -1085,7 +1091,7 @@ async function buildDockerImage(opts) {
         throw new Error(`docker buildx build failed with exit code ${result}`);
     }
 }
-function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, command, commandArgs) {
+function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, command, commandArgs, mountCache) {
     const args = [
         adapter,
         '--workspace',
@@ -1117,18 +1123,24 @@ function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port
         for (const tool of parseList(inputs.dockerToolCache)) {
             args.push('--tool-cache', tool);
         }
+        for (const target of parseList(inputs.dockerToolCacheTarget)) {
+            args.push('--tool-cache-target', target);
+        }
+    }
+    if (mountCache) {
+        args.push('--mount-cache');
     }
     appendMetadataHintArgs(args, inputs.metadataHints);
     args.push('--', command, ...commandArgs);
     return args;
 }
-async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, opts) {
+async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, opts, mountCache) {
     const dockerBuildArgs = dockerBuildxArgs({
         ...opts,
         cacheFrom: undefined,
         cacheTo: undefined,
     });
-    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, 'docker', dockerBuildArgs);
+    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, 'docker', dockerBuildArgs, mountCache);
     const result = await execBoringCache(args, {
         cwd: opts.context,
         env: {
@@ -1889,6 +1901,7 @@ async function runDockerRestore(plan, inputs) {
     const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
     const provenance = parseBooleanInput(core.getInput('provenance'), 'provenance', false);
     const sbom = parseBooleanInput(core.getInput('sbom'), 'sbom', false);
+    const dockerMountCache = parseBooleanInput(core.getInput('docker-mount-cache'), 'docker-mount-cache', false);
     const driver = core.getInput('driver') || 'docker-container';
     const driverOpts = parseMultiline(core.getInput('driver-opts') || '');
     const buildkitdConfigInline = core.getInput('buildkitd-config-inline') || '';
@@ -1901,6 +1914,9 @@ async function runDockerRestore(plan, inputs) {
     }
     if (dockerToolCaches.length > 0 && !shouldBuild) {
         throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
+    }
+    if (dockerMountCache && !shouldBuild) {
+        throw new Error('docker-mount-cache requires mode=docker with docker-command=build so boringcache docker can install and authenticate the cache-mount worker.');
     }
     const requestedCacheTag = '';
     let modeEvidence;
@@ -1941,7 +1957,7 @@ async function runDockerRestore(plan, inputs) {
         // Every surface starts from the same port. An explicit proxy-port remains
         // available when a workflow coordinates another process or has a conflict.
         const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port', DEFAULT_PROXY_PORT);
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates);
+        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates, inputs.dockerToolCacheTarget, dockerMountCache);
         const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
         const cacheTag = dockerPlan.tag;
         const usesCliWrappedBuild = cliOwnsManagedBuild || dockerToolCaches.length > 0;
@@ -1977,7 +1993,7 @@ async function runDockerRestore(plan, inputs) {
                     provenance,
                     sbom,
                     builder: cliOwnsManagedBuild ? '' : builderName,
-                }));
+                }, dockerMountCache));
             }
             modeEvidence = buildKitCacheEvidence('docker', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
         }
@@ -2113,6 +2129,11 @@ async function runBuildkitRestore(plan, inputs) {
     const target = core.getInput('target') || '';
     const platforms = parseList(core.getInput('platforms') || '').join(',');
     const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
+    const dockerMountCache = parseBooleanInput(core.getInput('docker-mount-cache'), 'docker-mount-cache', false);
+    if (dockerMountCache) {
+        throw new Error('docker-mount-cache requires mode=docker with docker-command=build; '
+            + 'BuildKit mode connects to a workflow-owned daemon and cannot install the cache-mount worker.');
+    }
     const buildkitHost = core.getInput('buildkit-host', { required: true });
     const tlsCaInput = core.getInput('buildkit-tls-ca') || '';
     const tlsCertInput = core.getInput('buildkit-tls-cert') || '';
@@ -2310,6 +2331,8 @@ async function runCargoRestore(plan, inputs) {
             },
         };
     }
+    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
+    await installSccache(sccacheVersion);
     const nativeEvidencePath = path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
     const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
     appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
