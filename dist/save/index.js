@@ -17297,7 +17297,13 @@ function processHeader (request, key, val) {
       } else if (typeof val[i] === 'object') {
         throw new InvalidArgumentError(`invalid ${key} header`)
       } else {
-        arr.push(`${val[i]}`)
+        // Coerce primitives (and reject unsafe coercions such as functions
+        // with a crafted toString/Symbol.toPrimitive).
+        const str = `${val[i]}`
+        if (!isValidHeaderValue(str)) {
+          throw new InvalidArgumentError(`invalid ${key} header`)
+        }
+        arr.push(str)
       }
     }
     val = arr
@@ -17308,7 +17314,12 @@ function processHeader (request, key, val) {
   } else if (val === null) {
     val = ''
   } else {
+    // Coerce primitives (and reject unsafe coercions such as functions
+    // with a crafted toString/Symbol.toPrimitive).
     val = `${val}`
+    if (!isValidHeaderValue(val)) {
+      throw new InvalidArgumentError(`invalid ${key} header`)
+    }
   }
 
   if (headerName === 'host') {
@@ -18685,6 +18696,7 @@ const {
   RequestContentLengthMismatchError,
   ResponseContentLengthMismatchError,
   RequestAbortedError,
+  InvalidArgumentError,
   HeadersTimeoutError,
   HeadersOverflowError,
   SocketError,
@@ -19668,8 +19680,16 @@ function writeH1 (client, request) {
     }
     body = bodyStream.stream
     contentLength = bodyStream.length
-  } else if (util.isBlobLike(body) && request.contentType == null && body.type) {
-    headers.push('content-type', body.type)
+  } else if (util.isBlobLike(body) && request.contentType == null) {
+    const contentType = body.type
+    if (contentType) {
+      const contentTypeValue = `${contentType}`
+      if (!util.isValidHeaderValue(contentTypeValue)) {
+        util.errorRequest(client, request, new InvalidArgumentError('invalid content-type header'))
+        return false
+      }
+      headers.push('content-type', contentTypeValue)
+    }
   }
 
   if (body && typeof body.read === 'function') {
@@ -23156,6 +23176,28 @@ function calculateRetryAfterHeader (retryAfter) {
   return new Date(retryAfter).getTime() - current
 }
 
+function validatePartialResponseContentLength (headers, range, statusCode, retryCount) {
+  const contentLength = headers['content-length']
+  if (contentLength == null) {
+    return null
+  }
+
+  if (!Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+    return null
+  }
+
+  const length = Number(contentLength)
+  const expectedLength = range.end - range.start + 1
+  if (!Number.isFinite(length) || length !== expectedLength) {
+    return new RequestRetryError('Content-Length mismatch', statusCode, {
+      headers,
+      data: { count: retryCount }
+    })
+  }
+
+  return null
+}
+
 class RetryHandler {
   constructor (opts, handlers) {
     const { retryOptions, ...dispatchOpts } = opts
@@ -23370,6 +23412,12 @@ class RetryHandler {
         return false
       }
 
+      const contentLengthError = validatePartialResponseContentLength(headers, contentRange, statusCode, this.retryCount)
+      if (contentLengthError != null) {
+        this.abort(contentLengthError)
+        return false
+      }
+
       const { start, size, end = size - 1 } = contentRange
 
       assert(this.start === start, 'content-range mismatch')
@@ -23391,6 +23439,12 @@ class RetryHandler {
             resume,
             statusMessage
           )
+        }
+
+        const contentLengthError = validatePartialResponseContentLength(headers, range, statusCode, this.retryCount)
+        if (contentLengthError != null) {
+          this.abort(contentLengthError)
+          return false
         }
 
         const { start, size, end = size - 1 } = range
@@ -27664,7 +27718,7 @@ function validateCookiePath (path) {
 
     if (
       code < 0x20 || // exclude CTLs (0-31)
-      code === 0x7F || // DEL
+      code > 0x7E || // exclude DEL and non-ascii
       code === 0x3B // ;
     ) {
       throw new Error('Invalid cookie path')
@@ -27673,16 +27727,80 @@ function validateCookiePath (path) {
 }
 
 /**
- * I have no idea why these values aren't allowed to be honest,
- * but Deno tests these. - Khafra
+ * <let-dig> ::= <letter> | <digit>
+ *
+ * <letter> ::= any one of the 52 alphabetic characters A through Z in
+ * upper case and a through z in lower case
+ *
+ * <digit> ::= any one of the ten digits 0 through 9r
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+ * @param {number} code
+ */
+function isLetterOrDigit (code) {
+  return (
+    (code >= 0x30 && code <= 0x39) || // 0-9
+    (code >= 0x41 && code <= 0x5A) || // A-Z
+    (code >= 0x61 && code <= 0x7A) // a-z
+  )
+}
+
+/**
+ * Validates a cookie domain against the "preferred name syntax".
+ *
+ * <domain>      ::= <subdomain> | " "
+ * <subdomain>   ::= <label> | <subdomain> "." <label>
+ * <label>       ::= <let-dig> [ [ <ldh-str> ] <let-dig> ]
+ * <ldh-str>     ::= <let-dig-hyp> | <let-dig-hyp> <ldh-str>
+ * <let-dig-hyp> ::= <let-dig> | "-"
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+ * @see https://www.rfc-editor.org/rfc/rfc1123#section-2.1
+ * @see https://www.rfc-editor.org/rfc/rfc1035#section-2.3.4
  * @param {string} domain
  */
 function validateCookieDomain (domain) {
-  if (
-    domain.startsWith('-') ||
-    domain.endsWith('.') ||
-    domain.endsWith('-')
-  ) {
+  // <domain> ::= <subdomain> | " "
+  if (domain === ' ') {
+    return
+  }
+
+  if (domain.length > 255) {
+    throw new Error('Invalid cookie domain')
+  }
+
+  let labelLength = 0
+
+  for (let i = 0; i < domain.length; ++i) {
+    const code = domain.charCodeAt(i)
+
+    if (code === 0x2E) {
+      if (labelLength === 0) {
+        throw new Error('Invalid cookie domain')
+      }
+
+      if (domain.charCodeAt(i - 1) === 0x2D) { // "-"
+        throw new Error('Invalid cookie domain')
+      }
+
+      labelLength = 0
+      continue
+    }
+
+    if (labelLength === 0 && !isLetterOrDigit(code)) {
+      throw new Error('Invalid cookie domain')
+    }
+
+    if (!isLetterOrDigit(code) && code !== 0x2D) { // "-"
+      throw new Error('Invalid cookie domain')
+    }
+
+    if (++labelLength > 63) {
+      throw new Error('Invalid cookie domain')
+    }
+  }
+
+  if (labelLength === 0 || domain.charCodeAt(domain.length - 1) === 0x2D) { // "-"
     throw new Error('Invalid cookie domain')
   }
 }
@@ -27825,7 +27943,13 @@ function stringify (cookie) {
 
     const [key, ...value] = part.split('=')
 
-    out.push(`${key.trim()}=${value.join('=')}`)
+    const trimmedKey = key.trim()
+    const joinedValue = value.join('=')
+
+    validateCookieName(trimmedKey)
+    validateCookieValue(joinedValue)
+
+    out.push(`${trimmedKey}=${joinedValue}`)
   }
 
   return out.join('; ')
@@ -95281,7 +95405,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.16.5',
+        cliVersion: getInput('cli-version') || 'v1.16.6',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -95893,6 +96017,15 @@ function detectCiSha() {
     }
     return undefined;
 }
+function detectCiPullRequestNumber() {
+    const explicit = process.env.BORINGCACHE_CI_PR_NUMBER?.trim();
+    if (explicit && /^\d+$/.test(explicit)) {
+        return Number(explicit);
+    }
+    const githubRef = process.env.GITHUB_REF?.trim() || '';
+    const githubMatch = githubRef.match(/^refs\/pull\/(\d+)\//);
+    return githubMatch ? Number(githubMatch[1]) : undefined;
+}
 function envDefaultBranch() {
     const value = process.env.BORINGCACHE_DEFAULT_BRANCH?.trim();
     return value ? normalizeRef(value) : undefined;
@@ -95972,6 +96105,9 @@ function detectGitContext(pathHint, workingDirectory) {
     const startPath = resolveGitStartPath(pathHint, workingDirectory);
     const gitDir = findGitDir(startPath);
     const context = {};
+    if (isCiEnv()) {
+        context.prNumber = detectCiPullRequestNumber();
+    }
     if (gitDir) {
         const gitBranch = detectBranchFromHead(gitDir);
         if (gitBranch) {
@@ -95993,6 +96129,7 @@ function detectGitContext(pathHint, workingDirectory) {
 }
 function tagHasExplicitChannel(tag) {
     return tag.includes('-branch-')
+        || tag.includes('-pr-')
         || tag.includes('-sha-')
         || tag.endsWith('-main')
         || tag.endsWith('-master');
@@ -96078,7 +96215,10 @@ function resolveExactTag(spec, workingDirectory) {
         const gitContext = detectGitContext(spec.pathHint, workingDirectory);
         const branch = gitContext.branch ? normalizeRef(gitContext.branch) : undefined;
         const defaultBranch = gitContext.defaultBranch ? normalizeRef(gitContext.defaultBranch) : undefined;
-        if (branch && !isDefaultBranch(branch, defaultBranch)) {
+        if (spec.includePrTag && gitContext.prNumber) {
+            resolved = `${resolved}-pr-${gitContext.prNumber}`;
+        }
+        else if (branch && !isDefaultBranch(branch, defaultBranch)) {
             resolved = `${resolved}-branch-${branch}`;
         }
         else if (!branch && gitContext.commitSha) {
@@ -96102,7 +96242,7 @@ function resolveVerificationTags(specs, workingDirectory) {
     }
     return resolved;
 }
-function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
+function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit, includePrTag) {
     if (!entries.trim()) {
         return;
     }
@@ -96111,14 +96251,15 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
             tag: entry.tag,
             noPlatform,
             noGit,
+            includePrTag,
             pathHint: entry.savePath,
             saveExpected: true,
         });
     }
 }
-function buildGenericVerificationSpecs(plan, noGit = false) {
+function buildGenericVerificationSpecs(plan, noGit = false, includePrTag = false) {
     const specs = [];
-    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit);
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit, includePrTag);
     return specs;
 }
 function envWithOverrides(overrides) {
@@ -96133,11 +96274,12 @@ function envWithOverrides(overrides) {
 function groupVerificationSpecs(specs) {
     const grouped = new Map();
     for (const spec of specs) {
-        const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}`;
+        const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}:${spec.includePrTag ? '1' : '0'}`;
         const batch = grouped.get(key) || {
             tags: [],
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            includePrTag: Boolean(spec.includePrTag),
             saveExpectedTags: new Set(),
         };
         if (!batch.tags.includes(spec.tag)) {
@@ -96166,6 +96308,9 @@ async function runTagCheck(workspace, batch, options, timeoutSeconds) {
     }
     if (batch.noGit) {
         args.push('--no-git');
+    }
+    if (batch.includePrTag) {
+        args.push('--include-pr-tag');
     }
     args.push('--exact', '--fail-on-miss');
     if (shouldParseCheckJson) {
@@ -96953,6 +97098,9 @@ function buildFlagArgs(inputs) {
     }
     if (inputs.verbose) {
         flagArgs.push('--verbose');
+    }
+    if (!inputs.readOnly && !inputs.stage) {
+        flagArgs.push('--include-pr-tag');
     }
     return flagArgs;
 }
@@ -99343,6 +99491,8 @@ async function runCargoRestore(plan, inputs) {
             },
         };
     }
+    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
+    await installSccache(sccacheVersion);
     const nativeEvidencePath = path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
     const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
     mode_handlers_appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
@@ -99862,6 +100012,7 @@ function parseSavedVerificationSpecs(raw) {
             tag: spec.tag,
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            includePrTag: spec.includePrTag,
             pathHint: spec.pathHint,
             saveExpected: spec.saveExpected,
         }));

@@ -2310,6 +2310,8 @@ async function runCargoRestore(plan, inputs) {
             },
         };
     }
+    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
+    await installSccache(sccacheVersion);
     const nativeEvidencePath = path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
     const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
     appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
