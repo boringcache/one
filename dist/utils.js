@@ -91,7 +91,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.16.5',
+        cliVersion: core.getInput('cli-version') || 'v1.16.6',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -112,8 +112,9 @@ export function getInputs() {
         diagnosticsLogLines: normalizeDiagnosticsLogLines(core.getInput('diagnostics-log-lines')),
         metadataHints: core.getInput('metadata-hints'),
         proxyPort: core.getInput('proxy-port'),
-        managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:67119df5c17e41488ae8ccca4668b81f6e20e831f13cafe3c6a3463ff6b661ca',
+        managedBuildkitImage: core.getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:57bdd820fc830c8adb8f5de4e9b651a52b8dbf63695b028634dc27347a385b67',
         dockerToolCache: core.getInput('docker-tool-cache'),
+        dockerToolCacheTarget: core.getInput('docker-tool-cache-target'),
         cacheProfiles: core.getInput('cache-profiles'),
         failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
         failOnCacheError: core.getBooleanInput('fail-on-cache-error'),
@@ -703,6 +704,15 @@ function detectCiSha() {
     }
     return undefined;
 }
+function detectCiPullRequestNumber() {
+    const explicit = process.env.BORINGCACHE_CI_PR_NUMBER?.trim();
+    if (explicit && /^\d+$/.test(explicit)) {
+        return Number(explicit);
+    }
+    const githubRef = process.env.GITHUB_REF?.trim() || '';
+    const githubMatch = githubRef.match(/^refs\/pull\/(\d+)\//);
+    return githubMatch ? Number(githubMatch[1]) : undefined;
+}
 function envDefaultBranch() {
     const value = process.env.BORINGCACHE_DEFAULT_BRANCH?.trim();
     return value ? normalizeRef(value) : undefined;
@@ -782,6 +792,9 @@ function detectGitContext(pathHint, workingDirectory) {
     const startPath = resolveGitStartPath(pathHint, workingDirectory);
     const gitDir = findGitDir(startPath);
     const context = {};
+    if (isCiEnv()) {
+        context.prNumber = detectCiPullRequestNumber();
+    }
     if (gitDir) {
         const gitBranch = detectBranchFromHead(gitDir);
         if (gitBranch) {
@@ -803,6 +816,7 @@ function detectGitContext(pathHint, workingDirectory) {
 }
 function tagHasExplicitChannel(tag) {
     return tag.includes('-branch-')
+        || tag.includes('-pr-')
         || tag.includes('-sha-')
         || tag.endsWith('-main')
         || tag.endsWith('-master');
@@ -888,7 +902,10 @@ function resolveExactTag(spec, workingDirectory) {
         const gitContext = detectGitContext(spec.pathHint, workingDirectory);
         const branch = gitContext.branch ? normalizeRef(gitContext.branch) : undefined;
         const defaultBranch = gitContext.defaultBranch ? normalizeRef(gitContext.defaultBranch) : undefined;
-        if (branch && !isDefaultBranch(branch, defaultBranch)) {
+        if (spec.includePrTag && gitContext.prNumber) {
+            resolved = `${resolved}-pr-${gitContext.prNumber}`;
+        }
+        else if (branch && !isDefaultBranch(branch, defaultBranch)) {
             resolved = `${resolved}-branch-${branch}`;
         }
         else if (!branch && gitContext.commitSha) {
@@ -912,7 +929,7 @@ export function resolveVerificationTags(specs, workingDirectory) {
     }
     return resolved;
 }
-function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
+function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit, includePrTag) {
     if (!entries.trim()) {
         return;
     }
@@ -921,14 +938,15 @@ function appendVerificationSpecsFromEntries(specs, entries, noPlatform, noGit) {
             tag: entry.tag,
             noPlatform,
             noGit,
+            includePrTag,
             pathHint: entry.savePath,
             saveExpected: true,
         });
     }
 }
-export function buildGenericVerificationSpecs(plan, noGit = false) {
+export function buildGenericVerificationSpecs(plan, noGit = false, includePrTag = false) {
     const specs = [];
-    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit);
+    appendVerificationSpecsFromEntries(specs, plan.archiveEntries, false, noGit, includePrTag);
     return specs;
 }
 function envWithOverrides(overrides) {
@@ -943,11 +961,12 @@ function envWithOverrides(overrides) {
 function groupVerificationSpecs(specs) {
     const grouped = new Map();
     for (const spec of specs) {
-        const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}`;
+        const key = `${spec.noPlatform ? '1' : '0'}:${spec.noGit ? '1' : '0'}:${spec.includePrTag ? '1' : '0'}`;
         const batch = grouped.get(key) || {
             tags: [],
             noPlatform: spec.noPlatform,
             noGit: spec.noGit,
+            includePrTag: Boolean(spec.includePrTag),
             saveExpectedTags: new Set(),
         };
         if (!batch.tags.includes(spec.tag)) {
@@ -976,6 +995,9 @@ async function runTagCheck(workspace, batch, options, timeoutSeconds) {
     }
     if (batch.noGit) {
         args.push('--no-git');
+    }
+    if (batch.includePrTag) {
+        args.push('--include-pr-tag');
     }
     args.push('--exact', '--fail-on-miss');
     if (shouldParseCheckJson) {
@@ -1763,6 +1785,9 @@ export function buildFlagArgs(inputs) {
     }
     if (inputs.verbose) {
         flagArgs.push('--verbose');
+    }
+    if (!inputs.readOnly && !inputs.stage) {
+        flagArgs.push('--include-pr-tag');
     }
     return flagArgs;
 }
