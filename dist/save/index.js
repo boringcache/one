@@ -95405,7 +95405,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.16.6',
+        cliVersion: getInput('cli-version') || 'v1.17.0',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -100317,9 +100317,6 @@ async function run() {
         for (const entry of saveEntries) {
             args.push('--entry', entry);
         }
-        // A repo-plan cache profile is the archive boundary. Keep its wire format
-        // deterministic and independent of any layout auto-detected inside it.
-        args.push('--archive-transport');
         if (force) {
             args.push('--force');
         }
