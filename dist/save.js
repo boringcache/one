@@ -313,9 +313,6 @@ export async function run() {
         for (const entry of saveEntries) {
             args.push('--entry', entry);
         }
-        // A repo-plan cache profile is the archive boundary. Keep its wire format
-        // deterministic and independent of any layout auto-detected inside it.
-        args.push('--archive-transport');
         if (force) {
             args.push('--force');
         }

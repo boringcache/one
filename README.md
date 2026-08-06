@@ -25,7 +25,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
+- uses: boringcache/one@366e1aa37c271014d69aa6e1a12df57c472fdf5d # v1.16.9
   with:
     trust-policy: auto
     setup: none
@@ -54,7 +54,7 @@ ownership contract.
 
 ### Cargo mode
 
-The reviewed `v1.16.8` Action runs one complete repo-owned Cargo command inside
+The reviewed `v1.16.9` Action runs one complete repo-owned Cargo command inside
 the CLI's target,
 dependency, and sccache lifecycle. It provisions the audited sccache version
 before execution. Keep the command beside the cache plan:
@@ -66,7 +66,7 @@ profiles = ["cargo"]
 command = ["cargo", "build", "--release"]
 ```
 
-Select `mode: cargo` in one Action step with the reviewed `v1.16.8`
+Select `mode: cargo` in one Action step with the reviewed `v1.16.9`
 distribution SHA used by the examples in this README. The Action invokes
 `boringcache cargo` synchronously; it does not reconstruct target restore,
 source-freshness, compiler-cache, or save policy in workflow YAML.
@@ -82,7 +82,7 @@ command fails; Cargo publication happens synchronously only after success.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
+- uses: boringcache/one@366e1aa37c271014d69aa6e1a12df57c472fdf5d # v1.16.9
   with:
     trust-policy: auto
     setup: none
@@ -102,7 +102,7 @@ only for a single-tenant runner that is destroyed after the job.
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@09e053620cda4d3472f26a3ddd181144a108e2c2 # v1.16.8
+- uses: boringcache/one@366e1aa37c271014d69aa6e1a12df57c472fdf5d # v1.16.9
   with:
     trust-policy: auto
     setup: none
@@ -130,11 +130,11 @@ grouped inventory is contract-checked against it.
 
 ## Updates
 
-The examples pin the reviewed `v1.16.8` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.16.9` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. This
-reviewed Action installs CLI `v1.16.5` by default; `cli-version` is an explicit
+reviewed Action installs CLI `v1.16.6` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.
