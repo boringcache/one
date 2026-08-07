@@ -3,7 +3,7 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execBoringCache as execBoringCacheCore, DEFAULT_PROXY_PORT, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from './core';
+import { execBoringCache as execBoringCacheCore, DEFAULT_PROXY_PORT, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, PROXY_VERIFICATION_STOP_TIMEOUT_MS, } from './core';
 import { DEFAULT_OCI_HYDRATION_POLICY, detectNodePackageManager, normalizeVerifyTimeoutSeconds, } from './utils';
 import { readSha256File, verifySha256 } from './core/integrity';
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -447,9 +447,16 @@ function setProxyOutputs(port) {
     core.setOutput('proxy-port', String(port));
     core.setOutput('proxy-log-path', logPath);
 }
-function saveProxyModeState(port) {
-    saveModeState('proxy-port', String(port));
-    saveModeState('proxy-log-path', registryProxyLogPath(port));
+function saveProxyModeState(proxy) {
+    saveModeState('proxy-port', String(proxy.port));
+    saveModeState('proxy-log-path', registryProxyLogPath(proxy.port));
+    if (proxy.shutdownBudgetSecs !== undefined) {
+        saveModeState('proxy-shutdown-budget-secs', String(proxy.shutdownBudgetSecs));
+    }
+}
+function reportedProxyStopTimeoutMs() {
+    const reported = Number.parseInt(getModeState('proxy-shutdown-budget-secs'), 10);
+    return proxyStopTimeoutMs(Number.isFinite(reported) ? reported : null);
 }
 function getModeStateBoolean(key) {
     return getModeState(key) === 'true';
@@ -498,7 +505,12 @@ async function verifyOciPromotionRefsAfterStop() {
     }
     finally {
         if (verificationProxyPid !== null) {
-            await stopRegistryProxy(verificationProxyPid);
+            try {
+                await stopRegistryProxy(verificationProxyPid, port, PROXY_VERIFICATION_STOP_TIMEOUT_MS);
+            }
+            catch (stopError) {
+                core.warning(`Failed to stop the managed cache verification proxy: ${errorMessage(stopError)}`);
+            }
         }
     }
 }
@@ -512,7 +524,7 @@ function errorMessage(error) {
 async function verifyOciPromotionRefsThenStopProxy(proxyPid) {
     try {
         const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
-        await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined);
+        await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
     }
     catch (stopError) {
         throw new Error(`Failed to stop BoringCache proxy cleanly before managed cache promotion verification: ${errorMessage(stopError)}`);
@@ -2014,7 +2026,7 @@ async function runDockerRestore(plan, inputs) {
                 ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
             }, dockerPlan.proxy));
             saveModeState('proxy-pid', String(proxy.pid));
-            saveProxyModeState(proxy.port);
+            saveProxyModeState(proxy);
             saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
             saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
             saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
@@ -2180,7 +2192,7 @@ async function runBuildkitRestore(plan, inputs) {
             ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
         }, dockerPlan.proxy));
         saveModeState('proxy-pid', String(proxy.pid));
-        saveProxyModeState(proxy.port);
+        saveProxyModeState(proxy);
         saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
         saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
         saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
@@ -2405,7 +2417,7 @@ async function runBazelRestore(plan, inputs, options) {
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
     core.setOutput('cache-tag', cacheTag);
@@ -2453,7 +2465,7 @@ async function runGoRestore(plan, inputs) {
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
     core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
@@ -2487,7 +2499,7 @@ async function runGradleRestore(plan, inputs, options) {
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
     core.setOutput('cache-tag', cacheTag);
@@ -2528,7 +2540,7 @@ async function runMavenRestore(plan, inputs, options) {
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
     const extensionsPath = requireSetupFilePath(setup, 'extensions.xml', 'maven extensions.xml');
@@ -2579,7 +2591,7 @@ async function runXcodeRestore(plan, inputs, options) {
     }, proxyPlan.proxy, inputs.failOnCacheError));
     saveModeState('proxy-pid', String(proxy.pid));
     saveModeState('xcode-evidence-json', evidencePath);
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     core.setOutput('cache-tag', proxyPlan.tag);
     core.setOutput('workspace', proxyPlan.workspace);
     setProxyOutputs(proxy.port);
@@ -2613,7 +2625,7 @@ async function runTurboProxyRestore(plan, inputs) {
     ]);
     if (corepackResult.status === 'rejected') {
         if (proxyResult.status === 'fulfilled') {
-            await stopRegistryProxy(proxyResult.value.pid, proxyResult.value.port);
+            await stopRegistryProxy(proxyResult.value.pid, proxyResult.value.port, proxyStopTimeoutMs(proxyResult.value.shutdownBudgetSecs ?? null));
         }
         throw corepackResult.reason;
     }
@@ -2626,7 +2638,7 @@ async function runTurboProxyRestore(plan, inputs) {
         core.setOutput('package-manager-cache-dir', plannedNodePackageManagerCacheDir(packageManager, turboPlan) || packageManager.cacheDir);
     }
     saveModeState('proxy-pid', String(proxy.pid));
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port));
     core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
@@ -2645,7 +2657,7 @@ async function runNxProxyRestore(plan, inputs) {
     const cacheTag = nxPlan.tag;
     const proxy = await startPortableCacheProxyWithFallback(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port));
     core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
@@ -2681,7 +2693,7 @@ async function startCompilerCacheProxy(adapter, plan, inputs) {
     saveModeState(`${adapter}-preflight-kv-hit`, String(preflight.kvHit));
     saveModeState(`${adapter}-preflight-kv-checked`, String(preflight.kvChecked));
     saveModeState('proxy-pid', String(proxy.pid));
-    saveProxyModeState(proxy.port);
+    saveProxyModeState(proxy);
     core.setOutput('workspace', proxyPlan.workspace);
     core.setOutput('cache-tag', proxyPlan.tag);
     core.setOutput('cache-hit', String(preflight.kvHit));
@@ -2815,6 +2827,6 @@ async function stopProxyFromState() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
         const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
-        await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined);
+        await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
     }
 }

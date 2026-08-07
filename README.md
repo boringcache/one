@@ -25,7 +25,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@366e1aa37c271014d69aa6e1a12df57c472fdf5d # v1.16.9
+- uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1.17.0
   with:
     trust-policy: auto
     setup: none
@@ -82,7 +82,7 @@ command fails; Cargo publication happens synchronously only after success.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@366e1aa37c271014d69aa6e1a12df57c472fdf5d # v1.16.9
+- uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1.17.0
   with:
     trust-policy: auto
     setup: none
@@ -102,7 +102,7 @@ only for a single-tenant runner that is destroyed after the job.
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@366e1aa37c271014d69aa6e1a12df57c472fdf5d # v1.16.9
+- uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1.17.0
   with:
     trust-policy: auto
     setup: none
@@ -136,5 +136,5 @@ Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. This
-reviewed Action installs CLI `v1.16.6` by default; `cli-version` is an explicit
+reviewed Action installs CLI `v1.17.0` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.

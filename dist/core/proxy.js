@@ -9,12 +9,42 @@ import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, mis
 export const DEFAULT_PROXY_PORT = 22243;
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
+const PROXY_STOP_PHASE_BUDGETS = [
+    ['BORINGCACHE_KV_SHUTDOWN_FLUSH_MAX_SECS', 720],
+    ['BORINGCACHE_OCI_SHUTDOWN_PUBLISH_TIMEOUT_SECS', 720],
+    ['BORINGCACHE_ARCHIVE_SHUTDOWN_PUBLISH_TIMEOUT_SECS', 720],
+];
+const PROXY_STOP_TIMEOUT_SECS_ENV = 'BORINGCACHE_PROXY_STOP_TIMEOUT_SECS';
+const PROXY_STOP_MARGIN_MS = 180000;
+const PROXY_STOP_KILL_GRACE_MS = 5000;
+export const PROXY_VERIFICATION_STOP_TIMEOUT_MS = 60000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
 const OCI_IMPORT_READY_TIMEOUT_MS = 15000;
 const OCI_IMPORT_READY_POLL_INTERVAL_MS = 1000;
 const OCI_REF_READY_POLL_INTERVAL_MS = 1000;
 const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+function envSeconds(name) {
+    const raw = process.env[name];
+    if (!raw) {
+        return null;
+    }
+    const parsed = Number.parseInt(raw.trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+export function proxyStopTimeoutMs(reportedBudgetSecs) {
+    const override = envSeconds(PROXY_STOP_TIMEOUT_SECS_ENV);
+    if (override !== null) {
+        return override * 1000;
+    }
+    if (typeof reportedBudgetSecs === 'number' &&
+        Number.isFinite(reportedBudgetSecs) &&
+        reportedBudgetSecs > 0) {
+        return reportedBudgetSecs * 1000 + PROXY_STOP_MARGIN_MS;
+    }
+    const phaseSeconds = PROXY_STOP_PHASE_BUDGETS.reduce((total, [name, fallback]) => total + (envSeconds(name) ?? fallback), 0);
+    return phaseSeconds * 1000 + PROXY_STOP_MARGIN_MS;
+}
 export function normalizeProxyTags(tagInput) {
     const tags = [];
     const seen = new Set();
@@ -85,6 +115,16 @@ function clearProxyReadyFile(readyFile) {
         // Ignore missing or inaccessible ready markers; startup will recreate them.
     }
 }
+export function parseProxyReadyMarker(contents) {
+    try {
+        const parsed = JSON.parse(contents);
+        const budget = parsed?.shutdown_budget_secs;
+        return typeof budget === 'number' && Number.isFinite(budget) && budget > 0 ? budget : null;
+    }
+    catch {
+        return null;
+    }
+}
 async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_MS, port, pid) {
     const start = Date.now();
     let lastLogAt = 0;
@@ -92,8 +132,15 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
         if (fs.existsSync(readyFile)) {
             const elapsed = ((Date.now() - start) / 1000).toFixed(1);
             core.info(`BoringCache proxy is ready (${elapsed}s)`);
+            let reportedBudgetSecs = null;
+            try {
+                reportedBudgetSecs = parseProxyReadyMarker(fs.readFileSync(readyFile, 'utf8').trim());
+            }
+            catch {
+                reportedBudgetSecs = null;
+            }
             clearProxyReadyFile(readyFile);
-            return;
+            return reportedBudgetSecs;
         }
         if (pid && pid > 0 && !isProcessAlive(pid)) {
             const logs = port ? readProxyLogs(port) : '';
@@ -420,7 +467,10 @@ export async function startRegistryProxy(options) {
     core.info(`BoringCache proxy started (PID: ${child.pid})`);
     const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
     try {
-        await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
+        const reportedBudgetSecs = await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
+        if (reportedBudgetSecs !== null) {
+            handle.shutdownBudgetSecs = reportedBudgetSecs;
+        }
         if (options.ociRequiredReadableRefs?.length) {
             const ociImportReadiness = await waitForOciImportReadiness(host, options.port, options.ociRequiredReadableRefs, options.ociImportReadyTimeoutMs);
             logOciImportReadiness(ociImportReadiness);
@@ -449,11 +499,10 @@ export async function startRegistryProxy(options) {
     }
 }
 /**
- * Graceful stop: send SIGTERM and wait for the proxy to exit on its own.
- * The proxy handles SIGTERM by flushing all pending blobs to the backend,
- * then exits. Never send SIGKILL — the proxy owns its own shutdown timing.
+ * Graceful stop: SIGTERM, wait out the derived shutdown budget, then SIGKILL
+ * and fail with the proxy log tail.
  */
-export async function stopRegistryProxy(pid, port) {
+export async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTimeoutMs()) {
     if (pid <= 0) {
         core.info('No proxy PID to stop (was reused from another invocation)');
         return;
@@ -475,7 +524,8 @@ export async function stopRegistryProxy(pid, port) {
     const pollInterval = 1000;
     const logInterval = 30_000;
     let lastLog = start;
-    while (true) {
+    let warnedSlow = false;
+    while (Date.now() - start < stopTimeoutMs) {
         if (!isProcessAlive(pid)) {
             if (port) {
                 const logs = readProxyLogs(port);
@@ -491,12 +541,35 @@ export async function stopRegistryProxy(pid, port) {
             return;
         }
         const now = Date.now();
+        if (!warnedSlow && now - start >= stopTimeoutMs / 2) {
+            warnedSlow = true;
+            core.warning(`BoringCache proxy (PID: ${pid}) is still flushing after ${Math.round((now - start) / 1000)}s; it will be force-stopped at the ${Math.round(stopTimeoutMs / 1000)}s shutdown budget`);
+        }
         if (now - lastLog >= logInterval) {
-            core.info(`Waiting for BoringCache proxy to flush and exit... (${Math.round((now - start) / 1000)}s elapsed)`);
+            core.info(`Waiting for BoringCache proxy to flush and exit... (${Math.round((now - start) / 1000)}s of ${Math.round(stopTimeoutMs / 1000)}s shutdown budget)`);
             lastLog = now;
         }
         await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
+    const waitedSeconds = Math.round((Date.now() - start) / 1000);
+    core.warning(`BoringCache proxy (PID: ${pid}) did not exit within the ${Math.round(stopTimeoutMs / 1000)}s shutdown budget; sending SIGKILL`);
+    try {
+        process.kill(pid, 'SIGKILL');
+    }
+    catch {
+    }
+    const killDeadline = Date.now() + PROXY_STOP_KILL_GRACE_MS;
+    while (Date.now() < killDeadline && isProcessAlive(pid)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const logs = port ? readProxyLogs(port) : '';
+    const tail = logs
+        .split('\n')
+        .filter(line => line.trim().length > 0)
+        .slice(-40)
+        .join('\n');
+    throw new Error(`BoringCache proxy shutdown exceeded the ${Math.round(stopTimeoutMs / 1000)}s budget; sent SIGKILL after ${waitedSeconds}s. Cache publication may be incomplete.` +
+        (tail ? `\nLast proxy log lines:\n${tail}` : ''));
 }
 /**
  * Bind to port 0 and return the assigned port.
