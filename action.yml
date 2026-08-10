@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.18.0'
+    default: 'v1.18.1'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -206,7 +206,7 @@ inputs:
     default: 'boringcache'
     required: false
   sccache-version:
-    description: 'sccache version to install when the binary is not already available. Explicit versions require the matching publisher .sha256 release asset.'
+    description: 'sccache version to install when the CLI-selected plan needs it and the binary is not already available. Explicit versions require the matching publisher .sha256 release asset.'
     default: '0.16.0'
     required: false
   ccache-version:
@@ -243,7 +243,7 @@ inputs:
     required: false
 outputs:
   cache-hit:
-    description: 'A boolean value indicating an archive or mode-specific cache hit was found'
+    description: 'A boolean value indicating an archive or mode-specific cache hit was found. Cargo reports its target hit when planned, otherwise its compiler-cache hit.'
   diagnostics-level:
     description: 'Effective diagnostics level used by the action: off, summary, or verbose'
   evidence-path:
@@ -255,7 +255,7 @@ outputs:
   workspace:
     description: 'Resolved BoringCache workspace'
   cache-tag:
-    description: 'Resolved cache tag or prefix'
+    description: 'Resolved primary cache tag or prefix. Cargo reports its target tag when planned.'
   resolved-entries:
     description: 'Resolved archive cache entries from the CLI plan'
   resolved-tags:
@@ -311,9 +311,9 @@ outputs:
   buildx-platforms:
     description: 'Available platforms for the Docker buildx builder'
   sccache-tag:
-    description: 'Resolved sccache cache tag'
+    description: 'Resolved compiler-cache tag for standalone sccache or composed Cargo'
   sccache-hit:
-    description: 'Whether remote sccache KV rows existed before the build'
+    description: 'Whether remote sccache KV rows existed before a standalone sccache or composed Cargo build'
   package-manager:
     description: 'Detected Node.js package manager for Turbo mode'
   package-manager-cache-dir:

@@ -25,7 +25,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1.17.0
+- uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1.18.0
   with:
     trust-policy: auto
     setup: none
@@ -55,16 +55,22 @@ ownership contract.
 ### Cargo mode
 
 The reviewed `v1.16.9` Action runs one complete repo-owned Cargo command inside
-the CLI's target,
-dependency, and sccache lifecycle. It provisions the audited sccache version
-before execution. Keep the command beside the cache plan:
+the CLI's dependency, target, and optional sccache lifecycle. It provisions the
+audited sccache version only when the CLI plan selects it. Keep the command and
+layer choice beside the cache plan, and keep compiler identity independent:
 
 ```toml
 [adapters.cargo]
-tag = "rust-compiler"
 profiles = ["cargo"]
 command = ["cargo", "build", "--release"]
+compiler-cache = "sccache"
+
+[adapters.sccache]
+tag = "rust-compiler"
 ```
+
+`compiler-cache = "sccache"` is the default. Use `"none"` for dependency and
+target caching without a compiler proxy.
 
 Select `mode: cargo` in one Action step with the reviewed `v1.16.9`
 distribution SHA used by the examples in this README. The Action invokes
@@ -82,7 +88,7 @@ command fails; Cargo publication happens synchronously only after success.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1.17.0
+- uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1.18.0
   with:
     trust-policy: auto
     setup: none
@@ -102,7 +108,7 @@ only for a single-tenant runner that is destroyed after the job.
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1.17.0
+- uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1.18.0
   with:
     trust-policy: auto
     setup: none

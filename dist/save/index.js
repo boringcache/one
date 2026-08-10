@@ -95478,7 +95478,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.18.0',
+        cliVersion: getInput('cli-version') || 'v1.18.1',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -99550,7 +99550,9 @@ function cargoArchiveVerificationSpecs(cargoPlan, workingDirectory) {
             : undefined,
         saveExpected: !cargoPlan.proxy.read_only,
     }));
-    specs.push(adapterProxyVerificationSpec(cargoPlan.tag, cargoPlan.proxy, workingDirectory));
+    if (cargoCompilerCacheEnabled(cargoPlan)) {
+        specs.push(adapterProxyVerificationSpec(cargoCompilerCacheTag(cargoPlan), cargoPlan.proxy, workingDirectory));
+    }
     const unique = new Map();
     for (const spec of specs) {
         const key = `${spec.tag}\0${String(spec.noPlatform)}\0${String(spec.noGit)}`;
@@ -99560,24 +99562,49 @@ function cargoArchiveVerificationSpecs(cargoPlan, workingDirectory) {
     }
     return [...unique.values()];
 }
+function cargoCompilerCacheEnabled(cargoPlan) {
+    // Compatible older CLIs predate the explicit layer field and always compose
+    // sccache, so a missing value preserves their released behavior.
+    return cargoPlan.cargo_cache?.compiler_cache !== 'none';
+}
+function cargoCompilerCacheTag(cargoPlan) {
+    // Older CLIs exposed only the adapter-level tag. Prefer the explicit layer
+    // identity while preserving their released dry-run contract.
+    return cargoPlan.cargo_cache?.compiler_cache_tag || cargoPlan.tag;
+}
 async function runCargoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
     const command = cargoPlan.command || [];
     const targetEntry = (cargoPlan.archive_entries || []).find((entry) => entry.kind === 'cargo-target' || entry.requested === 'cargo-target');
-    const targetPreflight = targetEntry
-        ? await checkCompilerCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
-            noPlatform: cargoPlan.proxy.no_platform,
-            noGit: cargoPlan.proxy.no_git,
-            requireServerSignature: true,
-        })
-        : emptyCompilerCacheTagCheckStatus();
+    const compilerCacheEnabled = cargoCompilerCacheEnabled(cargoPlan);
+    const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
+    const [targetPreflight, compilerPreflight] = await Promise.all([
+        targetEntry
+            ? checkCompilerCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
+                noPlatform: cargoPlan.proxy.no_platform,
+                noGit: cargoPlan.proxy.no_git,
+                requireServerSignature: true,
+            })
+            : emptyCompilerCacheTagCheckStatus(),
+        compilerCacheEnabled
+            ? checkCompilerCacheTagStatus(cargoPlan.workspace, compilerCacheTag, {
+                noPlatform: cargoPlan.proxy.no_platform,
+                noGit: cargoPlan.proxy.no_git,
+                requireServerSignature: true,
+            })
+            : emptyCompilerCacheTagCheckStatus(),
+    ]);
+    const cacheHit = targetEntry ? targetPreflight.cacheEntryHit : compilerPreflight.kvHit;
+    const cacheTag = targetEntry?.tag || (compilerCacheEnabled ? compilerCacheTag : '');
+    core.setOutput('sccache-tag', compilerCacheEnabled ? compilerCacheTag : '');
+    core.setOutput('sccache-hit', String(compilerCacheEnabled && compilerPreflight.kvHit));
     if (inputs.failOnCacheMiss && !inputs.lookupOnly) {
         throw new Error('mode=cargo does not support fail-on-cache-miss while executing yet; '
             + 'the CLI adapter does not expose that lifecycle hook. Use lookup-only for a preflight check.');
     }
-    if (inputs.lookupOnly && inputs.failOnCacheMiss && !targetPreflight.cacheEntryHit) {
-        throw new Error(`Cargo target cache miss for ${targetEntry?.tag || 'the CLI-owned target entry'}`);
+    if (inputs.lookupOnly && inputs.failOnCacheMiss && !cacheHit) {
+        throw new Error(`Cargo cache miss for ${cacheTag || 'the CLI-owned Cargo layers'}`);
     }
     const verificationSpecs = cargoArchiveVerificationSpecs(cargoPlan, plan.workingDirectory);
     const resolvedEntries = (cargoPlan.archive_entries || [])
@@ -99585,8 +99612,8 @@ async function runCargoRestore(plan, inputs) {
         .join('\n');
     if (inputs.lookupOnly) {
         return {
-            cacheHit: targetPreflight.cacheEntryHit,
-            cacheTag: cargoPlan.tag,
+            cacheHit,
+            cacheTag,
             resolvedEntries,
             verificationSpecs,
             evidence: {
@@ -99594,20 +99621,28 @@ async function runCargoRestore(plan, inputs) {
                 command_executed: false,
                 lookup_only: true,
                 target_cache_hit: targetPreflight.cacheEntryHit,
+                compiler_cache_hit: compilerPreflight.kvHit,
+                cargo_cache: cargoPlan.cargo_cache,
                 archive_entries: cargoPlan.archive_entries || [],
             },
         };
     }
-    const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
-    await installSccache(sccacheVersion);
-    const nativeEvidencePath = path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`);
+    if (compilerCacheEnabled) {
+        const sccacheVersion = core.getInput('sccache-version') || SCCACHE_DEFAULT_VERSION.slice(1);
+        await installSccache(sccacheVersion);
+    }
+    const nativeEvidencePath = compilerCacheEnabled
+        ? path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`)
+        : '';
     const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
     mode_handlers_appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
     appendMetadataHintArgs(args, inputs.metadataHints);
     if (inputs.failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
-    args.push('--native-tool-evidence-json', nativeEvidencePath);
+    if (nativeEvidencePath) {
+        args.push('--native-tool-evidence-json', nativeEvidencePath);
+    }
     const startedAt = Date.now();
     let nativeToolEvidence = null;
     try {
@@ -99618,27 +99653,31 @@ async function runCargoRestore(plan, inputs) {
         if (exitCode !== 0) {
             throw new Error(`boringcache cargo exited with code ${exitCode}`);
         }
-        nativeToolEvidence = readBoundedJsonObject(nativeEvidencePath);
+        nativeToolEvidence = nativeEvidencePath ? readBoundedJsonObject(nativeEvidencePath) : null;
     }
     finally {
-        fs.rmSync(nativeEvidencePath, { force: true });
+        if (nativeEvidencePath) {
+            fs.rmSync(nativeEvidencePath, { force: true });
+        }
     }
     const commandEvidence = {
         command,
         elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
         native_tool: nativeToolEvidence,
     };
-    core.setOutput('cache-tag', cargoPlan.tag);
+    core.setOutput('cache-tag', cacheTag);
     core.setOutput('workspace', cargoPlan.workspace);
     return {
-        cacheHit: targetPreflight.cacheEntryHit,
-        cacheTag: cargoPlan.tag,
+        cacheHit,
+        cacheTag,
         resolvedEntries,
         verificationSpecs,
         evidence: {
             ...commandEvidence,
             command_executed: true,
             target_cache_hit: targetPreflight.cacheEntryHit,
+            compiler_cache_hit: compilerPreflight.kvHit,
+            cargo_cache: cargoPlan.cargo_cache,
             archive_entries: cargoPlan.archive_entries || [],
         },
     };
