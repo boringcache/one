@@ -91,13 +91,13 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.18.1',
+        cliVersion: core.getInput('cli-version') || 'v1.19.0',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
         workingDirectory: path.resolve(core.getInput('working-directory') || '.'),
         tools: core.getInput('tools'),
-        mavenVersion: core.getInput('maven-version') || '3.9.9',
+        mavenVersion: core.getInput('maven-version') || '3.9.16',
         mavenLocalRepo: core.getInput('maven-local-repo') || '~/.m2/repository',
         trustPolicy: normalizeTrustPolicy(core.getInput('trust-policy') || 'auto'),
         cacheCandidates: core.getInput('cache-candidates', { trimWhitespace: false }),
@@ -398,7 +398,24 @@ export async function runDiagnosticsGroup(diagnostics, title, fn) {
     }
     await core.group(title, fn);
 }
-export function writeActionEvidence(phase, payload) {
+export function actionEvidenceProductRefs(cliVersion) {
+    const productRefs = {
+        schema_version: 1,
+        cli_version: cliVersion.trim(),
+    };
+    const actionRepository = (process.env.GITHUB_ACTION_REPOSITORY || '').trim();
+    const actionRef = (process.env.GITHUB_ACTION_REF || '').trim();
+    if (actionRef) {
+        const actionSha = /^[0-9a-f]{40}$/i.test(actionRef) ? actionRef.toLowerCase() : undefined;
+        const recordedActionRef = actionSha || actionRef;
+        productRefs.action_ref = actionRepository ? `${actionRepository}@${recordedActionRef}` : recordedActionRef;
+        if (actionSha) {
+            productRefs.action_sha = actionSha;
+        }
+    }
+    return productRefs;
+}
+export function writeActionEvidence(phase, payload, productRefs) {
     const evidencePath = actionEvidencePath();
     const current = readActionEvidence(evidencePath);
     const now = new Date().toISOString();
@@ -406,6 +423,7 @@ export function writeActionEvidence(phase, payload) {
         schema_version: 'boringcache_one_evidence.v1',
         generated_at: current.generated_at || now,
         updated_at: now,
+        product_refs: productRefs || current.product_refs,
         phases: sanitizeEvidencePhases({
             ...current.phases,
             [phase]: payload,
@@ -1733,7 +1751,7 @@ export function validateOneInputs(inputs, modeSpec, archiveEntries) {
 export async function buildPlan(inputs) {
     const modeSpec = resolveModeSpec(inputs.mode);
     assertImplementedMode(modeSpec);
-    const resolvedMavenVersion = inputs.mavenVersion || '3.9.9';
+    const resolvedMavenVersion = inputs.mavenVersion || '3.9.16';
     const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.mode, inputs.tools, inputs.workingDirectory);
     if (inputs.setup === 'mise'
         && modeSpec.resolved === 'maven'

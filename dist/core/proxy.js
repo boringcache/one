@@ -9,11 +9,7 @@ import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, mis
 export const DEFAULT_PROXY_PORT = 22243;
 const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
-const PROXY_STOP_PHASE_BUDGETS = [
-    ['BORINGCACHE_KV_SHUTDOWN_FLUSH_MAX_SECS', 720],
-    ['BORINGCACHE_OCI_SHUTDOWN_PUBLISH_TIMEOUT_SECS', 720],
-    ['BORINGCACHE_ARCHIVE_SHUTDOWN_PUBLISH_TIMEOUT_SECS', 720],
-];
+const PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS = 7455;
 const PROXY_STOP_TIMEOUT_SECS_ENV = 'BORINGCACHE_PROXY_STOP_TIMEOUT_SECS';
 const PROXY_STOP_MARGIN_MS = 180000;
 const PROXY_STOP_KILL_GRACE_MS = 5000;
@@ -42,8 +38,7 @@ export function proxyStopTimeoutMs(reportedBudgetSecs) {
         reportedBudgetSecs > 0) {
         return reportedBudgetSecs * 1000 + PROXY_STOP_MARGIN_MS;
     }
-    const phaseSeconds = PROXY_STOP_PHASE_BUDGETS.reduce((total, [name, fallback]) => total + (envSeconds(name) ?? fallback), 0);
-    return phaseSeconds * 1000 + PROXY_STOP_MARGIN_MS;
+    return PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS * 1000 + PROXY_STOP_MARGIN_MS;
 }
 export function normalizeProxyTags(tagInput) {
     const tags = [];
@@ -434,6 +429,9 @@ export async function startRegistryProxy(options) {
     }
     if (options.xcodeEvidenceJson?.trim()) {
         args.push('--xcode-evidence-json', options.xcodeEvidenceJson.trim());
+    }
+    if (options.nixHookSocket?.trim()) {
+        args.push('--nix-hook-socket', options.nixHookSocket.trim());
     }
     if (effectiveStage) {
         args.push('--stage');

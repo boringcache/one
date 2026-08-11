@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.18.1'
+    default: 'v1.19.0'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -14,7 +14,7 @@ inputs:
     default: 'none'
     required: false
   mode:
-    description: 'Primary cache behavior. Use archive for portable directory caches, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.'
+    description: 'Primary cache behavior. Use archive for portable directory caches, gha for Actions Cache v2 compatibility, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nix, nx, sccache, turbo, or xcode.'
     default: 'archive'
     required: false
   working-directory:
@@ -183,7 +183,7 @@ inputs:
     required: false
   maven-version:
     description: 'Maven version to install when setup=mise and the project does not already pin it.'
-    default: '3.9.9'
+    default: '3.9.16'
     required: false
   maven-local-repo:
     description: 'Local Maven repository path. Used for archive defaults in Maven mode.'
@@ -207,7 +207,7 @@ inputs:
     required: false
   sccache-version:
     description: 'sccache version to install when the CLI-selected plan needs it and the binary is not already available. Explicit versions require the matching publisher .sha256 release asset.'
-    default: '0.16.0'
+    default: '0.17.0'
     required: false
   ccache-version:
     description: 'ccache version to use. The action installs the audited default release and its HTTP storage helper when they are not already available.'

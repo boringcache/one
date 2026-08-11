@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import { applyTrustTokenPolicy, applyCliPlanEnv, applyMiseSetup, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applyTrustTokenPolicy, applyCliPlanEnv, applyMiseSetup, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 const ARCHIVE_OVERLAP_MODES = new Set([
@@ -8,6 +8,7 @@ const ARCHIVE_OVERLAP_MODES = new Set([
     'go',
     'gradle',
     'maven',
+    'nix',
     'nx',
     'sccache',
     'turbo',
@@ -315,7 +316,7 @@ export async function run() {
                 ...trustState.token_capabilities,
             },
             staged_candidates: stagedCandidates,
-        });
+        }, actionEvidenceProductRefs(cliCapabilityVersion));
         restoreFailureContext = {
             ...restoreFailureContext,
             cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
