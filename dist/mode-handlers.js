@@ -3,7 +3,7 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execBoringCache as execBoringCacheCore, DEFAULT_PROXY_PORT, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, PROXY_VERIFICATION_STOP_TIMEOUT_MS, } from './core';
+import { execBoringCache as execBoringCacheCore, DEFAULT_PROXY_PORT, findAvailablePort, hasToolVersionOnPath, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, resolveGitHubCacheIdentity, startGhaAdapter, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, PROXY_VERIFICATION_STOP_TIMEOUT_MS, } from './core';
 import { DEFAULT_OCI_HYDRATION_POLICY, detectNodePackageManager, normalizeVerifyTimeoutSeconds, } from './utils';
 import { readSha256File, verifySha256 } from './core/integrity';
 const DOCKER_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-docker-metadata.json');
@@ -39,16 +39,16 @@ const BUILDCTL_RELEASES = {
         sha256: '02542a36873fe095b5606981a86301e249d2734931925cb2f287ea015de3f555',
     },
 };
-const SCCACHE_DEFAULT_VERSION = 'v0.16.0';
+const SCCACHE_DEFAULT_VERSION = 'v0.17.0';
 // Immutable digests published with the default sccache release. Explicit
 // version overrides must provide the publisher's adjacent .sha256 asset.
 const SCCACHE_DEFAULT_SHA256 = {
-    'sccache-v0.16.0-aarch64-apple-darwin.tar.gz': 'ded590cae2c72042c61178632906bef62d635fa20d45f8b22110a2241f430960',
-    'sccache-v0.16.0-aarch64-pc-windows-msvc.zip': '6a715fe44d9b7a2cac15c256411ef232d3b6276e2421bd3be16ab32af71fbf88',
-    'sccache-v0.16.0-aarch64-unknown-linux-musl.tar.gz': 'f73a5c39f96bb6ebb89cc7915cf182260d4cbf30765322c5e793d0fe8bd80784',
-    'sccache-v0.16.0-x86_64-apple-darwin.tar.gz': 'f7dbd055db75a938ab1539f5316c5d08e73a1b94c40ab170ddcc617f5bf18343',
-    'sccache-v0.16.0-x86_64-pc-windows-msvc.zip': 'b8514ed7552e148b0a032114f745118dcb801791adafafeaf9935e4bfb0edf1b',
-    'sccache-v0.16.0-x86_64-unknown-linux-musl.tar.gz': 'aec995a83ad3dff3d14b6314e08858b7b73d35ca85a5bcf3d3a9ec07dee35588',
+    'sccache-v0.17.0-aarch64-apple-darwin.tar.gz': '0c560bfba31aef5bdfb4fb3d2677f6e61d71c5c00952f2a83344f47aa31f00f1',
+    'sccache-v0.17.0-aarch64-pc-windows-msvc.zip': '82994d1bc92ccc0556f7e6e0ad6cbd08a41a1e84b461fcae628ac2afc8c372bf',
+    'sccache-v0.17.0-aarch64-unknown-linux-musl.tar.gz': '821a86343191aa1cbab74bd42f9e93c9a63bf85e4742945f40d3ae84193c1c77',
+    'sccache-v0.17.0-x86_64-apple-darwin.tar.gz': 'c2144cafbfe3d22e34ae637f9974ce53613543ac19477fdb287df22ea3668261',
+    'sccache-v0.17.0-x86_64-pc-windows-msvc.zip': 'e94cfc5b58cbe439302f586c1d1bd7980c2cd371d47bdf385ade657411e6f3ac',
+    'sccache-v0.17.0-x86_64-unknown-linux-musl.tar.gz': '67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006',
 };
 const CCACHE_DEFAULT_VERSION = '4.13.6';
 const CCACHE_STORAGE_HTTP_DEFAULT_VERSION = '0.8';
@@ -229,8 +229,12 @@ export async function runModeRestore(plan, inputs, options = {}) {
             return runGoRestore(plan, inputs);
         case 'gradle':
             return runGradleRestore(plan, inputs, options);
+        case 'gha':
+            return runGhaRestore(plan, inputs);
         case 'maven':
             return runMavenRestore(plan, inputs, options);
+        case 'nix':
+            return runNixRestore(plan, inputs, options);
         case 'sccache':
             return runSccacheRestore(plan, inputs);
         case 'turbo':
@@ -264,11 +268,25 @@ export async function runModeSave(mode, options = {}) {
             await stopProxyFromState();
             return;
         case 'gradle':
+        case 'gha':
         case 'maven':
         case 'nx':
         case 'turbo':
         case 'xcode':
             await stopProxyFromState();
+            return;
+        case 'nix':
+            try {
+                await drainNixUploads();
+            }
+            finally {
+                try {
+                    await stopProxyFromState();
+                }
+                finally {
+                    cleanupNixRuntimeDirectory();
+                }
+            }
             return;
         case 'sccache':
             await runSccacheSave(options);
@@ -276,6 +294,36 @@ export async function runModeSave(mode, options = {}) {
         case 'archive':
             return;
     }
+}
+async function runGhaRestore(plan, inputs) {
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+    const identity = resolveGitHubCacheIdentity();
+    const adapter = await startGhaAdapter({
+        workspace: plan.workspace,
+        repositoryId: identity.repositoryId,
+        scope: identity.scope,
+        readScopes: identity.readScopes,
+        port: requestedPort,
+        readOnly: inputs.readOnly,
+        verbose: inputs.verbose,
+    });
+    saveModeState('proxy-pid', String(adapter.pid));
+    saveModeState('proxy-port', String(adapter.port));
+    saveModeState('proxy-log-path', adapter.logPath);
+    saveModeState('workspace', plan.workspace);
+    setProxyOutputs(adapter.port);
+    return {
+        cacheHit: false,
+        resolvedEntries: '',
+        evidence: {
+            adapter: 'gha',
+            repository_id: identity.repositoryId,
+            readable_scope_count: identity.readScopes.length + 1,
+            fallback_scope_count: identity.readScopes.length,
+            results_url: adapter.resultsUrl,
+            read_only: adapter.readOnly,
+        },
+    };
 }
 function parseBooleanInput(value, inputName, defaultValue = false) {
     if (value === undefined || value === null || value === '') {
@@ -378,7 +426,21 @@ function applyAdapterSetupPlan(setup) {
         else {
             throw new Error(`Unsupported adapter setup file mode for ${file.path}`);
         }
+        if (file.executable) {
+            fs.chmodSync(file.path, 0o700);
+        }
     }
+}
+function prependExistingNixConfig(setup) {
+    const planned = setup.env_vars?.NIX_CONFIG;
+    const existing = process.env.NIX_CONFIG;
+    if (!planned || !existing?.trim()) {
+        return;
+    }
+    setup.env_vars = {
+        ...setup.env_vars,
+        NIX_CONFIG: `${existing.replace(/\n+$/, '')}\n${planned}`,
+    };
 }
 function setupFilePath(setup, suffix) {
     return (setup.files || []).find((file) => file.path.endsWith(suffix))?.path || '';
@@ -588,6 +650,9 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     }
     if (options.mavenBuildCacheId?.trim()) {
         args.push('--maven-build-cache-id', options.mavenBuildCacheId.trim());
+    }
+    if (options.failOnCacheError) {
+        args.push('--fail-on-cache-error');
     }
     args.push('--dry-run', '--json');
     let stdout = '';
@@ -2596,6 +2661,105 @@ async function runMavenRestore(plan, inputs, options) {
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
     };
 }
+async function captureCommand(command, args) {
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await exec.exec(command, args, {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+}
+async function assertNixTrustedUser() {
+    if (process.platform === 'win32') {
+        throw new Error('mode=nix requires a Linux or macOS runner with Nix installed.');
+    }
+    const version = await captureCommand('nix', ['--version']);
+    if (version.exitCode !== 0) {
+        throw new Error(version.stderr || '`nix` was not found on PATH. Install Nix before boringcache/one.');
+    }
+    try {
+        fs.accessSync('/nix/store', fs.constants.W_OK);
+        return;
+    }
+    catch {
+        // Multi-user Nix stores are normally daemon-owned. Check daemon trust.
+    }
+    const userResult = await captureCommand('id', ['-un']);
+    const groupsResult = await captureCommand('id', ['-Gn']);
+    const trustedResult = await captureCommand('nix', [
+        '--extra-experimental-features',
+        'nix-command',
+        'config',
+        'show',
+        'trusted-users',
+    ]);
+    if (userResult.exitCode !== 0 || groupsResult.exitCode !== 0 || trustedResult.exitCode !== 0) {
+        throw new Error(trustedResult.stderr
+            || groupsResult.stderr
+            || userResult.stderr
+            || 'Unable to determine whether the runner is a trusted Nix user.');
+    }
+    const user = userResult.stdout;
+    const groups = new Set(groupsResult.stdout.split(/\s+/).filter(Boolean));
+    const trustedSetting = trustedResult.stdout.includes('=')
+        ? trustedResult.stdout.slice(trustedResult.stdout.indexOf('=') + 1)
+        : trustedResult.stdout;
+    const trusted = trustedSetting.split(/\s+/).filter(Boolean).some((entry) => (entry === '*'
+        || entry === user
+        || (entry.startsWith('@') && groups.has(entry.slice(1)))));
+    if (!trusted) {
+        throw new Error(`mode=nix requires ${user || 'the runner user'} to be listed in Nix trusted-users so the per-job substituter and post-build hook reach the Nix daemon.`);
+    }
+}
+async function runNixRestore(plan, inputs, options) {
+    await assertNixTrustedUser();
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+    const proxyPlan = await resolveAdapterCliPlan('nix', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
+        metadataHintsInput: inputs.metadataHints,
+        failOnCacheError: inputs.failOnCacheError,
+    });
+    const setup = requireAdapterSetupPlan('nix', proxyPlan.setup);
+    prependExistingNixConfig(setup);
+    const socketPath = proxyPlan.proxy.nix_hook_socket?.trim() || '';
+    if (!proxyPlan.proxy.read_only && !socketPath) {
+        throw new Error('boringcache nix setup plan did not include its upload socket');
+    }
+    const proxy = await startRegistryProxy(actionProxyOptions({
+        command: 'cache-registry',
+        workspace: proxyPlan.workspace,
+        tag: proxyPlan.tag,
+        host: proxyPlan.proxy.host || '127.0.0.1',
+        port: proxyPlan.proxy.port,
+        noGit: proxyPlan.proxy.no_git,
+        noPlatform: proxyPlan.proxy.no_platform,
+        verbose: inputs.verbose,
+        readOnly: proxyPlan.proxy.read_only,
+        nixHookSocket: socketPath || undefined,
+    }, proxyPlan.proxy, inputs.failOnCacheError));
+    saveModeState('proxy-pid', String(proxy.pid));
+    saveProxyModeState(proxy);
+    saveModeState('nix-hook-socket', socketPath);
+    saveModeState('nix-runtime-directory', setup.directories?.[0] || '');
+    saveModeState('nix-fail-on-cache-error', String(inputs.failOnCacheError));
+    await waitForArchiveMaterialization(options);
+    applyAdapterSetupPlan(setup);
+    core.setOutput('cache-tag', proxyPlan.tag);
+    core.setOutput('workspace', proxyPlan.workspace);
+    setProxyOutputs(proxy.port);
+    return {
+        cacheTag: proxyPlan.tag,
+        verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, plan.workingDirectory)],
+    };
+}
 async function runXcodeRestore(plan, inputs, options) {
     if (process.platform !== 'darwin') {
         throw new Error('mode=xcode requires a macOS runner with Xcode installed.');
@@ -2868,4 +3032,33 @@ async function stopProxyFromState() {
         const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
         await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
     }
+}
+async function drainNixUploads() {
+    const socketPath = getModeState('nix-hook-socket');
+    if (!socketPath) {
+        return;
+    }
+    const exitCode = await execBoringCache(['nix-hook', '--socket', socketPath, '--drain'], {
+        ignoreReturnCode: true,
+    });
+    if (exitCode === 0) {
+        return;
+    }
+    const message = `Nix cache upload drain failed with exit code ${exitCode}`;
+    if (getModeStateBoolean('nix-fail-on-cache-error')) {
+        throw new Error(message);
+    }
+    core.warning(message);
+}
+function cleanupNixRuntimeDirectory() {
+    const runtimeDirectory = getModeState('nix-runtime-directory');
+    if (!runtimeDirectory) {
+        return;
+    }
+    const normalized = path.normalize(runtimeDirectory);
+    if (path.dirname(normalized) !== '/tmp' || !/^boringcache-nix-[A-Za-z0-9]{1,64}$/.test(path.basename(normalized))) {
+        core.warning(`Refusing to remove unexpected Nix runtime directory ${runtimeDirectory}`);
+        return;
+    }
+    fs.rmSync(normalized, { recursive: true, force: true });
 }

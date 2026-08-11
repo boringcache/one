@@ -39,10 +39,20 @@ const MODE_SPECS = {
         implemented: true,
         description: 'Gradle build cache proxy integration.',
     },
+    gha: {
+        resolved: 'gha',
+        implemented: true,
+        description: 'GitHub Actions Cache v2 compatibility through a runner-local adapter.',
+    },
     maven: {
         resolved: 'maven',
         implemented: true,
         description: 'Maven build cache proxy integration.',
+    },
+    nix: {
+        resolved: 'nix',
+        implemented: true,
+        description: 'Nix HTTP binary-cache integration.',
     },
     nx: {
         resolved: 'nx',
@@ -76,14 +86,16 @@ export function normalizeMode(value) {
         case 'ccache':
         case 'go':
         case 'gradle':
+        case 'gha':
         case 'maven':
+        case 'nix':
         case 'nx':
         case 'sccache':
         case 'turbo':
         case 'xcode':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nx, sccache, turbo, or xcode.`);
+            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, cargo, ccache, gha, go, gradle, maven, nix, nx, sccache, turbo, or xcode.`);
     }
 }
 export function resolveModeSpec(mode) {

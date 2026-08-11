@@ -3,7 +3,8 @@
 `boringcache/one` is GitHub lifecycle for the same CLI-owned BoringCache plan
 used locally and on any runner. It installs the CLI, restores and saves named
 archive profiles, and orchestrates Docker, BuildKit, Bazel, Cargo, Go, Gradle,
-Maven, Turbo, Nx, C/C++ `ccache`, Rust `sccache`, and Xcode compilation-cache
+Maven, Turbo, Nx, C/C++ `ccache`, Rust `sccache`, Xcode compilation-cache, and
+GitHub Actions Cache v2 compatibility
 modes without inventing a second cache interface.
 
 ## Quick start
@@ -25,7 +26,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1.18.0
+- uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1.18.1
   with:
     trust-policy: auto
     setup: none
@@ -52,9 +53,25 @@ build freshness; no system tar installation is required. See
 [archive mode](https://boringcache.com/docs#cli-run) for the customer-facing
 ownership contract.
 
+### GitHub Actions Cache v2 mode
+
+Place one `mode: gha` step before existing cache-enabled actions. It starts the
+loopback compatibility adapter and exports the standard GitHub cache variables;
+existing `actions/cache` keys, paths, and setup-action cache settings stay the
+same. Keep this step before every cache-using action so reverse post-step order
+leaves the adapter running for their uploads.
+
+Choose this compatibility mode when the existing Actions Cache behavior and
+workflow shape should stay intact. For semantic entries shared with local runs
+and other CI systems, use `boringcache onboard` and an archive
+`cache-profiles` plan instead. Both paths use the same BoringCache storage
+engine; neither imports objects already stored by GitHub. The GHA mode is
+implemented and CI-verified in source and becomes a customer path with the next
+reviewed CLI and Action release that contains it; `v1.18.1` does not.
+
 ### Cargo mode
 
-The reviewed `v1.16.9` Action runs one complete repo-owned Cargo command inside
+The reviewed `v1.18.1` Action runs one complete repo-owned Cargo command inside
 the CLI's dependency, target, and optional sccache lifecycle. It provisions the
 audited sccache version only when the CLI plan selects it. Keep the command and
 layer choice beside the cache plan, and keep compiler identity independent:
@@ -72,7 +89,7 @@ tag = "rust-compiler"
 `compiler-cache = "sccache"` is the default. Use `"none"` for dependency and
 target caching without a compiler proxy.
 
-Select `mode: cargo` in one Action step with the reviewed `v1.16.9`
+Select `mode: cargo` in one Action step with the reviewed `v1.18.1`
 distribution SHA used by the examples in this README. The Action invokes
 `boringcache cargo` synchronously; it does not reconstruct target restore,
 source-freshness, compiler-cache, or save policy in workflow YAML.
@@ -88,7 +105,7 @@ command fails; Cargo publication happens synchronously only after success.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1.18.0
+- uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1.18.1
   with:
     trust-policy: auto
     setup: none
@@ -108,7 +125,7 @@ only for a single-tenant runner that is destroyed after the job.
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1.18.0
+- uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1.18.1
   with:
     trust-policy: auto
     setup: none
@@ -136,7 +153,7 @@ grouped inventory is contract-checked against it.
 
 ## Updates
 
-The examples pin the reviewed `v1.16.9` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.18.1` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
