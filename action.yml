@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.19.0'
+    default: 'v1.19.1'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -118,7 +118,7 @@ inputs:
     description: 'Docker or BuildKit secrets, newline-separated.'
     required: false
   docker-tool-cache:
-    description: 'Docker mode only: expose session-only BoringCache remote-cache config for Turbo, Nx, Bazel, Gradle, Maven, sccache, or Go inside matching Dockerfile RUN steps. Accepts comma- or newline-separated TOOL:TAG values, or plain tool names backed by [adapters.<tool>].tag.'
+    description: 'Docker mode only: expose session-only BoringCache remote-cache config for Turbo, Nx, Bazel, Gradle, Maven, ccache, sccache, or Go inside matching Dockerfile RUN steps. Accepts comma- or newline-separated TOOL:TAG values, or plain tool names backed by [adapters.<tool>].tag.'
     required: false
   docker-tool-cache-target:
     description: 'Docker mode only: limit docker-tool-cache injection to selected Bake targets or Compose services. Comma- or newline-separated. Requires docker-tool-cache.'
@@ -243,7 +243,7 @@ inputs:
     required: false
 outputs:
   cache-hit:
-    description: 'A boolean value indicating an archive or mode-specific cache hit was found. Cargo reports its target hit when planned, otherwise its compiler-cache hit.'
+    description: 'Whether reusable cache existed before startup. Go, Gradle, Maven, Nx, Turbo, ccache, and sccache report direct KV rows; Cargo reports its target hit when planned, otherwise its compiler-cache hit.'
   diagnostics-level:
     description: 'Effective diagnostics level used by the action: off, summary, or verbose'
   evidence-path:

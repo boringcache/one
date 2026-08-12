@@ -1787,7 +1787,7 @@ async function stopCcacheStorageHelpers(statsLog, statsDirectory) {
     }
     return summarizeCcacheStats(output);
 }
-function emptyCompilerCacheTagCheckStatus() {
+function emptyDirectCacheTagCheckStatus() {
     return {
         hit: false,
         cacheEntryHit: false,
@@ -1812,7 +1812,7 @@ function checkResultHasCacheEntryHit(result) {
     }
     return result.cache_type !== 'kv';
 }
-async function checkCompilerCacheTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
+async function checkDirectCacheTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
     const args = ['check', workspace, tag, '--json'];
     if (requireServerSignature) {
         args.unshift('--require-server-signature');
@@ -1834,7 +1834,7 @@ async function checkCompilerCacheTagStatus(workspace, tag, { noPlatform = false,
         },
     });
     if (exitCode !== 0) {
-        return emptyCompilerCacheTagCheckStatus();
+        return emptyDirectCacheTagCheckStatus();
     }
     try {
         const summary = JSON.parse(stdout);
@@ -1852,18 +1852,18 @@ async function checkCompilerCacheTagStatus(workspace, tag, { noPlatform = false,
     }
     catch (error) {
         core.warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
-        return emptyCompilerCacheTagCheckStatus();
+        return emptyDirectCacheTagCheckStatus();
     }
 }
-async function checkCompilerCacheProxyTagStatus(workspace, tag, options = {}) {
-    const strictStatus = await checkCompilerCacheTagStatus(workspace, tag, {
+async function checkDirectCacheProxyTagStatus(workspace, tag, options = {}) {
+    const strictStatus = await checkDirectCacheTagStatus(workspace, tag, {
         ...options,
         requireServerSignature: true,
     });
     if (strictStatus.kvChecked || strictStatus.kvHit) {
         return strictStatus;
     }
-    const kvStatus = await checkCompilerCacheTagStatus(workspace, tag, {
+    const kvStatus = await checkDirectCacheTagStatus(workspace, tag, {
         ...options,
         requireServerSignature: false,
     });
@@ -1872,6 +1872,15 @@ async function checkCompilerCacheProxyTagStatus(workspace, tag, options = {}) {
         cacheEntryHit: strictStatus.cacheEntryHit,
         kvHit: kvStatus.kvHit,
         kvChecked: kvStatus.kvChecked || kvStatus.kvHit,
+    };
+}
+function directCachePreflightEvidence(preflight) {
+    return {
+        cache_preflight: {
+            cache_entry_hit: preflight.cacheEntryHit,
+            kv_hit: preflight.kvHit,
+            kv_checked: preflight.kvChecked,
+        },
     };
 }
 function rewritePlannedProxyPort(value, plannedPort, actualPort) {
@@ -2391,19 +2400,19 @@ async function runCargoRestore(plan, inputs) {
     const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
     const [targetPreflight, compilerPreflight] = await Promise.all([
         targetEntry
-            ? checkCompilerCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
+            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
                 noPlatform: cargoPlan.proxy.no_platform,
                 noGit: cargoPlan.proxy.no_git,
                 requireServerSignature: true,
             })
-            : emptyCompilerCacheTagCheckStatus(),
+            : emptyDirectCacheTagCheckStatus(),
         compilerCacheEnabled
-            ? checkCompilerCacheTagStatus(cargoPlan.workspace, compilerCacheTag, {
+            ? checkDirectCacheTagStatus(cargoPlan.workspace, compilerCacheTag, {
                 noPlatform: cargoPlan.proxy.no_platform,
                 noGit: cargoPlan.proxy.no_git,
                 requireServerSignature: true,
             })
-            : emptyCompilerCacheTagCheckStatus(),
+            : emptyDirectCacheTagCheckStatus(),
     ]);
     const cacheHit = targetEntry ? targetPreflight.cacheEntryHit : compilerPreflight.kvHit;
     const cacheTag = targetEntry?.tag || (compilerCacheEnabled ? compilerCacheTag : '');
@@ -2556,6 +2565,10 @@ async function runGoRestore(plan, inputs) {
     });
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
+    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
+        noPlatform: proxyPlan.proxy.no_platform,
+        noGit: proxyPlan.proxy.no_git,
+    });
     saveModeState('proxy-pid', '');
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
@@ -2575,7 +2588,9 @@ async function runGoRestore(plan, inputs) {
     setProxyOutputs(proxy.port);
     core.setOutput('workspace', workspace);
     return {
+        cacheHit: preflight.kvHit,
         cacheTag,
+        evidence: directCachePreflightEvidence(preflight),
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
     };
 }
@@ -2591,6 +2606,10 @@ async function runGradleRestore(plan, inputs, options) {
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('gradle', proxyPlan.setup);
+    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
+        noPlatform: proxyPlan.proxy.no_platform,
+        noGit: proxyPlan.proxy.no_git,
+    });
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -2610,7 +2629,9 @@ async function runGradleRestore(plan, inputs, options) {
     setProxyOutputs(proxy.port);
     core.setOutput('workspace', workspace);
     return {
+        cacheHit: preflight.kvHit,
         cacheTag,
+        evidence: directCachePreflightEvidence(preflight),
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
     };
 }
@@ -2632,6 +2653,10 @@ async function runMavenRestore(plan, inputs, options) {
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
+    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
+        noPlatform: proxyPlan.proxy.no_platform,
+        noGit: proxyPlan.proxy.no_git,
+    });
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -2657,7 +2682,9 @@ async function runMavenRestore(plan, inputs, options) {
     core.setOutput('maven-local-repo', localRepo);
     core.setOutput('workspace', workspace);
     return {
+        cacheHit: preflight.kvHit,
         cacheTag,
+        evidence: directCachePreflightEvidence(preflight),
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, proxyPlan.proxy, plan.workingDirectory)],
     };
 }
@@ -2821,6 +2848,10 @@ async function runTurboProxyRestore(plan, inputs) {
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
     const packageManager = await detectNodePackageManager(plan.workingDirectory);
+    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
+        noPlatform: turboPlan.proxy.no_platform,
+        noGit: turboPlan.proxy.no_git,
+    });
     const proxyPromise = startPortableCacheProxyWithFallback(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     const [proxyResult, corepackResult] = await Promise.allSettled([
         proxyPromise,
@@ -2847,7 +2878,9 @@ async function runTurboProxyRestore(plan, inputs) {
     setProxyOutputs(proxy.port);
     core.setOutput('workspace', workspace);
     return {
+        cacheHit: preflight.kvHit,
         cacheTag,
+        evidence: directCachePreflightEvidence(preflight),
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, turboPlan.proxy, plan.workingDirectory)],
     };
 }
@@ -2858,6 +2891,10 @@ async function runNxProxyRestore(plan, inputs) {
     });
     const workspace = nxPlan.workspace;
     const cacheTag = nxPlan.tag;
+    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
+        noPlatform: nxPlan.proxy.no_platform,
+        noGit: nxPlan.proxy.no_git,
+    });
     const proxy = await startPortableCacheProxyWithFallback(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
@@ -2866,14 +2903,16 @@ async function runNxProxyRestore(plan, inputs) {
     setProxyOutputs(proxy.port);
     core.setOutput('workspace', workspace);
     return {
+        cacheHit: preflight.kvHit,
         cacheTag,
+        evidence: directCachePreflightEvidence(preflight),
         verificationSpecs: [adapterProxyVerificationSpec(cacheTag, nxPlan.proxy, plan.workingDirectory)],
     };
 }
 async function startCompilerCacheProxy(adapter, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
-    const preflight = await checkCompilerCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
+    const preflight = await checkDirectCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
     });
@@ -2936,7 +2975,7 @@ async function finishCompilerCacheSave(tool, state, stats, statsDetail, options)
         }
         return;
     }
-    const postShutdownStatus = await checkCompilerCacheProxyTagStatus(state.workspace, state.tag, {
+    const postShutdownStatus = await checkDirectCacheProxyTagStatus(state.workspace, state.tag, {
         noPlatform: state.noPlatform,
         noGit: state.noGit,
     });
@@ -2981,6 +3020,7 @@ async function runCcacheRestore(plan, inputs) {
         return {
             cacheHit: preflight.kvHit,
             cacheTag: proxyPlan.tag,
+            evidence: directCachePreflightEvidence(preflight),
             verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, plan.workingDirectory)],
         };
     }
@@ -3013,6 +3053,7 @@ async function runSccacheRestore(plan, inputs) {
     return {
         cacheHit: preflight.kvHit,
         cacheTag: proxyPlan.tag,
+        evidence: directCachePreflightEvidence(preflight),
         verificationSpecs: [adapterProxyVerificationSpec(proxyPlan.tag, proxyPlan.proxy, plan.workingDirectory)],
     };
 }
