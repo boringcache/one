@@ -1,11 +1,14 @@
 # boringcache/one
 
-`boringcache/one` is GitHub lifecycle for the same CLI-owned BoringCache plan
-used locally and on any runner. It installs the CLI, restores and saves named
-archive profiles, and orchestrates Docker, BuildKit, Bazel, Cargo, Go, Gradle,
-Maven, Turbo, Nx, C/C++ `ccache`, Rust `sccache`, Xcode compilation-cache, and
-Nix binary-cache and GitHub Actions Cache v2 compatibility
-modes without inventing a second cache interface.
+**One Action. The same cache plan everywhere.**
+
+`boringcache/one` brings the CLI-owned BoringCache plan into GitHub Actions.
+Local builds and CI use the same workspace, cache names, adapter commands, and
+restore/publish boundary. The Action installs the CLI and orchestrates Docker,
+BuildKit, Bazel, Cargo, Go, Gradle, Maven, Turbo, Nx, C/C++ `ccache`, Rust
+`sccache`, Xcode compilation cache, Nix binary cache, explicit archive
+profiles, and GitHub Actions Cache v2 compatibility without inventing a second
+cache interface.
 
 ## Quick start
 
@@ -50,7 +53,7 @@ exact `cache-candidates` output without adding another export.
 Archive handling is built into the CLI on every supported platform. BoringCache
 verifies archives before restore and preserves modification times needed for
 build freshness; no system tar installation is required. See
-[archive mode](https://boringcache.com/docs#cli-run) for the customer-facing
+[archive mode](https://boringcache.com/docs/cli#cli-run) for the customer-facing
 ownership contract.
 
 ### GitHub Actions Cache v2 mode
@@ -146,7 +149,7 @@ for path-cohort semantics and setup.
 
 ## Inputs
 
-Start with the [GitHub Actions guide](https://boringcache.com/docs#action). The
+Start with the [GitHub Actions guide](https://boringcache.com/docs/github-actions#action). The
 exact shipped input and output reference is [`action.yml`](action.yml); the
 grouped inventory is contract-checked against it.
 
