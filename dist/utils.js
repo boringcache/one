@@ -91,7 +91,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.19.1',
+        cliVersion: core.getInput('cli-version') || 'v1.19.2',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),

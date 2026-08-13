@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.19.1'
+    default: 'v1.19.2'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -107,7 +107,7 @@ inputs:
     default: 'false'
     required: false
   provenance:
-    description: 'Docker mode only: pass --provenance=true to docker buildx build. Must be true or false.'
+    description: 'Docker mode only: control Buildx provenance attestations. Forwarded explicitly so false disables Buildx default provenance. Must be true or false.'
     default: 'false'
     required: false
   sbom:
