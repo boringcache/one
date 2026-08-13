@@ -1127,9 +1127,7 @@ function dockerBuildxArgs(opts) {
     if (opts.noCache) {
         args.push('--no-cache');
     }
-    if (opts.provenance) {
-        args.push('--provenance=true');
-    }
+    args.push(`--provenance=${opts.provenance}`);
     if (opts.sbom) {
         args.push('--sbom=true');
     }

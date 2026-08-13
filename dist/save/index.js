@@ -43418,6 +43418,9 @@ module.exports = /*#__PURE__*/JSON.parse('{"name":"@actions/cache","version":"6.
 /******/ 	}
 /******/ 	
 /************************************************************************/
+/******/ 	/* webpack/runtime/asset-relocator-loader */
+/******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
+/******/ 	
 /******/ 	/* webpack/runtime/create fake namespace object */
 /******/ 	(() => {
 /******/ 		var getProto = Object.getPrototypeOf ? (obj) => (Object.getPrototypeOf(obj)) : (obj) => (obj.__proto__);
@@ -43475,10 +43478,6 @@ module.exports = /*#__PURE__*/JSON.parse('{"name":"@actions/cache","version":"6.
 /******/ 			Object.defineProperty(exports, '__esModule', { value: true });
 /******/ 		};
 /******/ 	})();
-/******/ 	
-/******/ 	/* webpack/runtime/compat */
-/******/ 	
-/******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
 /******/ 	
 /************************************************************************/
 var __webpack_exports__ = {};
@@ -101412,7 +101411,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.19.1',
+        cliVersion: getInput('cli-version') || 'v1.19.2',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -104334,9 +104333,7 @@ function dockerBuildxArgs(opts) {
     if (opts.noCache) {
         args.push('--no-cache');
     }
-    if (opts.provenance) {
-        args.push('--provenance=true');
-    }
+    args.push(`--provenance=${opts.provenance}`);
     if (opts.sbom) {
         args.push('--sbom=true');
     }
