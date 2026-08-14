@@ -40,6 +40,9 @@ The released modes are `archive`, `docker`, `buildkit`, `bazel`, `cargo`,
 `ccache`, `go`, `gradle`, `gha`, `maven`, `nix`, `nx`, `sccache`, `turbo`, and
 `xcode`. Each non-archive mode matches the CLI command with the same name.
 
+Cargo publishes target state only after the configured command succeeds. A
+failed Cargo build never publishes incomplete target state.
+
 Use `mode: gha` when existing cache-enabled actions should keep their keys,
 paths, restore keys, and archive behavior. Use `boringcache onboard` plus an
 archive `cache-profiles` setup when you want the same named cache entries in
