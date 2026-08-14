@@ -29,7 +29,7 @@ entries = ["dependencies"]
 Commit `.boringcache.toml`, then refer to the same profile in CI:
 
 ```yaml
-- uses: boringcache/one@e24257b122813ad11d53b9ed024b474ca4946ad2 # v1.19.1
+- uses: boringcache/one@71fdb67f0aa0afc1c4ac616c8c57d0d535f15bd9 # v1.19.2
   with:
     trust-policy: auto
     setup: none
@@ -69,11 +69,11 @@ workflow shape should stay intact. For semantic entries shared with local runs
 and other CI systems, use `boringcache onboard` and an archive
 `cache-profiles` plan instead. Both paths use the same BoringCache storage
 engine; neither imports objects already stored by GitHub. The GHA mode is
-included in the reviewed CLI and Action `v1.19.1` release.
+included in the reviewed CLI and Action `v1.19.2` release.
 
 ### Cargo mode
 
-The reviewed `v1.19.1` Action runs one complete repo-owned Cargo command inside
+The reviewed `v1.19.2` Action runs one complete repo-owned Cargo command inside
 the CLI's dependency, target, and optional sccache lifecycle. It provisions the
 audited sccache version only when the CLI plan selects it. Keep the command and
 layer choice beside the cache plan, and keep compiler identity independent:
@@ -91,7 +91,7 @@ tag = "rust-compiler"
 `compiler-cache = "sccache"` is the default. Use `"none"` for dependency and
 target caching without a compiler proxy.
 
-Select `mode: cargo` in one Action step with the reviewed `v1.19.1`
+Select `mode: cargo` in one Action step with the reviewed `v1.19.2`
 distribution SHA used by the examples in this README. The Action invokes
 `boringcache cargo` synchronously; it does not reconstruct target restore,
 source-freshness, compiler-cache, or save policy in workflow YAML.
@@ -107,7 +107,7 @@ command fails; Cargo publication happens synchronously only after success.
 Docker mode:
 
 ```yaml
-- uses: boringcache/one@e24257b122813ad11d53b9ed024b474ca4946ad2 # v1.19.1
+- uses: boringcache/one@71fdb67f0aa0afc1c4ac616c8c57d0d535f15bd9 # v1.19.2
   with:
     trust-policy: auto
     setup: none
@@ -127,7 +127,7 @@ only for a single-tenant runner that is destroyed after the job.
 Xcode mode on any macOS runner:
 
 ```yaml
-- uses: boringcache/one@e24257b122813ad11d53b9ed024b474ca4946ad2 # v1.19.1
+- uses: boringcache/one@71fdb67f0aa0afc1c4ac616c8c57d0d535f15bd9 # v1.19.2
   with:
     trust-policy: auto
     setup: none
@@ -155,11 +155,11 @@ grouped inventory is contract-checked against it.
 
 ## Updates
 
-The examples pin the reviewed `v1.19.1` distribution commit. A full commit SHA
+The examples pin the reviewed `v1.19.2` distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. This
-reviewed Action installs CLI `v1.19.1` by default; `cli-version` is an explicit
+reviewed Action installs CLI `v1.19.2` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.
