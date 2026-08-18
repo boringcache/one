@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.19.2'
+    default: 'v1.19.3'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -199,7 +199,7 @@ inputs:
     required: false
   maven-build-cache-extension-version:
     description: 'Version of org.apache.maven.extensions:maven-build-cache-extension to configure in Maven mode.'
-    default: '1.2.3'
+    default: '1.3.0'
     required: false
   maven-build-cache-id:
     description: 'Logical Maven remote build-cache id for the generated config.'
@@ -243,7 +243,7 @@ inputs:
     required: false
 outputs:
   cache-hit:
-    description: 'Whether reusable cache existed before startup. Go, Gradle, Maven, Nx, Turbo, ccache, and sccache report direct KV rows; Cargo reports its target hit when planned, otherwise its compiler-cache hit.'
+    description: 'Whether an action-level restore or preflight found reusable cache. Empty means this setup step did not measure reuse; Docker, BuildKit, and GHA report their outcome from the wrapped workload instead.'
   diagnostics-level:
     description: 'Effective diagnostics level used by the action: off, summary, or verbose'
   evidence-path:

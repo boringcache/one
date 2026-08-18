@@ -95299,7 +95299,7 @@ function logOciImportReadiness(readiness) {
         .join(' ');
     const message = `BoringCache managed cache became ready before planned restore refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
     if (readiness.readableRefs.length === 0) {
-        notice(`${message}. Continuing without cache imports; this is expected for cold seed jobs.`);
+        notice(`${message}. Continuing without these planned imports. Later wrapped commands may resolve target-specific refs; use their cache evidence to judge reuse.`);
         return;
     }
     warning(message);
@@ -100333,12 +100333,21 @@ function normalizeScope(value, label) {
     }
     return normalized;
 }
+function normalizeArtifactBackendId(value, label) {
+    const normalized = value.trim();
+    if (!normalized || Buffer.byteLength(normalized) > 128 || normalized.includes(':')) {
+        throw new Error(`${label} must contain 1-128 bytes and must not contain colons.`);
+    }
+    return normalized;
+}
 function readDefaultBranch() {
     const branch = githubContext.payload.repository?.default_branch;
     return typeof branch === 'string' ? branch.trim() : '';
 }
 function gha_resolveGitHubCacheIdentity() {
     const repositoryId = parseRepositoryId(process.env.GITHUB_REPOSITORY_ID || '');
+    const workflowRunBackendId = normalizeArtifactBackendId(process.env.GITHUB_RUN_ID || '', 'GITHUB_RUN_ID');
+    const workflowJobRunBackendId = normalizeArtifactBackendId(process.env.GITHUB_JOB || '', 'GITHUB_JOB');
     const scope = normalizeScope(process.env.GITHUB_REF || '', 'GITHUB_REF');
     const fallbacks = [
         (process.env.GITHUB_BASE_REF || '').trim(),
@@ -100353,7 +100362,7 @@ function gha_resolveGitHubCacheIdentity() {
             readScopes.push(normalized);
         }
     }
-    return { repositoryId, scope, readScopes };
+    return { repositoryId, workflowRunBackendId, workflowJobRunBackendId, scope, readScopes };
 }
 function parseReadyEnvironment(contents, host, port) {
     const parsed = JSON.parse(contents);
@@ -100422,6 +100431,8 @@ async function gha_startGhaAdapter(options) {
         '--host', host,
         '--port', String(options.port),
         '--repository-id', repositoryId,
+        '--workflow-run-backend-id', normalizeArtifactBackendId(options.workflowRunBackendId, 'workflow run backend id'),
+        '--workflow-job-run-backend-id', normalizeArtifactBackendId(options.workflowJobRunBackendId, 'workflow job run backend id'),
         '--scope', scope,
         '--ready-file', readyPath,
     ];
@@ -100451,7 +100462,7 @@ async function gha_startGhaAdapter(options) {
         core.exportVariable('ACTIONS_CACHE_SERVICE_V2', ready.ACTIONS_CACHE_SERVICE_V2);
         core.exportVariable('ACTIONS_RESULTS_URL', ready.ACTIONS_RESULTS_URL);
         core.exportVariable('ACTIONS_RUNTIME_TOKEN', ready.ACTIONS_RUNTIME_TOKEN);
-        core.info(`BoringCache GitHub Actions cache adapter is ready at ${ready.ACTIONS_RESULTS_URL}`);
+        core.info(`BoringCache GitHub Actions compatibility service is ready at ${ready.ACTIONS_RESULTS_URL}`);
         return {
             pid: child.pid,
             port: options.port,
@@ -100486,7 +100497,7 @@ async function gha_startGhaAdapter(options) {
 const mise_isWindows = process.platform === 'win32';
 const MISE_TOOL_NAME = 'mise';
 const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
-const DEFAULT_MISE_VERSION = 'v2026.8.3';
+const DEFAULT_MISE_VERSION = 'v2026.8.8';
 function runnerHomeDir() {
     return process.env.HOME || process.env.USERPROFILE || os.homedir();
 }
@@ -101246,7 +101257,7 @@ const MODE_SPECS = {
     gha: {
         resolved: 'gha',
         implemented: true,
-        description: 'GitHub Actions Cache v2 compatibility through a runner-local adapter.',
+        description: 'GitHub Actions cache and artifact compatibility through a runner-local adapter.',
     },
     maven: {
         resolved: 'maven',
@@ -101411,7 +101422,7 @@ const TOOL_LABELS = {
 };
 function getInputs() {
     return {
-        cliVersion: getInput('cli-version') || 'v1.19.2',
+        cliVersion: getInput('cli-version') || 'v1.19.3',
         cliPlatform: getInput('cli-platform'),
         setup: normalizeSetup(getInput('setup')),
         mode: normalizeMode(getInput('mode')),
@@ -101502,6 +101513,14 @@ function buildActionTrustState(requestedPolicy, resolvedPolicy, status) {
     };
 }
 function restorePhaseSummary(options) {
+    if (options.cacheHit === undefined) {
+        return {
+            status: 'cache_result_not_evaluated',
+            headline: 'Cache setup completed',
+            detail: 'This setup step prepared BoringCache but did not measure reuse by the wrapped build.',
+            next_step: 'Use the build cache imports, cached steps, and transfer evidence to judge reuse.',
+        };
+    }
     if (options.cacheHit) {
         const hitDetail = 'BoringCache restored at least one requested cache for this step.';
         if (options.saveCapable) {
@@ -103217,32 +103236,32 @@ const BUILDKIT_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'borin
 const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:57bdd820fc830c8adb8f5de4e9b651a52b8dbf63695b028634dc27347a385b67';
 const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
 const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
-const BUILDCTL_VERSION = 'v0.31.2';
-// Immutable subjects from the provenance files published with BuildKit v0.31.2.
+const BUILDCTL_VERSION = 'v0.32.2';
+// Immutable subjects from the provenance files published with BuildKit v0.32.2.
 const BUILDCTL_RELEASES = {
     'darwin-arm64': {
         platform: 'darwin-arm64',
-        sha256: 'c386267eab33e79f4a0cb6a59230b71cddbacb5bf9e93fdf2d2682f2b4fa1a18',
+        sha256: 'a404ae44f4ea5c533d22363543c873f94429ebc803da2e2a73b3b4f051cdd92a',
     },
     'darwin-x64': {
         platform: 'darwin-amd64',
-        sha256: 'c99fd17d2f37a0bf025b26601fea6fdcf7831ec9858a1fa63bcacb2e06441a2d',
+        sha256: 'c1e230aec90b79d6a70c28a24f7b13a0427596f95110427ae906621d9011838d',
     },
     'linux-arm64': {
         platform: 'linux-arm64',
-        sha256: '41fba1eed480376934fa4c8177ddd7021036b5168a0eb8e7ab5eccdf75d47a05',
+        sha256: '9e8f46bf309ec0ab262967be5538a4dbe06be756a82621f98253933bac5dcf92',
     },
     'linux-x64': {
         platform: 'linux-amd64',
-        sha256: 'fbabdb72433a35f5bb646e4cd424bf8567e5d055710cf55840f7af2020640791',
+        sha256: '2975d0f651ad96ba8b80b9992ae1f9a964f4408569af5b6dc36544165c3926af',
     },
     'win32-arm64': {
         platform: 'windows-arm64',
-        sha256: 'dc370dce464c3d27c87367c381586c65f46ca7e165586afed5b42617f3ab42b7',
+        sha256: '43bdbfcc33e1b0c73bb81298b3b8c8eeee61637c700a26c1ba134831b94a90c8',
     },
     'win32-x64': {
         platform: 'windows-amd64',
-        sha256: '02542a36873fe095b5606981a86301e249d2734931925cb2f287ea015de3f555',
+        sha256: 'b682a0dabd29137b2a5eecfcd62cd134944dffb09939b5308e1b77044a01331a',
     },
 };
 const SCCACHE_DEFAULT_VERSION = 'v0.17.0';
@@ -103507,6 +103526,8 @@ async function runGhaRestore(plan, inputs) {
     const adapter = await startGhaAdapter({
         workspace: plan.workspace,
         repositoryId: identity.repositoryId,
+        workflowRunBackendId: identity.workflowRunBackendId,
+        workflowJobRunBackendId: identity.workflowJobRunBackendId,
         scope: identity.scope,
         readScopes: identity.readScopes,
         port: requestedPort,
@@ -103519,7 +103540,6 @@ async function runGhaRestore(plan, inputs) {
     saveModeState('workspace', plan.workspace);
     setProxyOutputs(adapter.port);
     return {
-        cacheHit: false,
         resolvedEntries: '',
         evidence: {
             adapter: 'gha',

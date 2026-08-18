@@ -43,7 +43,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
         core.info(`cache-tag: ${plan.cacheTagPrefix || '(none)'}`);
         core.info(`resolved-entries: ${plan.archiveEntries || '(none)'}`);
         core.info(`resolved-tags: ${resolvedTags.join(',') || '(none)'}`);
-        core.info(`cache-hit: ${String(overallHit)}`);
+        core.info(`cache-hit: ${overallHit === undefined ? 'not evaluated' : String(overallHit)}`);
         core.info(`verify-mode: ${inputs.verify}`);
         core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
         core.info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} stage=${String(trustState.token_capabilities.stage)} save=${String(trustState.token_capabilities.save)}`);
@@ -64,13 +64,13 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
 }
 async function restoreEntries(workspace, entriesString, flagArgs, onRestoreStart) {
     if (!entriesString.trim()) {
-        return { hit: false, saveEntries: '' };
+        return { hit: false, evaluated: false, saveEntries: '' };
     }
     const parsedEntries = parseEntries(entriesString, 'restore', {
         separatorMode: 'newline',
     });
     if (parsedEntries.length === 0) {
-        return { hit: false, saveEntries: '' };
+        return { hit: false, evaluated: false, saveEntries: '' };
     }
     const primaryRestoreEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`);
     const restoreEntriesArg = primaryRestoreEntries.join(',');
@@ -114,7 +114,7 @@ async function restoreEntries(workspace, entriesString, flagArgs, onRestoreStart
         onRestoreStart?.();
         const restoreExitCode = await restoreProcess;
         if (restoreExitCode === 0) {
-            return { hit: true, saveEntries };
+            return { hit: true, evaluated: true, saveEntries };
         }
         const detail = restoreFailureDetail(stdout, stderr, attempt.entries);
         failedAttempts.push(detail);
@@ -130,7 +130,7 @@ async function restoreEntries(workspace, entriesString, flagArgs, onRestoreStart
     else if (restoreMissShouldFail) {
         throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
     }
-    return { hit: false, saveEntries };
+    return { hit: false, evaluated: true, saveEntries };
 }
 async function checkEntries(workspace, tags, restoreFlagArgs) {
     const checkTags = tags.map((tag) => tag.trim()).filter(Boolean);
@@ -280,10 +280,11 @@ export async function run() {
         const deferredVerifySpecs = trustResolution.resolved === 'publish' ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
         const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
-        const overallHit = modeRestore.cacheHit ?? archiveRestore.hit;
+        const overallHit = modeRestore.cacheHit ?? (archiveRestore.evaluated ? archiveRestore.hit : undefined);
+        const cacheResult = overallHit === undefined ? 'not_evaluated' : overallHit ? 'hit' : 'miss';
         const resolvedEntries = modeRestore.resolvedEntries ?? plan.archiveEntries;
         const diagnostics = loadDiagnosticsConfig(inputs);
-        core.setOutput('cache-hit', String(overallHit));
+        core.setOutput('cache-hit', overallHit === undefined ? '' : String(overallHit));
         core.setOutput('diagnostics-level', diagnostics.level);
         core.setOutput('resolved-mode', plan.mode);
         core.setOutput('resolved-tools', serializeTools(plan.runtimeTools));
@@ -306,6 +307,7 @@ export async function run() {
             resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
+            cache_result: cacheResult,
             mode_evidence: modeRestore.evidence || {},
             diagnostics_level: diagnostics.level,
             trust_state: trustState,
@@ -323,6 +325,7 @@ export async function run() {
             resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
+            cache_result: cacheResult,
             mode_evidence: modeRestore.evidence || {},
             trust_state: trustState,
             trust_policy: trustResolution.resolved,
