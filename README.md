@@ -2,10 +2,9 @@
 
 **One Action for every BoringCache mode.**
 
-`boringcache/one` brings the cache you configured locally into GitHub Actions.
-Pick archive, Docker, BuildKit, or a native tool adapter; the Action installs
-the CLI, prepares the runner, restores available work, and publishes new cache
-from trusted jobs.
+`boringcache/one` brings BoringCache into GitHub Actions. Pick archive, Docker,
+BuildKit, or a native tool adapter; the Action installs the CLI, prepares the
+runner, restores available work, and publishes from trusted jobs.
 
 ## First run
 
@@ -43,11 +42,14 @@ The released modes are `archive`, `docker`, `buildkit`, `bazel`, `cargo`,
 Cargo publishes target state only after the configured command succeeds. A
 failed Cargo build never publishes incomplete target state.
 
-Use `mode: gha` when existing cache-enabled actions should keep their keys,
-paths, restore keys, and archive behavior. Use `boringcache onboard` plus an
-archive `cache-profiles` setup when you want the same named cache entries in
-local builds and other CI systems. BoringCache does not import objects already
-stored by GitHub.
+Use `mode: gha` when existing cache-enabled actions should keep their keys and
+restore behavior, or when existing `actions/upload-artifact` and
+`actions/download-artifact` steps should keep their names, paths, and retention.
+Cache objects stay in the cache lifecycle; uploaded build outputs become
+first-class BoringCache Artifacts with a separate allowance and retention.
+Use `boringcache onboard` plus an archive `cache-profiles` setup when you want
+the same named cache entries in local builds and other CI systems. BoringCache
+does not import objects already stored by GitHub.
 
 ## Guides and reference
 

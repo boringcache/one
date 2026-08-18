@@ -11,32 +11,32 @@ const BUILDKIT_METADATA_FILE = path.join(os.tmpdir(), 'boringcache-one-buildkit-
 const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:57bdd820fc830c8adb8f5de4e9b651a52b8dbf63695b028634dc27347a385b67';
 const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
 const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
-const BUILDCTL_VERSION = 'v0.31.2';
-// Immutable subjects from the provenance files published with BuildKit v0.31.2.
+const BUILDCTL_VERSION = 'v0.32.2';
+// Immutable subjects from the provenance files published with BuildKit v0.32.2.
 const BUILDCTL_RELEASES = {
     'darwin-arm64': {
         platform: 'darwin-arm64',
-        sha256: 'c386267eab33e79f4a0cb6a59230b71cddbacb5bf9e93fdf2d2682f2b4fa1a18',
+        sha256: 'a404ae44f4ea5c533d22363543c873f94429ebc803da2e2a73b3b4f051cdd92a',
     },
     'darwin-x64': {
         platform: 'darwin-amd64',
-        sha256: 'c99fd17d2f37a0bf025b26601fea6fdcf7831ec9858a1fa63bcacb2e06441a2d',
+        sha256: 'c1e230aec90b79d6a70c28a24f7b13a0427596f95110427ae906621d9011838d',
     },
     'linux-arm64': {
         platform: 'linux-arm64',
-        sha256: '41fba1eed480376934fa4c8177ddd7021036b5168a0eb8e7ab5eccdf75d47a05',
+        sha256: '9e8f46bf309ec0ab262967be5538a4dbe06be756a82621f98253933bac5dcf92',
     },
     'linux-x64': {
         platform: 'linux-amd64',
-        sha256: 'fbabdb72433a35f5bb646e4cd424bf8567e5d055710cf55840f7af2020640791',
+        sha256: '2975d0f651ad96ba8b80b9992ae1f9a964f4408569af5b6dc36544165c3926af',
     },
     'win32-arm64': {
         platform: 'windows-arm64',
-        sha256: 'dc370dce464c3d27c87367c381586c65f46ca7e165586afed5b42617f3ab42b7',
+        sha256: '43bdbfcc33e1b0c73bb81298b3b8c8eeee61637c700a26c1ba134831b94a90c8',
     },
     'win32-x64': {
         platform: 'windows-amd64',
-        sha256: '02542a36873fe095b5606981a86301e249d2734931925cb2f287ea015de3f555',
+        sha256: 'b682a0dabd29137b2a5eecfcd62cd134944dffb09939b5308e1b77044a01331a',
     },
 };
 const SCCACHE_DEFAULT_VERSION = 'v0.17.0';
@@ -301,6 +301,8 @@ async function runGhaRestore(plan, inputs) {
     const adapter = await startGhaAdapter({
         workspace: plan.workspace,
         repositoryId: identity.repositoryId,
+        workflowRunBackendId: identity.workflowRunBackendId,
+        workflowJobRunBackendId: identity.workflowJobRunBackendId,
         scope: identity.scope,
         readScopes: identity.readScopes,
         port: requestedPort,
@@ -313,7 +315,6 @@ async function runGhaRestore(plan, inputs) {
     saveModeState('workspace', plan.workspace);
     setProxyOutputs(adapter.port);
     return {
-        cacheHit: false,
         resolvedEntries: '',
         evidence: {
             adapter: 'gha',

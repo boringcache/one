@@ -317,7 +317,7 @@ export function logOciImportReadiness(readiness) {
         .join(' ');
     const message = `BoringCache managed cache became ready before planned restore refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
     if (readiness.readableRefs.length === 0) {
-        core.notice(`${message}. Continuing without cache imports; this is expected for cold seed jobs.`);
+        core.notice(`${message}. Continuing without these planned imports. Later wrapped commands may resolve target-specific refs; use their cache evidence to judge reuse.`);
         return;
     }
     core.warning(message);
