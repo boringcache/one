@@ -91,7 +91,7 @@ const TOOL_LABELS = {
 };
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.19.2',
+        cliVersion: core.getInput('cli-version') || 'v1.19.3',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
@@ -182,6 +182,14 @@ export function buildActionTrustState(requestedPolicy, resolvedPolicy, status) {
     };
 }
 export function restorePhaseSummary(options) {
+    if (options.cacheHit === undefined) {
+        return {
+            status: 'cache_result_not_evaluated',
+            headline: 'Cache setup completed',
+            detail: 'This setup step prepared BoringCache but did not measure reuse by the wrapped build.',
+            next_step: 'Use the build cache imports, cached steps, and transfer evidence to judge reuse.',
+        };
+    }
     if (options.cacheHit) {
         const hitDetail = 'BoringCache restored at least one requested cache for this step.';
         if (options.saveCapable) {

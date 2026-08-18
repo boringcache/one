@@ -42,7 +42,7 @@ const MODE_SPECS = {
     gha: {
         resolved: 'gha',
         implemented: true,
-        description: 'GitHub Actions Cache v2 compatibility through a runner-local adapter.',
+        description: 'GitHub Actions cache and artifact compatibility through a runner-local adapter.',
     },
     maven: {
         resolved: 'maven',

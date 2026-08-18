@@ -51,12 +51,21 @@ function normalizeScope(value, label) {
     }
     return normalized;
 }
+function normalizeArtifactBackendId(value, label) {
+    const normalized = value.trim();
+    if (!normalized || Buffer.byteLength(normalized) > 128 || normalized.includes(':')) {
+        throw new Error(`${label} must contain 1-128 bytes and must not contain colons.`);
+    }
+    return normalized;
+}
 function readDefaultBranch() {
     const branch = githubContext.payload.repository?.default_branch;
     return typeof branch === 'string' ? branch.trim() : '';
 }
 export function resolveGitHubCacheIdentity() {
     const repositoryId = parseRepositoryId(process.env.GITHUB_REPOSITORY_ID || '');
+    const workflowRunBackendId = normalizeArtifactBackendId(process.env.GITHUB_RUN_ID || '', 'GITHUB_RUN_ID');
+    const workflowJobRunBackendId = normalizeArtifactBackendId(process.env.GITHUB_JOB || '', 'GITHUB_JOB');
     const scope = normalizeScope(process.env.GITHUB_REF || '', 'GITHUB_REF');
     const fallbacks = [
         (process.env.GITHUB_BASE_REF || '').trim(),
@@ -71,7 +80,7 @@ export function resolveGitHubCacheIdentity() {
             readScopes.push(normalized);
         }
     }
-    return { repositoryId, scope, readScopes };
+    return { repositoryId, workflowRunBackendId, workflowJobRunBackendId, scope, readScopes };
 }
 function parseReadyEnvironment(contents, host, port) {
     const parsed = JSON.parse(contents);
@@ -140,6 +149,8 @@ export async function startGhaAdapter(options) {
         '--host', host,
         '--port', String(options.port),
         '--repository-id', repositoryId,
+        '--workflow-run-backend-id', normalizeArtifactBackendId(options.workflowRunBackendId, 'workflow run backend id'),
+        '--workflow-job-run-backend-id', normalizeArtifactBackendId(options.workflowJobRunBackendId, 'workflow job run backend id'),
         '--scope', scope,
         '--ready-file', readyPath,
     ];
@@ -169,7 +180,7 @@ export async function startGhaAdapter(options) {
         core.exportVariable('ACTIONS_CACHE_SERVICE_V2', ready.ACTIONS_CACHE_SERVICE_V2);
         core.exportVariable('ACTIONS_RESULTS_URL', ready.ACTIONS_RESULTS_URL);
         core.exportVariable('ACTIONS_RUNTIME_TOKEN', ready.ACTIONS_RUNTIME_TOKEN);
-        core.info(`BoringCache GitHub Actions cache adapter is ready at ${ready.ACTIONS_RESULTS_URL}`);
+        core.info(`BoringCache GitHub Actions compatibility service is ready at ${ready.ACTIONS_RESULTS_URL}`);
         return {
             pid: child.pid,
             port: options.port,
