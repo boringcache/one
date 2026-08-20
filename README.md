@@ -42,14 +42,15 @@ The released modes are `archive`, `docker`, `buildkit`, `bazel`, `cargo`,
 Cargo publishes target state only after the configured command succeeds. A
 failed Cargo build never publishes incomplete target state.
 
-Use `mode: gha` when existing cache-enabled actions should keep their keys and
-restore behavior, or when existing `actions/upload-artifact` and
-`actions/download-artifact` steps should keep their names, paths, and retention.
-Cache objects stay in the cache lifecycle; uploaded build outputs become
-first-class BoringCache Artifacts with a separate allowance and retention.
-Use `boringcache onboard` plus an archive `cache-profiles` setup when you want
-the same named cache entries in local builds and other CI systems. BoringCache
-does not import objects already stored by GitHub.
+`mode: gha` exposes BoringCache's Actions-compatible service, but transparent
+provider-action routing requires a CI runner integration that installs that
+service before the job without changing existing cache or artifact action
+steps. A `mode: gha` setup step on a standard GitHub-hosted runner does not
+redirect later provider actions; they remain GitHub-backed. Use
+`boringcache onboard` plus an archive `cache-profiles` setup, or the native
+`boringcache artifact` commands, when BoringCache must own those bytes on a
+standard GitHub-hosted runner. BoringCache does not import objects already
+stored by GitHub.
 
 ## Guides and reference
 
