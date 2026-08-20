@@ -4,3 +4,6 @@ export { parseEntries, } from './inputs';
 export { startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, waitForOciRefsReadable, findAvailablePort, DEFAULT_PROXY_PORT, PROXY_VERIFICATION_STOP_TIMEOUT_MS, } from './proxy';
 export { resolveGitHubCacheIdentity, startGhaAdapter, } from './gha';
 export { getMiseBinPath, getMiseDataDir, getMiseShimsDir, slugMiseTagPart, installMise, installMiseTool, activateMiseTool, reshimMise, exportMiseEnv, readToolVersions, readToolVersionsValue, readMiseTomlTools, readMiseTomlVersion, readProjectMiseTools, hasMiseToolVersion, hasToolVersionOnPath, } from './mise';
+export { applyTrustEnvPolicy, buildActionTrustState, isPullRequestEvent, normalizeTrustPolicy, resolveTrustDecision, } from './trust';
+export { addLocalBinPaths, currentHomeDir, isPathInside, localBinDir, safePathComponent, } from './paths';
+export { download, ensureAdapterTools, installRequiredTool, installRequiredTools, releasePaths, resolveRequiredTools, secureCurlArgs, } from './managed-tools';
