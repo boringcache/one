@@ -101862,6 +101862,16 @@ function releasePaths(extractionDirectory, installDirectory, binaryPath, executa
     }
     return { sourcePath, destinationPath };
 }
+async function resolveVerifiedReleaseSource(extractionDirectory, sourcePath) {
+    const [physicalExtractionDirectory, physicalSourcePath] = await Promise.all([
+        fs.promises.realpath(extractionDirectory),
+        fs.promises.realpath(sourcePath),
+    ]);
+    if (!isPathInside(physicalExtractionDirectory, physicalSourcePath)) {
+        throw new Error(`Verified release source resolves outside its extraction directory: ${sourcePath}`);
+    }
+    return physicalSourcePath;
+}
 function secureCurlArgs(output, url) {
     return [
         '--fail',
@@ -101901,10 +101911,7 @@ async function installGithubRelease(install, binaryName) {
         installDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-tool-'));
         const executableName = process.platform === 'win32' ? `${binaryName}.exe` : binaryName;
         const { sourcePath, destinationPath } = releasePaths(tempDir, installDir, install.binary_path, executableName);
-        const physicalSourcePath = await fs.promises.realpath(sourcePath);
-        if (!isPathInside(tempDir, physicalSourcePath)) {
-            throw new Error(`Verified release source resolves outside its extraction directory: ${sourcePath}`);
-        }
+        const physicalSourcePath = await resolveVerifiedReleaseSource(tempDir, sourcePath);
         const sourceStat = await fs.promises.stat(physicalSourcePath);
         if (!sourceStat.isFile()) {
             throw new Error(`Verified release executable is not a regular file: ${sourcePath}`);
