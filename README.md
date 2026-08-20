@@ -12,7 +12,7 @@ Run `boringcache onboard` in the repository first. Commit `.boringcache.toml`,
 then select its archive profile in CI:
 
 ```yaml
-- uses: boringcache/one@531a7c041f3b7bf1672ec1cf43832dd4783bd24e # v1.19.3
+- uses: boringcache/one@e740ae5b3075ad2fe0d7b1edd2ed41b3ba130dae # v1.19.4
   with:
     trust-policy: auto
     setup: none
@@ -59,11 +59,11 @@ does not import objects already stored by GitHub.
 
 ## Updates
 
-The examples pin Action `v1.19.3` to its immutable distribution commit. A full commit SHA
+The examples pin Action `v1.19.4` to its immutable distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. Action
-`v1.19.3` installs CLI `v1.19.3` by default; `cli-version` is an explicit
+`v1.19.4` installs CLI `v1.19.4` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.
