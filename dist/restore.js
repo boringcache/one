@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import { applyTrustTokenPolicy, applyCliPlanEnv, applyMiseSetup, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applyTrustEnvPolicy, applyCliPlanEnv, applyMiseSetup, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 const ARCHIVE_OVERLAP_MODES = new Set([
@@ -189,16 +189,6 @@ export async function run() {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
             verify_mode: inputs.verify,
         };
-        const trustResolution = resolveTrustPolicy(inputs.trustPolicy);
-        applyTrustTokenPolicy(trustResolution.resolved);
-        const trustState = buildActionTrustState(inputs.trustPolicy, trustResolution.resolved, trustResolution.status);
-        const effectiveInputs = {
-            ...inputs,
-            readOnly: trustResolution.resolved === 'restore',
-            stage: trustResolution.resolved === 'stage',
-        };
-        const candidateReceiptFile = effectiveInputs.stage ? prepareCandidateReceiptFile() : '';
-        core.saveState('candidate-receipt-file', candidateReceiptFile);
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
@@ -206,6 +196,16 @@ export async function run() {
         if (inputs.mode.trim().toLowerCase() === 'xcode') {
             await ensureXcodePlugin(inputs.cliVersion);
         }
+        const trustDecision = await resolveTrustDecision(inputs.trustPolicy);
+        applyTrustEnvPolicy(trustDecision);
+        const trustState = buildActionTrustState(trustDecision);
+        const effectiveInputs = {
+            ...inputs,
+            readOnly: trustDecision.resolved === 'restore',
+            stage: trustDecision.resolved === 'stage',
+        };
+        const candidateReceiptFile = effectiveInputs.stage ? prepareCandidateReceiptFile() : '';
+        core.saveState('candidate-receipt-file', candidateReceiptFile);
         const cliCapabilityVersion = await resolveCliCapabilityVersion(inputs.cliVersion);
         const capabilityInputs = { ...effectiveInputs, cliVersion: cliCapabilityVersion };
         const plan = await buildPlan(capabilityInputs);
@@ -271,15 +271,15 @@ export async function run() {
         const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
         const genericSaveEntries = archiveRestore.saveEntries;
         const verificationSpecs = [
-            ...buildGenericVerificationSpecs(plan, effectiveInputs.stage, trustResolution.resolved === 'publish'),
+            ...buildGenericVerificationSpecs(plan, true),
             ...(modeRestore.verificationSpecs || []),
         ];
-        const resolvedTags = resolveVerificationTags(verificationSpecs, plan.workingDirectory);
-        const saveCapable = trustResolution.resolved !== 'restore';
+        const resolvedTags = resolveVerificationTags(verificationSpecs);
+        const saveCapable = trustDecision.write_allowed;
         const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
-        const deferredVerifySpecs = trustResolution.resolved === 'publish' ? saveExpectedSpecs : [];
+        const deferredVerifySpecs = trustDecision.resolved === 'publish' ? saveExpectedSpecs : [];
         const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
-        const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs, plan.workingDirectory);
+        const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs);
         const overallHit = modeRestore.cacheHit ?? (archiveRestore.evaluated ? archiveRestore.hit : undefined);
         const cacheResult = overallHit === undefined ? 'not_evaluated' : overallHit ? 'hit' : 'miss';
         const resolvedEntries = modeRestore.resolvedEntries ?? plan.archiveEntries;
@@ -311,7 +311,7 @@ export async function run() {
             mode_evidence: modeRestore.evidence || {},
             diagnostics_level: diagnostics.level,
             trust_state: trustState,
-            trust_policy: trustResolution.resolved,
+            trust_policy: trustDecision.resolved,
             verify_mode: inputs.verify,
             verify_save_tags: deferredVerifyTags,
             token_capabilities: {
@@ -328,7 +328,7 @@ export async function run() {
             cache_result: cacheResult,
             mode_evidence: modeRestore.evidence || {},
             trust_state: trustState,
-            trust_policy: trustResolution.resolved,
+            trust_policy: trustDecision.resolved,
             verify_save_tags: deferredVerifyTags,
         };
         core.saveState('resolved-mode', plan.mode);
@@ -349,8 +349,7 @@ export async function run() {
         core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
         core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
         core.saveState('trust-policy', inputs.trustPolicy);
-        core.saveState('resolved-trust-policy', trustResolution.resolved);
-        core.saveState('trust-status', trustResolution.status);
+        core.saveState('trust-decision', JSON.stringify(trustDecision));
         if (!saveCapable && inputs.verify !== 'none' && saveExpectedSpecs.length > 0) {
             core.info('Skipping save-expected tag verification in restore step: no save-capable token is available.');
         }
@@ -363,7 +362,7 @@ export async function run() {
             });
         }
         await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState);
-        if (trustResolution.resolved === 'restore') {
+        if (!trustDecision.write_allowed) {
             core.info(`Post step is restore-only (trust-policy: ${inputs.trustPolicy}).`);
         }
     }

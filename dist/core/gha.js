@@ -91,13 +91,15 @@ function parseReadyEnvironment(contents, host, port) {
         throw new Error('BoringCache GHA adapter wrote an invalid ready environment.');
     }
     const endpoint = new URL(parsed.ACTIONS_RESULTS_URL);
+    const endpointPort = Number.parseInt(endpoint.port, 10);
     if (endpoint.protocol !== 'http:'
         || endpoint.hostname !== host
-        || Number.parseInt(endpoint.port, 10) !== port
+        || !(endpointPort > 0)
+        || (port > 0 && endpointPort !== port)
         || endpoint.pathname !== '/') {
         throw new Error('BoringCache GHA adapter advertised an unexpected non-loopback endpoint.');
     }
-    return parsed;
+    return { environment: parsed, port: endpointPort };
 }
 async function waitForReady(readyPath, child, host, port, logPath) {
     const startedAt = Date.now();
@@ -147,13 +149,15 @@ export async function startGhaAdapter(options) {
         'gha',
         '--workspace', options.workspace,
         '--host', host,
-        '--port', String(options.port),
         '--repository-id', repositoryId,
         '--workflow-run-backend-id', normalizeArtifactBackendId(options.workflowRunBackendId, 'workflow run backend id'),
         '--workflow-job-run-backend-id', normalizeArtifactBackendId(options.workflowJobRunBackendId, 'workflow job run backend id'),
         '--scope', scope,
         '--ready-file', readyPath,
     ];
+    if (options.port > 0) {
+        args.push('--port', String(options.port));
+    }
     for (const readScope of readScopes) {
         args.push('--read-scope', readScope);
     }
@@ -176,17 +180,17 @@ export async function startGhaAdapter(options) {
     }
     try {
         const ready = await waitForReady(readyPath, child, host, options.port, logPath);
-        core.setSecret(ready.ACTIONS_RUNTIME_TOKEN);
-        core.exportVariable('ACTIONS_CACHE_SERVICE_V2', ready.ACTIONS_CACHE_SERVICE_V2);
-        core.exportVariable('ACTIONS_RESULTS_URL', ready.ACTIONS_RESULTS_URL);
-        core.exportVariable('ACTIONS_RUNTIME_TOKEN', ready.ACTIONS_RUNTIME_TOKEN);
-        core.info(`BoringCache GitHub Actions compatibility service is ready at ${ready.ACTIONS_RESULTS_URL}`);
+        core.setSecret(ready.environment.ACTIONS_RUNTIME_TOKEN);
+        core.exportVariable('ACTIONS_CACHE_SERVICE_V2', ready.environment.ACTIONS_CACHE_SERVICE_V2);
+        core.exportVariable('ACTIONS_RESULTS_URL', ready.environment.ACTIONS_RESULTS_URL);
+        core.exportVariable('ACTIONS_RUNTIME_TOKEN', ready.environment.ACTIONS_RUNTIME_TOKEN);
+        core.info(`BoringCache GitHub Actions compatibility service is ready at ${ready.environment.ACTIONS_RESULTS_URL}`);
         return {
             pid: child.pid,
-            port: options.port,
+            port: ready.port,
             readOnly,
             logPath,
-            resultsUrl: ready.ACTIONS_RESULTS_URL,
+            resultsUrl: ready.environment.ACTIONS_RESULTS_URL,
         };
     }
     catch (error) {

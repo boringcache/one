@@ -267,7 +267,9 @@ export async function ensureBoringCache(options) {
     const secrets = new Set([
         options.token,
         process.env.BORINGCACHE_RESTORE_TOKEN,
+        process.env.BORINGCACHE_STAGE_TOKEN,
         process.env.BORINGCACHE_SAVE_TOKEN,
+        process.env.BORINGCACHE_ADMIN_TOKEN,
     ].filter((value) => Boolean(value)));
     for (const secret of secrets) {
         core.setSecret(secret);
@@ -303,14 +305,11 @@ export async function ensureBoringCache(options) {
     const cacheInfo = getToolCacheInfo(normalizedVersion, options.platform);
     const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
     const cachePaths = [`${toolCacheRoot}/${TOOL_NAME}`];
-    // Try to restore from actions/cache first
-    let restoredFromCache = false;
     if (enableCache) {
         try {
             const cacheKey = await cache.restoreCache(cachePaths, cacheInfo.cacheKey);
             if (cacheKey) {
                 core.info(`Restored CLI from cache (key: ${cacheKey})`);
-                restoredFromCache = true;
             }
         }
         catch (error) {

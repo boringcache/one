@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, } from './core';
-import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, applyTrustTokenPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, resolveCliCapabilityVersion, resolveTrustPolicy, resolveVerificationTags, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
+import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
 function toSaveEntries(entriesString) {
     if (!entriesString.trim()) {
@@ -23,15 +23,9 @@ function parseSavedVerificationSpecs(raw) {
             return [];
         }
         return parsed
-            .filter((spec) => {
-            return spec && typeof spec.tag === 'string' && typeof spec.noPlatform === 'boolean' && typeof spec.noGit === 'boolean';
-        })
+            .filter((spec) => spec && typeof spec.tag === 'string')
             .map((spec) => ({
             tag: spec.tag,
-            noPlatform: spec.noPlatform,
-            noGit: spec.noGit,
-            includePrTag: spec.includePrTag,
-            pathHint: spec.pathHint,
             saveExpected: spec.saveExpected,
         }));
     }
@@ -40,7 +34,7 @@ function parseSavedVerificationSpecs(raw) {
     }
 }
 function filterVerifiableSpecs(specs) {
-    return specs.filter((spec) => !spec.pathHint || fs.existsSync(spec.pathHint));
+    return specs;
 }
 function buildCliSetupOptions(inputs, cliVersion, cliPlatform) {
     return {
@@ -77,37 +71,9 @@ function readXcodeEvidence(filePath) {
         return null;
     }
 }
-function buildLegacyVerificationSpecs(verifySaveTags, entriesString, workingDirectory, noPlatform) {
-    if (!entriesString.trim()) {
-        return verifySaveTags.map((tag) => ({
-            tag,
-            noPlatform: true,
-            noGit: true,
-        }));
-    }
-    const entrySpecs = parseEntries(entriesString, 'restore', {
-        separatorMode: 'newline',
-    })
-        .map((entry) => ({
-        tag: entry.tag,
-        noPlatform,
-        noGit: false,
-        pathHint: entry.savePath,
-        saveExpected: true,
-    }));
-    const resolvedEntryTags = resolveVerificationTags(entrySpecs, workingDirectory);
-    const pathHintsByResolvedTag = new Map();
-    resolvedEntryTags.forEach((resolvedTag, index) => {
-        const pathHint = entrySpecs[index]?.pathHint;
-        if (pathHint) {
-            pathHintsByResolvedTag.set(resolvedTag, pathHint);
-        }
-    });
+function buildLegacyVerificationSpecs(verifySaveTags) {
     return verifySaveTags.map((tag) => ({
         tag,
-        noPlatform: true,
-        noGit: true,
-        pathHint: pathHintsByResolvedTag.get(tag),
         saveExpected: true,
     }));
 }
@@ -182,16 +148,13 @@ export async function run() {
         const verifyTimeoutSeconds = normalizeVerifyTimeoutSeconds(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
         const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
         const requestedTrustPolicy = normalizeTrustPolicy(core.getState('trust-policy') || inputs.trustPolicy);
-        const savedResolvedPolicy = core.getState('resolved-trust-policy');
-        const savedTrustStatus = core.getState('trust-status');
-        const fallbackResolution = resolveTrustPolicy(requestedTrustPolicy);
-        const resolvedTrustPolicy = savedResolvedPolicy === 'restore'
-            || savedResolvedPolicy === 'stage'
-            || savedResolvedPolicy === 'publish'
-            ? savedResolvedPolicy
-            : fallbackResolution.resolved;
-        applyTrustTokenPolicy(resolvedTrustPolicy);
-        const trustState = buildActionTrustState(requestedTrustPolicy, resolvedTrustPolicy, (savedTrustStatus || fallbackResolution.status));
+        const savedTrustDecision = core.getState('trust-decision');
+        const trustDecision = savedTrustDecision
+            ? parseSavedTrustDecision(savedTrustDecision, requestedTrustPolicy)
+            : await resolveTrustDecision(requestedTrustPolicy);
+        const resolvedTrustPolicy = trustDecision.resolved;
+        applyTrustEnvPolicy(trustDecision);
+        const trustState = buildActionTrustState(trustDecision);
         if (resolvedMode === 'cargo') {
             core.info('Post step skipped: mode cargo completed its synchronous CLI lifecycle in the main Action step.');
             return;
@@ -254,7 +217,7 @@ export async function run() {
             generic_entries: genericEntries || '',
         };
         if (verifySaveSpecs.length === 0 && verifySaveTags.length > 0) {
-            verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags, genericEntries || '', workingDirectory || process.cwd(), false);
+            verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags);
         }
         if (workingDirectory) {
             process.chdir(workingDirectory);

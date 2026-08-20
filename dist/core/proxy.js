@@ -7,7 +7,6 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, missingStageTokenMessage, } from './auth';
 export const DEFAULT_PROXY_PORT = 22243;
-const PROXY_PID_FILE = path.join(os.tmpdir(), 'boringcache-proxy.pid');
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS = 7455;
 const PROXY_STOP_TIMEOUT_SECS_ENV = 'BORINGCACHE_PROXY_STOP_TIMEOUT_SECS';
@@ -150,6 +149,24 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
     }
     const logs = port ? readProxyLogs(port) : '';
     throw new Error(`BoringCache proxy did not become ready within ${timeoutMs}ms${logs ? `:\n${logs}` : ''}`);
+}
+function runningRegistryStatus(status) {
+    if (!status
+        || typeof status.workspace !== 'string'
+        || !status.workspace
+        || !Array.isArray(status.tags)
+        || status.tags.length === 0
+        || status.shutdown_requested === true) {
+        return null;
+    }
+    return status;
+}
+function occupiedPortMessage(port, status, workspace) {
+    const running = runningRegistryStatus(status);
+    if (running) {
+        return `Port ${port} is already serving BoringCache workspace ${running.workspace} with tags [${(running.tags || []).join(', ')}], so the CLI plan for workspace ${workspace} cannot start this invocation there. Leave proxy-port unset to let the CLI select a free port, or stop the other cache first.`;
+    }
+    return `Port ${port} is already in use by another process (for example the GitHub Actions cache adapter from mode: gha), so the CLI plan cannot start this runner-local cache there. Leave proxy-port unset to let the CLI select a free port, or stop the other process first.`;
 }
 function httpRequest(options) {
     return new Promise((resolve, reject) => {
@@ -365,14 +382,8 @@ export async function startRegistryProxy(options) {
     const normalizedTags = normalizeProxyTags(options.tag);
     const readyFile = proxyReadyFilePath(options.port);
     if (await isProxyRunning(host, options.port)) {
-        core.info(`BoringCache proxy already running on port ${options.port}, reusing`);
-        try {
-            const pid = parseInt(fs.readFileSync(PROXY_PID_FILE, 'utf-8').trim(), 10);
-            if (pid > 0)
-                return { pid, port: options.port, readOnly: effectiveReadOnly };
-        }
-        catch { }
-        return { pid: -1, port: options.port, readOnly: effectiveReadOnly };
+        const status = await fetchProxyStatus(host, options.port);
+        throw new Error(occupiedPortMessage(options.port, status, options.workspace));
     }
     clearProxyReadyFile(readyFile);
     const args = [cliCommand, options.workspace, normalizedTags];
@@ -461,7 +472,6 @@ export async function startRegistryProxy(options) {
     if (!child.pid) {
         throw new Error('Failed to start BoringCache proxy');
     }
-    fs.writeFileSync(PROXY_PID_FILE, String(child.pid));
     core.info(`BoringCache proxy started (PID: ${child.pid})`);
     const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
     try {
