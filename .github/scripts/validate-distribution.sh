@@ -29,6 +29,7 @@ test -f .github/SECURITY.md
 test -s dist/restore/index.js
 test -s dist/save/index.js
 test -s dist/utils.js
+test -s dist/core/action-inputs.js
 
 for source_path in docs examples scripts lib tests package.json package-lock.json tsconfig.json jest.config.js node_modules; do
   if [[ -e "$source_path" ]]; then
@@ -76,7 +77,7 @@ const fallback = new RegExp(
   `getInput\\((['"])cli-version\\1\\)\\s*\\|\\|\\s*(['"])${escapedVersion}\\2`,
 )
 
-for (const path of ['dist/utils.js', 'dist/restore/index.js', 'dist/save/index.js']) {
+for (const path of ['dist/core/action-inputs.js', 'dist/restore/index.js', 'dist/save/index.js']) {
   const source = fs.readFileSync(path, 'utf8')
   if (!fallback.test(source)) {
     throw new Error(`${path} does not contain the cli-version fallback ${version}`)
