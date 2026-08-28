@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.19.4'
+    default: 'v1.19.6'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -211,7 +211,7 @@ inputs:
     required: false
   ccache-version:
     description: 'ccache version to use. The action installs the audited default release and its HTTP storage helper when they are not already available.'
-    default: '4.13.6'
+    default: '4.14'
     required: false
   cache-profiles:
     description: 'Repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). Required for archive mode.'

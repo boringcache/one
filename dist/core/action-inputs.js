@@ -8,7 +8,7 @@ import { normalizeMode } from '../modes';
 export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 export function getInputs() {
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.19.4',
+        cliVersion: core.getInput('cli-version') || 'v1.19.6',
         cliPlatform: core.getInput('cli-platform'),
         setup: normalizeSetup(core.getInput('setup')),
         mode: normalizeMode(core.getInput('mode')),
