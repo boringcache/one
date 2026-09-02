@@ -1,9 +1,7 @@
-import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ensureAdapterTools } from '../core/managed-tools';
-import { adapterVerificationSpecs, appendCliPublicationPolicy, appendMetadataHintArgs, checkDirectCacheTagStatus, emptyDirectCacheTagCheckStatus, execBoringCache, proxyPlanningReadOnly, readBoundedJsonObject, resolveAdapterCliPlan, resolvePreferredPort, } from './shared';
+import { adapterVerificationSpecs, appendCliPublicationPolicy, checkDirectCacheTagStatus, emptyDirectCacheTagCheckStatus, execBoringCache, proxyPlanningReadOnly, readBoundedJsonObject, resolveAdapterCliPlan, resolvePreferredPort, } from './shared';
 export function cargoArchiveVerificationSpecs(cargoPlan, _workingDirectory) {
     return adapterVerificationSpecs(cargoPlan);
 }
@@ -19,7 +17,7 @@ export function cargoCompilerCacheTag(cargoPlan) {
 }
 export async function runCargoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const command = cargoPlan.command || [];
     const targetEntry = (cargoPlan.archive_entries || []).find((entry) => entry.kind === 'cargo-target' || entry.requested === 'cargo-target');
     const compilerCacheEnabled = cargoCompilerCacheEnabled(cargoPlan);
@@ -42,8 +40,6 @@ export async function runCargoRestore(plan, inputs) {
     ]);
     const cacheHit = targetEntry ? targetPreflight.cacheEntryHit : compilerPreflight.kvHit;
     const cacheTag = targetEntry?.tag || (compilerCacheEnabled ? compilerCacheTag : '');
-    core.setOutput('sccache-tag', compilerCacheEnabled ? compilerCacheTag : '');
-    core.setOutput('sccache-hit', String(compilerCacheEnabled && compilerPreflight.kvHit));
     if (inputs.failOnCacheMiss && !inputs.lookupOnly) {
         throw new Error('mode=cargo does not support fail-on-cache-miss while executing yet; '
             + 'the CLI adapter does not expose that lifecycle hook. Use lookup-only for a preflight check.');
@@ -57,6 +53,7 @@ export async function runCargoRestore(plan, inputs) {
         .join('\n');
     if (inputs.lookupOnly) {
         return {
+            workspace: cargoPlan.workspace,
             cacheHit,
             cacheTag,
             resolvedEntries,
@@ -72,15 +69,11 @@ export async function runCargoRestore(plan, inputs) {
             },
         };
     }
-    if (compilerCacheEnabled) {
-        await ensureAdapterTools('cargo', { sccache: core.getInput('sccache-version') }, execBoringCache, plan.workingDirectory);
-    }
     const nativeEvidencePath = compilerCacheEnabled
         ? path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`)
         : '';
     const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
     appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
-    appendMetadataHintArgs(args, inputs.metadataHints);
     if (inputs.failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
@@ -109,9 +102,8 @@ export async function runCargoRestore(plan, inputs) {
         elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
         native_tool: nativeToolEvidence,
     };
-    core.setOutput('cache-tag', cacheTag);
-    core.setOutput('workspace', cargoPlan.workspace);
     return {
+        workspace: cargoPlan.workspace,
         cacheHit,
         cacheTag,
         resolvedEntries,

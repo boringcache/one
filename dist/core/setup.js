@@ -9,8 +9,6 @@ import * as path from 'path';
 import { saveImmutableToolCache } from './action-cache';
 const TOOL_NAME = 'boringcache';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
-const XCODE_PLUGIN_ASSET = 'libboringcache_xcode_cas-macos-universal.dylib';
-const XCODE_PLUGIN_NAME = 'libboringcache_xcode_cas.dylib';
 export function findToolCachePath(toolName, version, arch) {
     const found = tc.find(toolName, version, arch);
     if (found) {
@@ -279,11 +277,6 @@ export async function ensureBoringCache(options) {
         core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
         core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
     }
-    const trustedFingerprint = options.trustedWorkspaceSigningKeyFingerprint?.trim();
-    if (trustedFingerprint) {
-        core.exportVariable('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT', trustedFingerprint);
-        core.info('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT configured');
-    }
     if (options.version === 'skip') {
         core.debug('CLI setup skipped (version: skip)');
         if (await isCliAvailable()) {
@@ -353,55 +346,6 @@ export async function ensureBoringCache(options) {
     const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName);
     core.addPath(stableToolPath);
     core.info(`BoringCache CLI ${normalizedVersion} ready`);
-}
-/** Install the native Xcode CAS adapter beside the stable CLI binary.
- *
- * The CLI intentionally discovers this sibling without any configuration, so
- * `mode: xcode` has the same one-step setup as every other Action mode. An
- * explicit BORINGCACHE_XCODE_PLUGIN_PATH remains available for source-tree and
- * canary E2E runs.
- */
-export async function ensureXcodePlugin(version, verify = true) {
-    if (process.platform !== 'darwin') {
-        throw new Error('The BoringCache Xcode plugin can only be installed on macOS.');
-    }
-    const configuredPath = (process.env.BORINGCACHE_XCODE_PLUGIN_PATH || '').trim();
-    if (configuredPath) {
-        // The CLI canonicalizes the path, requires a regular file, and hashes the
-        // plugin before starting Xcode. Keep environment-provided paths out of the
-        // Action's filesystem API so this override cannot become a path probe.
-        return configuredPath;
-    }
-    const pluginPath = path.join(getStableCliBinDir(), XCODE_PLUGIN_NAME);
-    if (fs.existsSync(pluginPath)) {
-        core.exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
-        return pluginPath;
-    }
-    if (version.toLowerCase() === 'skip') {
-        throw new Error(`mode=xcode needs ${XCODE_PLUGIN_NAME} beside the BoringCache CLI, `
-            + 'or BORINGCACHE_XCODE_PLUGIN_PATH when cli-version is skip.');
-    }
-    const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-    const downloadUrl = getDownloadUrl(normalizedVersion, XCODE_PLUGIN_ASSET);
-    core.info(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
-    let downloadedPath;
-    try {
-        downloadedPath = await tc.downloadTool(downloadUrl);
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to download ${XCODE_PLUGIN_ASSET} from ${downloadUrl}: ${message}`);
-    }
-    if (verify) {
-        const expectedChecksum = await getExpectedChecksum(normalizedVersion, XCODE_PLUGIN_ASSET);
-        await verifyChecksum(downloadedPath, expectedChecksum, XCODE_PLUGIN_ASSET);
-    }
-    await fs.promises.mkdir(path.dirname(pluginPath), { recursive: true });
-    await fs.promises.copyFile(downloadedPath, pluginPath);
-    await fs.promises.chmod(pluginPath, 0o755);
-    core.exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
-    core.info('BoringCache Xcode adapter ready');
-    return pluginPath;
 }
 export async function execBoringCache(args, options = {}) {
     const isWindows = os.platform() === 'win32';

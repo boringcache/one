@@ -84,7 +84,9 @@ export function resolveGitHubCacheIdentity() {
 }
 function parseReadyEnvironment(contents, host, port) {
     const parsed = JSON.parse(contents);
-    if (parsed.ACTIONS_CACHE_SERVICE_V2 !== 'true'
+    if (typeof parsed.BORINGCACHE_WORKSPACE !== 'string'
+        || !parsed.BORINGCACHE_WORKSPACE.trim()
+        || parsed.ACTIONS_CACHE_SERVICE_V2 !== 'true'
         || typeof parsed.ACTIONS_RESULTS_URL !== 'string'
         || typeof parsed.ACTIONS_RUNTIME_TOKEN !== 'string'
         || !parsed.ACTIONS_RUNTIME_TOKEN) {
@@ -147,7 +149,6 @@ export async function startGhaAdapter(options) {
     const logPath = path.join(serviceDirectory, 'service.log');
     const args = [
         'gha',
-        '--workspace', options.workspace,
         '--host', host,
         '--repository-id', repositoryId,
         '--workflow-run-backend-id', normalizeArtifactBackendId(options.workflowRunBackendId, 'workflow run backend id'),
@@ -155,6 +156,9 @@ export async function startGhaAdapter(options) {
         '--scope', scope,
         '--ready-file', readyPath,
     ];
+    if (options.workspace?.trim()) {
+        args.push('--workspace', options.workspace.trim());
+    }
     if (options.port > 0) {
         args.push('--port', String(options.port));
     }
@@ -186,6 +190,7 @@ export async function startGhaAdapter(options) {
         core.exportVariable('ACTIONS_RUNTIME_TOKEN', ready.environment.ACTIONS_RUNTIME_TOKEN);
         core.info(`BoringCache GitHub Actions compatibility service is ready at ${ready.environment.ACTIONS_RESULTS_URL}`);
         return {
+            workspace: ready.environment.BORINGCACHE_WORKSPACE,
             pid: child.pid,
             port: ready.port,
             readOnly,

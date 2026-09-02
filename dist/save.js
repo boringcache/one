@@ -1,55 +1,13 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
-import { hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, } from './core';
-import { actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, normalizeVerifyTimeoutSeconds, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
+import { hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
+import { actionErrorMessage, buildActionTrustState, ensureBoringCache, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
-function toSaveEntries(entriesString) {
-    if (!entriesString.trim()) {
-        return '';
-    }
-    return parseEntries(entriesString, 'restore', {
-        separatorMode: 'newline',
-    })
-        .map((entry) => `${entry.tag}:${entry.savePath}`)
-        .join('\n');
-}
-function parseSavedVerificationSpecs(raw) {
-    if (!raw.trim()) {
-        return [];
-    }
-    try {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) {
-            return [];
-        }
-        return parsed
-            .filter((spec) => spec && typeof spec.tag === 'string')
-            .map((spec) => ({
-            tag: spec.tag,
-            saveExpected: spec.saveExpected,
-        }));
-    }
-    catch {
-        return [];
-    }
-}
-function filterVerifiableSpecs(specs) {
-    return specs;
-}
-function buildCliSetupOptions(inputs, cliVersion, cliPlatform) {
+function buildCliSetupOptions(cliVersion, cliPlatform) {
     return {
         version: cliVersion,
         platform: cliPlatform,
-        ...(inputs.trustedWorkspaceSigningKeyFingerprint
-            ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
-            : {}),
     };
-}
-function parseSavedTagList(raw) {
-    return new Set(raw
-        .split(',')
-        .map((entry) => entry.trim())
-        .filter(Boolean));
 }
 function readXcodeEvidence(filePath) {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -71,18 +29,12 @@ function readXcodeEvidence(filePath) {
         return null;
     }
 }
-function buildLegacyVerificationSpecs(verifySaveTags) {
-    return verifySaveTags.map((tag) => ({
-        tag,
-        saveExpected: true,
-    }));
-}
-async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, saveStatus) {
+async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, trustState, saveStatus) {
     const diagnostics = loadDiagnosticsConfig(inputs);
-    const proxyLogPath = core.getState('proxy-log-path') || core.getState('mode-proxy-log-path');
-    const candidateReceiptFile = core.getState('candidate-receipt-file');
+    const proxyLogPath = getActionState('proxy-log-path') || getActionState('mode-proxy-log-path');
+    const candidateReceiptFile = getActionState('candidate-receipt-file');
     const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
-    const xcodeEvidencePath = core.getState('mode-xcode-evidence-json');
+    const xcodeEvidencePath = getActionState('mode-xcode-evidence-json');
     const xcodeEvidence = readXcodeEvidence(xcodeEvidencePath);
     writeActionEvidence('post', {
         phase_status: 'completed',
@@ -91,8 +43,6 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         working_directory: workingDirectory || process.cwd(),
         workspace: genericWorkspace || '',
         generic_entries: genericEntries || '',
-        verify_mode: verifyMode,
-        verify_save_tags: verifySaveTags,
         trust_state: trustState,
         diagnostics_level: diagnostics.level,
         save_status: saveStatus,
@@ -106,8 +56,6 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         core.info(`working-directory: ${workingDirectory || process.cwd()}`);
         core.info(`workspace: ${genericWorkspace || '(none)'}`);
         core.info(`generic-entries: ${genericEntries || '(none)'}`);
-        core.info(`verify-mode: ${verifyMode}`);
-        core.info(`verify-save-tags: ${verifySaveTags.join(',') || '(none)'}`);
         core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
         core.info(`staged-candidates: ${stagedCandidates.map((candidate) => candidate.id).join(',') || '(none)'}`);
         if (xcodeEvidence) {
@@ -132,82 +80,51 @@ export async function run() {
     let postFailureContext = {};
     let strictPostFailure = false;
     try {
+        let resolvedMode = getActionState('resolved-mode');
+        if (!resolvedMode) {
+            core.info('Post step skipped: the main step did not create a lifecycle plan.');
+            return;
+        }
         const inputs = getInputs();
         strictPostFailure = inputs.failOnCacheError;
-        const cliVersion = core.getState('cli-version') || inputs.cliVersion;
-        let cliCapabilityVersion = core.getState('cli-capability-version');
-        const cliPlatform = core.getState('cli-platform') || inputs.cliPlatform || undefined;
-        let resolvedMode = core.getState('resolved-mode');
-        let workingDirectory = core.getState('working-directory');
-        let genericEntries = core.getState('generic-cache-entries');
-        let genericWorkspace = core.getState('generic-cache-workspace');
-        let force = core.getState('force') === 'true';
-        let verbose = core.getState('verbose') === 'true';
-        const verifyMode = (core.getState('verify-mode') || inputs.verify);
-        strictPostFailure ||= verifyMode === 'check';
-        const verifyTimeoutSeconds = normalizeVerifyTimeoutSeconds(core.getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
-        const verifyRequireServerSignature = core.getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
-        const requestedTrustPolicy = normalizeTrustPolicy(core.getState('trust-policy') || inputs.trustPolicy);
-        const savedTrustDecision = core.getState('trust-decision');
+        const cliVersion = getActionState('cli-version');
+        let cliCapabilityVersion = getActionState('cli-capability-version');
+        const cliPlatform = getActionState('cli-platform') || inputs.cliPlatform || undefined;
+        let workingDirectory = getActionState('working-directory');
+        let genericEntries = getActionState('generic-cache-entries');
+        let genericWorkspace = getActionState('generic-cache-workspace');
+        const verbose = getActionState('verbose') === 'true';
+        const requestedTrustPolicy = normalizeTrustPolicy(getActionState('trust-policy') || inputs.trustPolicy);
+        const savedTrustDecision = getActionState('trust-decision');
         const trustDecision = savedTrustDecision
             ? parseSavedTrustDecision(savedTrustDecision, requestedTrustPolicy)
             : await resolveTrustDecision(requestedTrustPolicy);
         const resolvedTrustPolicy = trustDecision.resolved;
         applyTrustEnvPolicy(trustDecision);
         const trustState = buildActionTrustState(trustDecision);
-        if (resolvedMode === 'cargo') {
-            core.info('Post step skipped: mode cargo completed its synchronous CLI lifecycle in the main Action step.');
+        if (['cargo', 'docker', 'buildkit'].includes(resolvedMode)) {
+            core.info(`Post step skipped: mode ${resolvedMode} completed its synchronous CLI lifecycle in the main Action step.`);
             return;
         }
-        let candidateReceiptFile = core.getState('candidate-receipt-file');
+        let candidateReceiptFile = getActionState('candidate-receipt-file');
         if (resolvedTrustPolicy === 'stage' && !candidateReceiptFile) {
             candidateReceiptFile = prepareCandidateReceiptFile();
-            core.saveState('candidate-receipt-file', candidateReceiptFile);
+            saveActionState('candidate-receipt-file', candidateReceiptFile);
         }
         useCandidateReceiptFile(candidateReceiptFile);
-        let verifySaveTags = core.getState('verify-save-tags')
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter(Boolean);
-        let verifySaveSpecs = parseSavedVerificationSpecs(core.getState('verify-save-specs'));
         postFailureContext = {
             resolved_mode: resolvedMode || '',
             working_directory: workingDirectory || '',
             workspace: genericWorkspace || '',
             generic_entries: genericEntries || '',
-            verify_mode: verifyMode,
-            verify_save_tags: verifySaveTags,
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
             trust_state: trustState,
         };
         if (cliVersion.toLowerCase() !== 'skip') {
-            await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
-        }
-        if ((resolvedMode || inputs.mode).trim().toLowerCase() === 'xcode') {
-            await ensureXcodePlugin(cliVersion);
+            await ensureBoringCache(buildCliSetupOptions(cliVersion, cliPlatform));
         }
         if (!cliCapabilityVersion) {
             cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);
-        }
-        if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
-            const plan = await buildPlan({
-                ...inputs,
-                cliVersion: cliCapabilityVersion,
-                readOnly: resolvedTrustPolicy === 'restore',
-                stage: resolvedTrustPolicy === 'stage',
-            });
-            resolvedMode = plan.mode;
-            if (!workingDirectory) {
-                workingDirectory = plan.workingDirectory;
-            }
-            if (!genericWorkspace) {
-                genericWorkspace = plan.workspace;
-            }
-            if (!genericEntries) {
-                genericEntries = toSaveEntries(plan.archiveEntries);
-            }
-            force = inputs.force;
-            verbose = inputs.verbose;
         }
         postFailureContext = {
             ...postFailureContext,
@@ -216,9 +133,6 @@ export async function run() {
             workspace: genericWorkspace || '',
             generic_entries: genericEntries || '',
         };
-        if (verifySaveSpecs.length === 0 && verifySaveTags.length > 0) {
-            verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags);
-        }
         if (workingDirectory) {
             process.chdir(workingDirectory);
         }
@@ -229,7 +143,7 @@ export async function run() {
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
                 core.info(`Save skipped: trust-policy ${requestedTrustPolicy} resolved to restore.`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
             return;
         }
         const requiredTokenPresent = resolvedTrustPolicy === 'stage' ? hasStageToken() : hasSaveToken();
@@ -240,28 +154,14 @@ export async function run() {
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
                 core.notice(`Save skipped: ${resolvedTrustPolicy === 'stage' ? missingStageTokenMessage() : missingSaveTokenMessage()}`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_token' : 'skipped_missing_token');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_token' : 'skipped_missing_token');
             return;
         }
         if (resolvedMode && resolvedMode !== 'archive') {
             await runModeSave(resolvedMode);
-            const skippedModeVerifyTags = parseSavedTagList(core.getState('mode-skipped-verify-tags'));
-            if (skippedModeVerifyTags.size > 0) {
-                verifySaveTags = verifySaveTags.filter((tag) => !skippedModeVerifyTags.has(tag));
-                verifySaveSpecs = verifySaveSpecs.filter((spec) => !skippedModeVerifyTags.has(spec.tag));
-            }
         }
         if (!genericEntries || !genericWorkspace) {
-            if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {
-                await verifyVerificationSpecs(genericWorkspace, verifySaveSpecs, {
-                    mode: verifyMode,
-                    timeoutSeconds: verifyTimeoutSeconds,
-                    requireServerSignature: verifyRequireServerSignature,
-                    verbose,
-                    acceptPendingSaveExpected: true,
-                });
-            }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage' && resolvedMode && resolvedMode !== 'archive'
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedTrustPolicy === 'stage' && resolvedMode && resolvedMode !== 'archive'
                 ? 'mode_post_staged'
                 : resolvedMode && resolvedMode !== 'archive'
                     ? 'mode_post_no_generic_save'
@@ -276,9 +176,6 @@ export async function run() {
         for (const entry of saveEntries) {
             args.push('--entry', entry);
         }
-        if (force) {
-            args.push('--force');
-        }
         if (resolvedTrustPolicy === 'stage') {
             args.push('--stage');
         }
@@ -289,17 +186,7 @@ export async function run() {
             args.push('--fail-on-cache-error');
         }
         await execBoringCache(args);
-        const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
-        if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
-            await verifyVerificationSpecs(genericWorkspace, verifiableSaveSpecs, {
-                mode: verifyMode,
-                timeoutSeconds: verifyTimeoutSeconds,
-                requireServerSignature: verifyRequireServerSignature,
-                verbose,
-                acceptPendingSaveExpected: true,
-            });
-        }
-        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage'
+        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedTrustPolicy === 'stage'
             ? resolvedMode && resolvedMode !== 'archive'
                 ? 'mode_post_and_generic_stage'
                 : 'staged'
@@ -319,5 +206,6 @@ export async function run() {
     }
     finally {
         process.chdir(originalCwd);
+        removeActionStateDocument();
     }
 }

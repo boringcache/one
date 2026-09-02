@@ -8,6 +8,3 @@ export function requireCliVerificationTags(tags, adapter) {
 export function resolveVerificationTags(specs) {
     return Array.from(new Set(specs.map((spec) => spec.tag)));
 }
-export function buildGenericVerificationSpecs(plan, saveExpected = false) {
-    return plan.archiveVerificationTags.map((tag) => ({ tag, saveExpected }));
-}

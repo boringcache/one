@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { redactEvidenceText } from './redaction';
+import { getActionState, saveActionState } from './lifecycle-state';
 let processEvidenceId;
 export function restorePhaseSummary(options) {
     if (options.cacheHit === undefined) {
@@ -165,7 +166,7 @@ export function writeActionEvidence(phase, payload, productRefs) {
     try {
         fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
         core.setOutput('evidence-path', evidencePath);
-        core.saveState('evidence-id', currentEvidenceId());
+        saveActionState('evidence-id', currentEvidenceId());
         return evidencePath;
     }
     catch (error) {
@@ -189,7 +190,7 @@ export function actionErrorMessage(error) {
 // Hashing it into a basename keeps state and environment values out of filesystem
 // path expressions while still letting post reopen the main process's envelope.
 function currentEvidenceId() {
-    const savedEvidenceId = (core.getState('evidence-id') || '').trim();
+    const savedEvidenceId = (getActionState('evidence-id') || '').trim();
     if (savedEvidenceId) {
         return savedEvidenceId;
     }
