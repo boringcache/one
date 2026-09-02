@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { parsePositiveIntegerInput } from './input-values';
+import { getActionState } from './lifecycle-state';
 import { redactEvidenceText } from './redaction';
 export const MAX_DIAGNOSTICS_LOG_LINES = 500;
 export const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
@@ -46,9 +47,9 @@ export function resolveDiagnosticsConfig(mode, logLines) {
     };
 }
 export function loadDiagnosticsConfig(inputs) {
-    const savedLevel = (core.getState('diagnostics-level') || '').trim().toLowerCase();
+    const savedLevel = (getActionState('diagnostics-level') || '').trim().toLowerCase();
     if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
-        const savedLogLines = normalizeDiagnosticsLogLines((core.getState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
+        const savedLogLines = normalizeDiagnosticsLogLines((getActionState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
         return {
             level: savedLevel,
             enabled: savedLevel !== 'off',

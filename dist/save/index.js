@@ -97313,7 +97313,7 @@ function saveCacheV2(paths_1, key_1, options_1) {
 ;// CONCATENATED MODULE: ./dist/core/action-cache.js
 
 
-async function action_cache_saveImmutableToolCache(paths, key, label) {
+async function saveImmutableToolCache(paths, key, label) {
     try {
         const cacheId = await cache_saveCache(paths, key);
         if (cacheId >= 0) {
@@ -97340,8 +97340,6 @@ async function action_cache_saveImmutableToolCache(paths, key, label) {
 
 const TOOL_NAME = 'boringcache';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
-const XCODE_PLUGIN_ASSET = 'libboringcache_xcode_cas-macos-universal.dylib';
-const XCODE_PLUGIN_NAME = 'libboringcache_xcode_cas.dylib';
 function findToolCachePath(toolName, version, arch) {
     const found = find(toolName, version, arch);
     if (found) {
@@ -97610,11 +97608,6 @@ async function ensureBoringCache(options) {
         exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
         info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
     }
-    const trustedFingerprint = options.trustedWorkspaceSigningKeyFingerprint?.trim();
-    if (trustedFingerprint) {
-        exportVariable('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT', trustedFingerprint);
-        info('BORINGCACHE_TRUSTED_WORKSPACE_KEY_FINGERPRINT configured');
-    }
     if (options.version === 'skip') {
         core_debug('CLI setup skipped (version: skip)');
         if (await isCliAvailable()) {
@@ -97677,62 +97670,13 @@ async function ensureBoringCache(options) {
     else {
         toolPath = await downloadAndInstall(normalizedVersion, platform, enableVerify);
         if (enableCache) {
-            await action_cache_saveImmutableToolCache(cachePaths, cacheInfo.cacheKey, 'CLI');
+            await saveImmutableToolCache(cachePaths, cacheInfo.cacheKey, 'CLI');
         }
     }
     const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
     const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName);
     addPath(stableToolPath);
     info(`BoringCache CLI ${normalizedVersion} ready`);
-}
-/** Install the native Xcode CAS adapter beside the stable CLI binary.
- *
- * The CLI intentionally discovers this sibling without any configuration, so
- * `mode: xcode` has the same one-step setup as every other Action mode. An
- * explicit BORINGCACHE_XCODE_PLUGIN_PATH remains available for source-tree and
- * canary E2E runs.
- */
-async function ensureXcodePlugin(version, verify = true) {
-    if (process.platform !== 'darwin') {
-        throw new Error('The BoringCache Xcode plugin can only be installed on macOS.');
-    }
-    const configuredPath = (process.env.BORINGCACHE_XCODE_PLUGIN_PATH || '').trim();
-    if (configuredPath) {
-        // The CLI canonicalizes the path, requires a regular file, and hashes the
-        // plugin before starting Xcode. Keep environment-provided paths out of the
-        // Action's filesystem API so this override cannot become a path probe.
-        return configuredPath;
-    }
-    const pluginPath = external_path_.join(getStableCliBinDir(), XCODE_PLUGIN_NAME);
-    if (external_fs_namespaceObject.existsSync(pluginPath)) {
-        exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
-        return pluginPath;
-    }
-    if (version.toLowerCase() === 'skip') {
-        throw new Error(`mode=xcode needs ${XCODE_PLUGIN_NAME} beside the BoringCache CLI, `
-            + 'or BORINGCACHE_XCODE_PLUGIN_PATH when cli-version is skip.');
-    }
-    const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-    const downloadUrl = getDownloadUrl(normalizedVersion, XCODE_PLUGIN_ASSET);
-    info(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
-    let downloadedPath;
-    try {
-        downloadedPath = await downloadTool(downloadUrl);
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to download ${XCODE_PLUGIN_ASSET} from ${downloadUrl}: ${message}`);
-    }
-    if (verify) {
-        const expectedChecksum = await getExpectedChecksum(normalizedVersion, XCODE_PLUGIN_ASSET);
-        await verifyChecksum(downloadedPath, expectedChecksum, XCODE_PLUGIN_ASSET);
-    }
-    await external_fs_namespaceObject.promises.mkdir(external_path_.dirname(pluginPath), { recursive: true });
-    await external_fs_namespaceObject.promises.copyFile(downloadedPath, pluginPath);
-    await external_fs_namespaceObject.promises.chmod(pluginPath, 0o755);
-    exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
-    info('BoringCache Xcode adapter ready');
-    return pluginPath;
 }
 async function setup_execBoringCache(args, options = {}) {
     const isWindows = external_os_.platform() === 'win32';
@@ -97774,12 +97718,12 @@ function auth_missingRestoreTokenMessage() {
 function auth_missingSaveTokenMessage() {
     return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN.';
 }
-function missingStageTokenMessage() {
+function auth_missingStageTokenMessage() {
     return 'A stage-capable token is required. Set BORINGCACHE_STAGE_TOKEN or BORINGCACHE_SAVE_TOKEN.';
 }
 
 ;// CONCATENATED MODULE: ./dist/core/inputs.js
-function parseEntries(entriesInput, _action, options = {}) {
+function inputs_parseEntries(entriesInput, _action, options = {}) {
     const separatorMode = options.separatorMode ?? 'newline';
     const entrySpecs = [];
     let current = '';
@@ -97858,7 +97802,7 @@ function envSeconds(name) {
     const parsed = Number.parseInt(raw.trim(), 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
-function proxy_proxyStopTimeoutMs(reportedBudgetSecs) {
+function proxyStopTimeoutMs(reportedBudgetSecs) {
     const override = envSeconds(PROXY_STOP_TIMEOUT_SECS_ENV);
     if (override !== null) {
         return override * 1000;
@@ -97912,7 +97856,7 @@ function proxyProbeHost(host) {
 async function isProxyRunning(host, port) {
     const probeHost = proxyProbeHost(host);
     return await new Promise((resolve) => {
-        const socket = external_net_.createConnection({ host: probeHost, port });
+        const socket = net.createConnection({ host: probeHost, port });
         let settled = false;
         const finish = (value) => {
             if (settled) {
@@ -97930,11 +97874,11 @@ async function isProxyRunning(host, port) {
     });
 }
 function proxyReadyFilePath(port) {
-    return external_path_.join(external_os_.tmpdir(), `boringcache-proxy-${port}.ready`);
+    return path.join(os.tmpdir(), `boringcache-proxy-${port}.ready`);
 }
 function clearProxyReadyFile(readyFile) {
     try {
-        external_fs_namespaceObject.unlinkSync(readyFile);
+        fs.unlinkSync(readyFile);
     }
     catch {
         // Ignore missing or inaccessible ready markers; startup will recreate them.
@@ -97954,12 +97898,12 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
     const start = Date.now();
     let lastLogAt = 0;
     while (Date.now() - start < timeoutMs) {
-        if (external_fs_namespaceObject.existsSync(readyFile)) {
+        if (fs.existsSync(readyFile)) {
             const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-            info(`BoringCache proxy is ready (${elapsed}s)`);
+            core.info(`BoringCache proxy is ready (${elapsed}s)`);
             let reportedBudgetSecs = null;
             try {
-                reportedBudgetSecs = parseProxyReadyMarker(external_fs_namespaceObject.readFileSync(readyFile, 'utf8').trim());
+                reportedBudgetSecs = parseProxyReadyMarker(fs.readFileSync(readyFile, 'utf8').trim());
             }
             catch {
                 reportedBudgetSecs = null;
@@ -97973,7 +97917,7 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
         }
         const elapsed = Date.now() - start;
         if (elapsed - lastLogAt >= PROXY_READY_WARN_INTERVAL_MS) {
-            info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
+            core.info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
             lastLogAt = elapsed;
         }
         await new Promise((resolve) => setTimeout(resolve, PROXY_READY_POLL_INTERVAL_MS));
@@ -98001,7 +97945,7 @@ function occupiedPortMessage(port, status, workspace) {
 }
 function httpRequest(options) {
     return new Promise((resolve, reject) => {
-        const request = external_http_.request(options, (response) => {
+        const request = http.request(options, (response) => {
             let body = '';
             response.setEncoding('utf8');
             response.on('data', (chunk) => {
@@ -98148,7 +98092,7 @@ async function waitForOciRefsReadable(host, port, requestedRefs, timeoutMs = 60_
 }
 function logOciImportReadiness(readiness) {
     if (readiness.ready) {
-        info(`BoringCache managed cache import refs are readable: ${readiness.readableRefs.join(', ')}`);
+        core.info(`BoringCache managed cache import refs are readable: ${readiness.readableRefs.join(', ')}`);
         return;
     }
     const statusSuffix = [
@@ -98165,10 +98109,10 @@ function logOciImportReadiness(readiness) {
         .join(' ');
     const message = `BoringCache managed cache became ready before planned restore refs were fully readable. readable=[${readiness.readableRefs.join(', ')}] unreadable=[${readiness.unreadableRefs.join(', ')}]${statusSuffix ? ` ${statusSuffix}` : ''}`;
     if (readiness.readableRefs.length === 0) {
-        notice(`${message}. Continuing without these planned imports. Later wrapped commands may resolve target-specific refs; use their cache evidence to judge reuse.`);
+        core.notice(`${message}. Continuing without these planned imports. Later wrapped commands may resolve target-specific refs; use their cache evidence to judge reuse.`);
         return;
     }
-    warning(message);
+    core.warning(message);
 }
 function assertOciImportReady(readiness) {
     if (readiness.ready) {
@@ -98184,7 +98128,7 @@ function assertOciImportReady(readiness) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function proxy_startRegistryProxy(options) {
-    const { restoreToken, stageToken, saveToken } = auth_getAuthTokens();
+    const { restoreToken, stageToken, saveToken } = getAuthTokens();
     if (options.readOnly && options.stage) {
         throw new Error('Proxy stage cannot be combined with read-only mode.');
     }
@@ -98200,13 +98144,13 @@ async function proxy_startRegistryProxy(options) {
         effectiveReadOnly = true;
         effectiveStage = false;
         authToken = restoreToken;
-        info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
+        core.info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
     if (!authToken) {
         if (effectiveReadOnly) {
-            throw new Error(`${auth_missingRestoreTokenMessage()} This is required for proxy mode.`);
+            throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
         }
-        throw new Error(`${effectiveStage ? missingStageTokenMessage() : auth_missingSaveTokenMessage()} This is required for proxy mode.`);
+        throw new Error(`${effectiveStage ? missingStageTokenMessage() : missingSaveTokenMessage()} This is required for proxy mode.`);
     }
     const host = options.host || '127.0.0.1';
     const cliCommand = 'cache-registry';
@@ -98288,10 +98232,10 @@ async function proxy_startRegistryProxy(options) {
     if (options.verbose) {
         args.push('--verbose');
     }
-    info(`Starting BoringCache proxy on ${host}:${options.port}...`);
+    core.info(`Starting BoringCache proxy on ${host}:${options.port}...`);
     const logFile = proxyLogPath(options.port);
-    const logFd = external_fs_namespaceObject.openSync(logFile, 'w');
-    const child = (0,external_child_process_namespaceObject.spawn)('boringcache', args, {
+    const logFd = fs.openSync(logFile, 'w');
+    const child = spawn('boringcache', args, {
         detached: true,
         stdio: ['ignore', logFd, logFd],
         env: {
@@ -98299,11 +98243,11 @@ async function proxy_startRegistryProxy(options) {
         }
     });
     child.unref();
-    external_fs_namespaceObject.closeSync(logFd);
+    fs.closeSync(logFd);
     if (!child.pid) {
         throw new Error('Failed to start BoringCache proxy');
     }
-    info(`BoringCache proxy started (PID: ${child.pid})`);
+    core.info(`BoringCache proxy started (PID: ${child.pid})`);
     const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
     try {
         const reportedBudgetSecs = await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
@@ -98328,7 +98272,7 @@ async function proxy_startRegistryProxy(options) {
     }
     catch (error) {
         try {
-            await proxy_stopRegistryProxy(child.pid, options.port);
+            await stopRegistryProxy(child.pid, options.port);
         }
         catch {
             // Keep the original readiness failure as the primary error.
@@ -98341,7 +98285,7 @@ async function proxy_startRegistryProxy(options) {
  * Graceful stop: SIGTERM, wait out the derived shutdown budget, then SIGKILL
  * and fail with the proxy log tail.
  */
-async function proxy_stopRegistryProxy(pid, port, stopTimeoutMs = proxy_proxyStopTimeoutMs()) {
+async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTimeoutMs()) {
     if (pid <= 0) {
         info('No proxy PID to stop (was reused from another invocation)');
         return;
@@ -98413,7 +98357,7 @@ async function proxy_stopRegistryProxy(pid, port, stopTimeoutMs = proxy_proxySto
 /**
  * Bind to port 0 and return the assigned port.
  */
-async function proxy_findAvailablePort() {
+async function findAvailablePort() {
     return new Promise((resolve, reject) => {
         const server = net.createServer();
         server.listen(0, '127.0.0.1', () => {
@@ -103396,7 +103340,9 @@ function gha_resolveGitHubCacheIdentity() {
 }
 function parseReadyEnvironment(contents, host, port) {
     const parsed = JSON.parse(contents);
-    if (parsed.ACTIONS_CACHE_SERVICE_V2 !== 'true'
+    if (typeof parsed.BORINGCACHE_WORKSPACE !== 'string'
+        || !parsed.BORINGCACHE_WORKSPACE.trim()
+        || parsed.ACTIONS_CACHE_SERVICE_V2 !== 'true'
         || typeof parsed.ACTIONS_RESULTS_URL !== 'string'
         || typeof parsed.ACTIONS_RUNTIME_TOKEN !== 'string'
         || !parsed.ACTIONS_RUNTIME_TOKEN) {
@@ -103459,7 +103405,6 @@ async function gha_startGhaAdapter(options) {
     const logPath = path.join(serviceDirectory, 'service.log');
     const args = [
         'gha',
-        '--workspace', options.workspace,
         '--host', host,
         '--repository-id', repositoryId,
         '--workflow-run-backend-id', normalizeArtifactBackendId(options.workflowRunBackendId, 'workflow run backend id'),
@@ -103467,6 +103412,9 @@ async function gha_startGhaAdapter(options) {
         '--scope', scope,
         '--ready-file', readyPath,
     ];
+    if (options.workspace?.trim()) {
+        args.push('--workspace', options.workspace.trim());
+    }
     if (options.port > 0) {
         args.push('--port', String(options.port));
     }
@@ -103498,6 +103446,7 @@ async function gha_startGhaAdapter(options) {
         core.exportVariable('ACTIONS_RUNTIME_TOKEN', ready.environment.ACTIONS_RUNTIME_TOKEN);
         core.info(`BoringCache GitHub Actions compatibility service is ready at ${ready.environment.ACTIONS_RESULTS_URL}`);
         return {
+            workspace: ready.environment.BORINGCACHE_WORKSPACE,
             pid: child.pid,
             port: ready.port,
             readOnly,
@@ -103516,726 +103465,6 @@ async function gha_startGhaAdapter(options) {
         fs.rmSync(serviceDirectory, { recursive: true, force: true });
         throw error;
     }
-}
-
-;// CONCATENATED MODULE: ./dist/core/mise.js
-
-
-
-
-
-
-
-
-
-const mise_isWindows = process.platform === 'win32';
-const MISE_TOOL_NAME = 'mise';
-const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
-const DEFAULT_MISE_VERSION = 'v2026.8.14';
-function runnerHomeDir() {
-    return process.env.HOME || process.env.USERPROFILE || os.homedir();
-}
-function getMiseBinPath() {
-    const homedir = runnerHomeDir();
-    return mise_isWindows
-        ? path.join(homedir, '.local', 'bin', 'mise.exe')
-        : path.join(homedir, '.local', 'bin', 'mise');
-}
-function getMiseDataDir() {
-    if (mise_isWindows) {
-        return path.join(process.env.LOCALAPPDATA || path.join(runnerHomeDir(), 'AppData', 'Local'), 'mise');
-    }
-    return path.join(runnerHomeDir(), '.local', 'share', 'mise');
-}
-function getMiseShimsDir() {
-    return path.join(getMiseDataDir(), 'shims');
-}
-function slugMiseTagPart(value) {
-    const normalized = value
-        .trim()
-        .toLowerCase()
-        .replace(/^v(?=\d)/, '')
-        .replace(/[^a-z0-9._-]+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^[.-]+|[.-]+$/g, '');
-    return normalized || 'unknown';
-}
-async function mise_hasMiseToolVersion(toolName, version) {
-    const normalizedTool = normalizeToolName(toolName);
-    let output = '';
-    const exitCode = await exec.exec(getMiseBinPath(), ['ls', normalizedTool, '--installed', '--json'], {
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0 || !output.trim()) {
-        return false;
-    }
-    let entries;
-    try {
-        const parsed = JSON.parse(output);
-        if (Array.isArray(parsed)) {
-            entries = parsed;
-        }
-        else if (Array.isArray(parsed?.versions)) {
-            entries = parsed.versions;
-        }
-        else {
-            return false;
-        }
-    }
-    catch {
-        return false;
-    }
-    return entries.some((entry) => entry.installed !== false && isMatchingToolVersion(version, entry.version || ''));
-}
-async function mise_hasToolVersionOnPath(toolName, version) {
-    const normalizedTool = normalizeToolName(toolName);
-    const probes = getToolVersionProbes(normalizedTool);
-    for (const probe of probes) {
-        const detectedVersion = await detectToolVersion(probe);
-        if (detectedVersion && isMatchingToolVersion(version, detectedVersion)) {
-            return true;
-        }
-    }
-    return false;
-}
-async function mise_installMise() {
-    const version = getMiseVersion();
-    const normalizedVersion = version.replace(/^v/, '');
-    const platform = getMisePlatformInfo();
-    const cacheInfo = getMiseToolCacheInfo(version, platform);
-    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
-    const cachePaths = [`${toolCacheRoot}/${MISE_TOOL_NAME}`];
-    let restoredFromCache = false;
-    try {
-        const cacheKey = await cache.restoreCache(cachePaths, cacheInfo.cacheKey);
-        if (cacheKey) {
-            core.info(`Restored mise from cache (key: ${cacheKey})`);
-            restoredFromCache = true;
-        }
-    }
-    catch (error) {
-        core.debug(`mise cache restore failed: ${error instanceof Error ? error.message : error}`);
-    }
-    let toolPath = tc.find(MISE_TOOL_NAME, normalizedVersion);
-    if (toolPath) {
-        core.info(`Using cached mise ${version}`);
-    }
-    else {
-        core.info(`Installing mise ${version}...`);
-        toolPath = await downloadAndInstallMise(version, platform);
-        await saveImmutableToolCache(cachePaths, cacheInfo.cacheKey, 'mise');
-    }
-    if (!toolPath) {
-        throw new Error(`Failed to install mise ${version}`);
-    }
-    if (restoredFromCache && !tc.find(MISE_TOOL_NAME, normalizedVersion)) {
-        core.debug(`mise cache restored but tool cache lookup for ${version} remained empty`);
-    }
-    await materializeMiseBinary(toolPath, platform);
-    core.addPath(path.dirname(getMiseBinPath()));
-    core.addPath(getMiseShimsDir());
-    core.info(`mise ${version} ready`);
-}
-function getMiseVersion() {
-    const value = process.env.MISE_VERSION || DEFAULT_MISE_VERSION;
-    return value.startsWith('v') ? value : `v${value}`;
-}
-function getMisePlatformInfo() {
-    const runnerOS = process.env.RUNNER_OS || os.platform();
-    const runnerArch = process.env.RUNNER_ARCH || os.arch();
-    const osName = normalizeRunnerOs(runnerOS);
-    const arch = normalizeRunnerArch(runnerArch);
-    const version = getMiseVersion();
-    if (osName === 'windows') {
-        return {
-            os: osName,
-            arch,
-            assetName: `mise-${version}-windows-${arch}.zip`,
-            binaryName: 'mise.exe',
-            isWindows: true,
-        };
-    }
-    return {
-        os: osName,
-        arch,
-        assetName: `mise-${version}-${osName}-${arch}`,
-        binaryName: 'mise',
-        isWindows: false,
-    };
-}
-function normalizeRunnerOs(value) {
-    const normalized = value.toLowerCase();
-    if (normalized === 'darwin' || normalized === 'macos') {
-        return 'macos';
-    }
-    if (normalized === 'win32' || normalized === 'windows') {
-        return 'windows';
-    }
-    if (normalized === 'linux') {
-        return 'linux';
-    }
-    throw new Error(`Unsupported platform for mise: OS=${value}`);
-}
-function normalizeRunnerArch(value) {
-    const normalized = value.toLowerCase();
-    if (normalized === 'x64' || normalized === 'amd64') {
-        return 'x64';
-    }
-    if (normalized === 'arm64' || normalized === 'aarch64') {
-        return 'arm64';
-    }
-    throw new Error(`Unsupported architecture for mise: ARCH=${value}`);
-}
-function getMiseToolCacheInfo(version, platform) {
-    const normalizedVersion = version.replace(/^v/, '');
-    const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
-    return {
-        cacheKey: `${MISE_TOOL_NAME}-${normalizedVersion}-${platform.os}-${platform.arch}`,
-        cachePattern: `${toolCacheRoot}/${MISE_TOOL_NAME}/${normalizedVersion}*`,
-    };
-}
-function getMiseDownloadUrl(version, assetName) {
-    return `${MISE_RELEASES_BASE}/${version}/${assetName}`;
-}
-function getMiseChecksumsUrl(version) {
-    return `${MISE_RELEASES_BASE}/${version}/SHASUMS256.txt`;
-}
-async function mise_computeFileHash(filePath) {
-    const fileBuffer = await fs.promises.readFile(filePath);
-    const hashSum = crypto.createHash('sha256');
-    hashSum.update(fileBuffer);
-    return hashSum.digest('hex');
-}
-function mise_parseChecksums(content, assetName) {
-    for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-            continue;
-        }
-        const match = trimmed.match(/^([a-f0-9]{64})\s+(.+)$/i);
-        if (!match) {
-            continue;
-        }
-        const [, hash, filename] = match;
-        if (filename === assetName || filename.endsWith(`/${assetName}`)) {
-            return hash.toLowerCase();
-        }
-    }
-    return null;
-}
-async function mise_getExpectedChecksum(version, assetName) {
-    const checksumsPath = await tc.downloadTool(getMiseChecksumsUrl(version));
-    const content = await fs.promises.readFile(checksumsPath, 'utf-8');
-    const checksum = mise_parseChecksums(content, assetName);
-    if (!checksum) {
-        throw new Error(`Checksum not found for mise asset: ${assetName}`);
-    }
-    return checksum;
-}
-async function mise_verifyChecksum(filePath, expectedChecksum, assetName) {
-    const actualChecksum = await mise_computeFileHash(filePath);
-    if (actualChecksum !== expectedChecksum) {
-        throw new Error(`Checksum verification failed for ${assetName}:\n` +
-            `  Expected: ${expectedChecksum}\n` +
-            `  Actual:   ${actualChecksum}`);
-    }
-}
-async function downloadAndInstallMise(version, platform) {
-    const downloadUrl = getMiseDownloadUrl(version, platform.assetName);
-    core.info(`Downloading mise from: ${downloadUrl}`);
-    const downloadedPath = await tc.downloadTool(downloadUrl);
-    const expectedChecksum = await mise_getExpectedChecksum(version, platform.assetName);
-    await mise_verifyChecksum(downloadedPath, expectedChecksum, platform.assetName);
-    const versionDir = version.replace(/^v/, '').replace(/[^A-Za-z0-9._-]/g, '_') || 'unknown';
-    const installDir = path.join(os.tmpdir(), 'mise-install', versionDir);
-    // mise install paths are rooted under the runner temp directory with a sanitized version segment.
-    // codeql[js/path-injection]
-    await fs.promises.mkdir(installDir, { recursive: true });
-    const binaryPath = path.join(installDir, platform.binaryName);
-    if (platform.isWindows) {
-        const extractedPath = await tc.extractZip(downloadedPath);
-        const extractedBinary = await findMiseBinary(extractedPath, platform.binaryName);
-        // The source is the verified mise archive and the destination is the sanitized temp install dir.
-        // codeql[js/path-injection]
-        await fs.promises.copyFile(extractedBinary, binaryPath);
-    }
-    else {
-        // The source is the verified mise download and the destination is the sanitized temp install dir.
-        // codeql[js/path-injection]
-        await fs.promises.copyFile(downloadedPath, binaryPath);
-        // codeql[js/path-injection]
-        await fs.promises.chmod(binaryPath, 0o755);
-    }
-    return tc.cacheDir(installDir, MISE_TOOL_NAME, version.replace(/^v/, ''));
-}
-async function materializeMiseBinary(toolPath, platform) {
-    const sourceBinary = path.join(toolPath, platform.binaryName);
-    const targetBinary = getMiseBinPath();
-    // The mise bin directory is action-owned runner state.
-    // codeql[js/path-injection]
-    await fs.promises.mkdir(path.dirname(targetBinary), { recursive: true });
-    // The source comes from the Actions tool cache and target is action-owned runner state.
-    // codeql[js/path-injection]
-    await fs.promises.copyFile(sourceBinary, targetBinary);
-    if (!platform.isWindows) {
-        await fs.promises.chmod(targetBinary, 0o755);
-    }
-}
-async function findMiseBinary(extractedPath, binaryName) {
-    const candidates = [
-        path.join(extractedPath, 'mise', 'bin', binaryName),
-        path.join(extractedPath, 'bin', binaryName),
-        path.join(extractedPath, binaryName),
-    ];
-    for (const candidate of candidates) {
-        try {
-            await fs.promises.access(candidate);
-            return candidate;
-        }
-        catch {
-            continue;
-        }
-    }
-    throw new Error(`Unable to locate ${binaryName} in extracted mise archive`);
-}
-async function mise_installMiseTool(toolName, version, options = {}) {
-    const spec = `${toolName}@${version}`;
-    const label = options.label || toolName;
-    const global = options.global ?? true;
-    core.info(`Installing ${label} ${version} via mise...`);
-    await exec.exec(getMiseBinPath(), ['install', spec], { env: options.env });
-    await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
-}
-function normalizeToolVersion(value) {
-    return value.trim().replace(/^v(?=\d)/, '');
-}
-function isMatchingToolVersion(requested, candidate) {
-    const normalizedRequested = normalizeToolVersion(requested);
-    const normalizedCandidate = normalizeToolVersion(candidate);
-    if (!normalizedRequested || !normalizedCandidate) {
-        return false;
-    }
-    const requestedParts = extractNumericVersionParts(normalizedRequested);
-    const candidateParts = extractNumericVersionParts(normalizedCandidate);
-    if (requestedParts.length > 0 || candidateParts.length > 0) {
-        if (requestedParts.length === 0 || requestedParts.length > candidateParts.length) {
-            return false;
-        }
-        return requestedParts.every((part, index) => part === candidateParts[index]);
-    }
-    return slugMiseTagPart(normalizedRequested) === slugMiseTagPart(normalizedCandidate);
-}
-function extractNumericVersionParts(value) {
-    const baseVersion = normalizeToolVersion(value).split('+')[0].trim();
-    const numericPrefix = baseVersion.match(/^\d+(?:\.\d+)*/)?.[0];
-    if (!numericPrefix) {
-        return [];
-    }
-    return numericPrefix
-        .split('.')
-        .map(normalizeVersionSegment)
-        .filter(Boolean);
-}
-function normalizeVersionSegment(value) {
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return '';
-    }
-    const numericMatch = trimmed.match(/^\d+/);
-    return numericMatch ? numericMatch[0] : trimmed;
-}
-async function detectToolVersion(probe) {
-    let stdout = '';
-    let stderr = '';
-    let exitCode;
-    try {
-        exitCode = await exec.exec(probe.command, probe.args, {
-            ignoreReturnCode: true,
-            silent: true,
-            listeners: {
-                stdout: (data) => {
-                    stdout += data.toString();
-                },
-                stderr: (data) => {
-                    stderr += data.toString();
-                },
-            },
-        });
-    }
-    catch (error) {
-        core.debug(`Skipping PATH probe for ${probe.command}: ${error instanceof Error ? error.message : String(error)}`);
-        return null;
-    }
-    if (exitCode !== 0) {
-        return null;
-    }
-    const output = probe.stream === 'stderr'
-        ? stderr
-        : probe.stream === 'combined'
-            ? `${stdout}\n${stderr}`
-            : stdout;
-    return extractVersionFromOutput(output, probe.versionPattern);
-}
-function extractVersionFromOutput(output, versionPattern) {
-    const pattern = versionPattern || /\bv?(\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?)\b/;
-    const match = output.match(pattern);
-    if (!match) {
-        return null;
-    }
-    return match[1] || match[0] || null;
-}
-function getToolVersionProbes(toolName) {
-    switch (toolName) {
-        case 'bazel':
-            return [
-                { command: 'bazel', args: ['--version'], versionPattern: /bazel\s+([0-9A-Za-z.+-]+)/i },
-                { command: 'bazelisk', args: ['version'], versionPattern: /Build label:\s*([0-9A-Za-z.+-]+)/i, stream: 'combined' },
-            ];
-        case 'bun':
-            return [{ command: 'bun', args: ['--version'] }];
-        case 'elixir':
-            return [{ command: 'elixir', args: ['--version'], versionPattern: /Elixir\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
-        case 'erlang':
-            return [{
-                    command: 'erl',
-                    args: ['-noshell', '-eval', 'io:format("~s", [erlang:system_info(otp_release)]), halt().'],
-                }];
-        case 'go':
-            return [{ command: 'go', args: ['version'], versionPattern: /go version go([0-9A-Za-z.+-]+)/i }];
-        case 'gradle':
-            return [{ command: 'gradle', args: ['--version'], versionPattern: /Gradle\s+([0-9A-Za-z.+-]+)/i }];
-        case 'java':
-            return [{ command: 'java', args: ['-version'], versionPattern: /version\s+"([0-9A-Za-z.+-]+)"/i, stream: 'stderr' }];
-        case 'maven':
-            return [{ command: 'mvn', args: ['--version'], versionPattern: /Apache Maven\s+([0-9A-Za-z.+-]+)/i }];
-        case 'node':
-            return [{ command: 'node', args: ['--version'] }];
-        case 'npm':
-            return [{ command: 'npm', args: ['--version'] }];
-        case 'pnpm':
-            return [{ command: 'pnpm', args: ['--version'] }];
-        case 'composer':
-            return [{ command: 'composer', args: ['--version'], versionPattern: /Composer version\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
-        case 'ccache':
-            return [{ command: 'ccache', args: ['--version'], versionPattern: /ccache version\s+([0-9A-Za-z.+-]+)/i }];
-        case 'ccache-storage-http':
-            return [{ command: 'ccache-storage-http', args: ['--version'], versionPattern: /Version:\s*([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
-        case 'php':
-            return [{ command: 'php', args: ['--version'], versionPattern: /PHP\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' }];
-        case 'python':
-            return [
-                { command: 'python3', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
-                { command: 'python', args: ['--version'], versionPattern: /Python\s+([0-9A-Za-z.+-]+)/i, stream: 'combined' },
-            ];
-        case 'ruby':
-            return [{ command: 'ruby', args: ['--version'], versionPattern: /ruby\s+([0-9A-Za-z.+-]+)/i }];
-        case 'rust':
-            return [{ command: 'rustc', args: ['--version'], versionPattern: /rustc\s+([0-9A-Za-z.+-]+)/i }];
-        case 'sccache':
-            return [{ command: 'sccache', args: ['--version'], versionPattern: /sccache\s+([0-9A-Za-z.+-]+)/i }];
-        case 'turbo':
-            return [{ command: 'turbo', args: ['--version'] }];
-        case 'uv':
-            return [{ command: 'uv', args: ['--version'] }];
-        case 'yarn':
-            return [{ command: 'yarn', args: ['--version'] }];
-        default:
-            return [];
-    }
-}
-async function mise_activateMiseTool(toolName, version, options = {}) {
-    const spec = `${toolName}@${version}`;
-    const label = options.label || toolName;
-    const global = options.global ?? true;
-    core.info(`Activating ${label} ${version}...`);
-    await exec.exec(getMiseBinPath(), buildUseArgs(spec, global), { env: options.env });
-}
-async function mise_reshimMise(force = true) {
-    const args = force ? ['reshim', '-f'] : ['reshim'];
-    core.info('Refreshing mise shims...');
-    await exec.exec(getMiseBinPath(), args);
-}
-async function mise_exportMiseEnv(cwd) {
-    core.info('Exporting mise environment...');
-    const envVars = await readMiseEnvJson(cwd);
-    if (envVars) {
-        for (const [key, value] of Object.entries(envVars)) {
-            if (typeof value === 'string') {
-                core.exportVariable(key, value);
-            }
-        }
-        return;
-    }
-    const dotenv = await readMiseEnvDotenv(cwd);
-    for (const [key, value] of parseDotenvLines(dotenv)) {
-        core.exportVariable(key, value);
-    }
-}
-function buildUseArgs(spec, global) {
-    return global ? ['use', '-g', spec] : ['use', spec];
-}
-async function readMiseEnvJson(cwd) {
-    let output = '';
-    const exitCode = await exec.exec(getMiseBinPath(), ['env', '--json'], {
-        cwd,
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0 || !output.trim()) {
-        return null;
-    }
-    try {
-        const parsed = JSON.parse(output);
-        return Object.fromEntries(Object.entries(parsed).filter((entry) => typeof entry[1] === 'string'));
-    }
-    catch {
-        return null;
-    }
-}
-async function readMiseEnvDotenv(cwd) {
-    let output = '';
-    const exitCode = await exec.exec(getMiseBinPath(), ['env', '--dotenv'], {
-        cwd,
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0) {
-        throw new Error('Failed to export mise environment');
-    }
-    return output;
-}
-function parseDotenvLines(content) {
-    const entries = [];
-    for (const rawLine of content.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith('#')) {
-            continue;
-        }
-        const separatorIndex = line.indexOf('=');
-        if (separatorIndex <= 0) {
-            continue;
-        }
-        const key = line.slice(0, separatorIndex).trim();
-        const rawValue = line.slice(separatorIndex + 1).trim();
-        const value = rawValue.replace(/^['"]|['"]$/g, '');
-        if (key) {
-            entries.push([key, value]);
-        }
-    }
-    return entries;
-}
-async function readToolVersions(workingDir) {
-    const toolVersionsPath = external_path_.join(workingDir, '.tool-versions');
-    try {
-        const content = await external_fs_namespaceObject.promises.readFile(toolVersionsPath, 'utf-8');
-        const tools = new Map();
-        for (const rawLine of content.split(/\r?\n/)) {
-            const line = stripTomlComment(rawLine).trim();
-            if (!line) {
-                continue;
-            }
-            const [toolName, version] = line.split(/\s+/, 3);
-            if (!toolName || !version) {
-                continue;
-            }
-            tools.set(normalizeToolName(toolName), version.trim());
-        }
-        return Array.from(tools, ([name, version]) => ({ name, version }));
-    }
-    catch {
-        return [];
-    }
-}
-async function readToolVersionsValue(workingDir, toolName) {
-    const normalizedToolName = normalizeToolName(toolName);
-    const tools = await readToolVersions(workingDir);
-    return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
-}
-async function readMiseTomlTools(workingDir) {
-    const miseToml = external_path_.join(workingDir, 'mise.toml');
-    try {
-        const content = await external_fs_namespaceObject.promises.readFile(miseToml, 'utf-8');
-        const toolsBlock = extractToolsBlock(content);
-        if (!toolsBlock) {
-            return [];
-        }
-        const tools = new Map();
-        const lines = toolsBlock.split(/\r?\n/);
-        for (let index = 0; index < lines.length; index += 1) {
-            const parsedLine = stripTomlComment(lines[index]).trim();
-            if (!parsedLine) {
-                continue;
-            }
-            const assignmentMatch = parsedLine.match(/^([A-Za-z0-9._-]+)\s*=\s*(.+)$/);
-            if (!assignmentMatch) {
-                continue;
-            }
-            const [, rawToolName, rawValue] = assignmentMatch;
-            const toolName = normalizeToolName(rawToolName);
-            const value = rawValue.trim();
-            const stringVersion = value.match(/^["']([^"']+)["']$/);
-            if (stringVersion?.[1]) {
-                tools.set(toolName, stringVersion[1]);
-                continue;
-            }
-            const inlineVersion = extractInlineTableVersion(value);
-            if (inlineVersion) {
-                tools.set(toolName, inlineVersion);
-                continue;
-            }
-            if (value.startsWith('{')) {
-                let blockValue = value;
-                let braceDepth = countBraceDelta(value);
-                while (braceDepth > 0 && index + 1 < lines.length) {
-                    index += 1;
-                    const nextLine = stripTomlComment(lines[index]).trim();
-                    blockValue = `${blockValue}\n${nextLine}`;
-                    braceDepth += countBraceDelta(nextLine);
-                }
-                const blockVersion = extractInlineTableVersion(blockValue);
-                if (blockVersion) {
-                    tools.set(toolName, blockVersion);
-                }
-            }
-        }
-        return Array.from(tools, ([name, version]) => ({ name, version }));
-    }
-    catch {
-        return [];
-    }
-}
-async function readMiseTomlVersion(workingDir, toolName) {
-    const normalizedToolName = normalizeToolName(toolName);
-    const tools = await readMiseTomlTools(workingDir);
-    return tools.find((tool) => tool.name === normalizedToolName)?.version || null;
-}
-async function readProjectMiseTools(workingDir) {
-    const toolVersions = await readToolVersions(workingDir);
-    const miseTomlTools = await readMiseTomlTools(workingDir);
-    const merged = new Map();
-    for (const tool of toolVersions) {
-        merged.set(tool.name, tool.version);
-    }
-    for (const tool of miseTomlTools) {
-        merged.set(tool.name, tool.version);
-    }
-    return Array.from(merged, ([name, version]) => ({ name, version }));
-}
-function extractToolsBlock(content) {
-    const lines = content.split(/\r?\n/);
-    const block = [];
-    let inToolsBlock = false;
-    for (const rawLine of lines) {
-        const line = stripTomlComment(rawLine).trim();
-        if (!inToolsBlock) {
-            if (line === '[tools]') {
-                inToolsBlock = true;
-            }
-            continue;
-        }
-        if (line.startsWith('[') && line.endsWith(']')) {
-            break;
-        }
-        block.push(rawLine);
-    }
-    return inToolsBlock ? block.join('\n') : null;
-}
-function extractInlineTableVersion(value) {
-    const versionMatch = value.match(/\bversion\s*=\s*["']([^"']+)["']/);
-    return versionMatch?.[1] || null;
-}
-function countBraceDelta(value) {
-    let delta = 0;
-    let inSingleQuote = false;
-    let inDoubleQuote = false;
-    let isEscaped = false;
-    for (const character of value) {
-        if (isEscaped) {
-            isEscaped = false;
-            continue;
-        }
-        if (character === '\\' && inDoubleQuote) {
-            isEscaped = true;
-            continue;
-        }
-        if (!inDoubleQuote && character === '\'') {
-            inSingleQuote = !inSingleQuote;
-            continue;
-        }
-        if (!inSingleQuote && character === '"') {
-            inDoubleQuote = !inDoubleQuote;
-            continue;
-        }
-        if (inSingleQuote || inDoubleQuote) {
-            continue;
-        }
-        if (character === '{') {
-            delta += 1;
-        }
-        else if (character === '}') {
-            delta -= 1;
-        }
-    }
-    return delta;
-}
-function stripTomlComment(value) {
-    let result = '';
-    let inSingleQuote = false;
-    let inDoubleQuote = false;
-    let isEscaped = false;
-    for (const character of value) {
-        if (isEscaped) {
-            result += character;
-            isEscaped = false;
-            continue;
-        }
-        if (character === '\\' && inDoubleQuote) {
-            result += character;
-            isEscaped = true;
-            continue;
-        }
-        if (!inDoubleQuote && character === '\'') {
-            inSingleQuote = !inSingleQuote;
-            result += character;
-            continue;
-        }
-        if (!inSingleQuote && character === '"') {
-            inDoubleQuote = !inDoubleQuote;
-            result += character;
-            continue;
-        }
-        if (!inSingleQuote && !inDoubleQuote && character === '#') {
-            break;
-        }
-        result += character;
-    }
-    return result;
-}
-function normalizeToolName(value) {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'nodejs') {
-        return 'node';
-    }
-    if (normalized === 'golang') {
-        return 'go';
-    }
-    return normalized;
 }
 
 ;// CONCATENATED MODULE: ./dist/core/trust.js
@@ -104633,347 +103862,137 @@ function compatibilityNextStep(status) {
 
 const SAFE_PATH_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 function currentHomeDir() {
-    return process.env.HOME || external_os_.homedir();
+    return process.env.HOME || os.homedir();
 }
 function localBinDir() {
     return path.join(currentHomeDir(), '.local', 'bin');
 }
-function paths_addLocalBinPaths() {
+function addLocalBinPaths() {
     const home = currentHomeDir();
-    addPath(external_path_.join(home, '.local', 'bin'));
-    addPath(external_path_.join(home, '.boringcache', 'bin'));
+    core.addPath(path.join(home, '.local', 'bin'));
+    core.addPath(path.join(home, '.boringcache', 'bin'));
 }
-function paths_isPathInside(parent, candidate) {
+function isPathInside(parent, candidate) {
     const root = path.resolve(parent);
     const target = path.resolve(candidate);
     const boundary = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
     return target === root || target.startsWith(boundary);
 }
-function paths_safePathComponent(label, value) {
+function safePathComponent(label, value) {
     if (!SAFE_PATH_COMPONENT.test(value)) {
         throw new Error(`Invalid verified release ${label}: ${value}`);
     }
     return value;
 }
 
-;// CONCATENATED MODULE: ./dist/core/integrity.js
+;// CONCATENATED MODULE: ./dist/core/lifecycle-state.js
 
 
-const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
-async function sha256File(filePath) {
-    const hash = crypto.createHash('sha256');
-    for await (const chunk of fs.createReadStream(filePath)) {
-        hash.update(chunk);
+
+
+
+const STATE_ID_KEY = 'lifecycle-id';
+const STATE_SCHEMA = 'boringcache_one_lifecycle.v1';
+const MAX_STATE_BYTES = 256 * 1024;
+let processStateId;
+function currentStateId() {
+    const saved = (getState(STATE_ID_KEY) || '').trim();
+    if (saved) {
+        return saved;
     }
-    return hash.digest('hex');
+    processStateId ||= external_crypto_namespaceObject.randomUUID();
+    return processStateId;
 }
-function parseSha256(content, assetName) {
-    const value = content.trim();
-    const match = value.match(/^([a-f0-9]{64})(?:\s+\*?(.+))?$/i);
-    if (!match) {
-        throw new Error(`Invalid SHA-256 checksum for ${assetName}`);
-    }
-    const [, digest, namedAsset] = match;
-    if (namedAsset && namedAsset !== assetName) {
-        throw new Error(`SHA-256 checksum names ${namedAsset}, expected ${assetName}`);
-    }
-    return digest.toLowerCase();
+function statePath(id = currentStateId()) {
+    const digest = external_crypto_namespaceObject.createHash('sha256').update(id).digest('hex');
+    return external_path_.join(external_os_.tmpdir(), `boringcache-one-lifecycle-${digest}.json`);
 }
-async function integrity_readSha256File(filePath, assetName) {
-    return parseSha256(await fs.promises.readFile(filePath, 'utf8'), assetName);
+function removeStateDocument(id) {
+    external_fs_namespaceObject.rmSync(statePath(id), { force: true });
 }
-async function integrity_verifySha256(filePath, expectedDigest, assetName) {
-    if (!SHA256_PATTERN.test(expectedDigest)) {
-        throw new Error(`Invalid expected SHA-256 digest for ${assetName}`);
-    }
-    const actualDigest = await sha256File(filePath);
-    if (actualDigest !== expectedDigest.toLowerCase()) {
-        throw new Error(`SHA-256 verification failed for ${assetName}: expected ${expectedDigest.toLowerCase()}, got ${actualDigest}`);
-    }
+function emptyDocument() {
+    return { schema_version: STATE_SCHEMA, values: {} };
 }
-
-;// CONCATENATED MODULE: ./dist/core/managed-tools.js
-
-
-
-
-
-
-
-const ADAPTER_BINARIES = {
-    buildkit: ['buildctl'],
-    cargo: ['sccache'],
-    ccache: ['ccache', 'ccache-storage-http'],
-    sccache: ['sccache'],
-};
-async function managed_tools_ensureAdapterTools(adapter, versions, runCli, workingDirectory) {
-    const requirements = await resolveRequiredTools(adapter, versions, runCli, workingDirectory);
-    if (requirements) {
-        await installRequiredTools(requirements);
-        return;
+function readDocument() {
+    const filePath = statePath();
+    if (!external_fs_namespaceObject.existsSync(filePath)) {
+        return emptyDocument();
     }
-    await requireAdapterBinariesOnPath(adapter);
+    const stat = external_fs_namespaceObject.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_STATE_BYTES) {
+        throw new Error('The BoringCache lifecycle state document is invalid.');
+    }
+    const parsed = JSON.parse(external_fs_namespaceObject.readFileSync(filePath, 'utf8'));
+    if (!parsed
+        || typeof parsed !== 'object'
+        || Array.isArray(parsed)
+        || parsed.schema_version !== STATE_SCHEMA
+        || typeof parsed.values !== 'object'
+        || Array.isArray(parsed.values)) {
+        throw new Error(`Unsupported BoringCache lifecycle state; expected ${STATE_SCHEMA}.`);
+    }
+    const values = parsed.values;
+    if (Object.values(values).some((value) => typeof value !== 'string')) {
+        throw new Error('The BoringCache lifecycle state document contains a non-string value.');
+    }
+    return { schema_version: STATE_SCHEMA, values };
 }
-async function resolveRequiredTools(adapter, versions, runCli, workingDirectory) {
-    const args = ['system', 'requirements', adapter];
-    for (const [tool, version] of Object.entries(versions)) {
-        if (version.trim()) {
-            args.push('--tool-version', `${tool}=${version.trim()}`);
-        }
+function writeDocument(document) {
+    const filePath = statePath();
+    const body = `${JSON.stringify(document)}\n`;
+    if (Buffer.byteLength(body) > MAX_STATE_BYTES) {
+        throw new Error('The BoringCache lifecycle state document exceeds its 256 KiB limit.');
     }
-    args.push('--json');
-    let stdout = '';
-    let stderr = '';
-    let exitCode;
+    const temporaryPath = `${filePath}.${process.pid}.${external_crypto_namespaceObject.randomUUID()}.tmp`;
+    external_fs_namespaceObject.writeFileSync(temporaryPath, body, { mode: 0o600 });
     try {
-        exitCode = await runCli(args, {
-            ignoreReturnCode: true,
-            silent: true,
-            cwd: workingDirectory,
-            listeners: {
-                stdout: (data) => {
-                    stdout += data.toString();
-                },
-                stderr: (data) => {
-                    stderr += data.toString();
-                },
-            },
-        });
-    }
-    catch (error) {
-        throw new Error(`Unable to ask the BoringCache CLI for ${adapter} tool requirements: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    if (unsupportedRequirementsCommand(exitCode, stderr)) {
-        return null;
-    }
-    if (exitCode !== 0) {
-        throw new Error(`The BoringCache CLI could not resolve ${adapter} tool requirements (exit ${exitCode})`
-            + `${stderr.trim() ? `: ${stderr.trim()}` : '.'}`);
-    }
-    if (!stdout.trim()) {
-        throw new Error(`The BoringCache CLI returned no ${adapter} tool requirements.`);
-    }
-    try {
-        const response = JSON.parse(stdout);
-        if (response.schema_version !== 1 || !Array.isArray(response.adapters)) {
-            throw new Error('expected schema_version 1 and an adapters array');
-        }
-        const selected = response.adapters.filter((entry) => entry.adapter === adapter);
-        if (selected.length !== 1 || !Array.isArray(selected[0].required_tools)) {
-            throw new Error(`expected exactly one ${adapter} requirement entry`);
-        }
-        selected[0].required_tools.forEach((requirement) => validateResolvedRequirement(requirement, adapter));
-        return selected[0].required_tools;
-    }
-    catch (error) {
-        throw new Error(`The BoringCache CLI returned invalid ${adapter} tool requirements: ${error instanceof Error ? error.message : String(error)}`);
-    }
-}
-function unsupportedRequirementsCommand(exitCode, stderr) {
-    return exitCode === 2
-        && /unrecognized subcommand\s+['"`](?:system|requirements)['"`]/i.test(stderr);
-}
-function validateResolvedRequirement(requirement, adapter) {
-    if (!requirement || typeof requirement !== 'object') {
-        throw new Error('required_tools entries must be objects');
-    }
-    for (const field of ['name', 'binary', 'version', 'required_by']) {
-        if (typeof requirement[field] !== 'string' || !requirement[field].trim()) {
-            throw new Error(`required tool ${field} must be a non-empty string`);
-        }
-    }
-    if (requirement.schema_version !== 1) {
-        throw new Error(`required tool ${requirement.name} has unsupported schema_version`);
-    }
-    if (requirement.installed_check !== 'presence' && requirement.installed_check !== 'version') {
-        throw new Error(`required tool ${requirement.name} has an unsupported installed_check`);
-    }
-    if (requirement.required_by !== adapter) {
-        throw new Error(`required tool ${requirement.name} belongs to ${requirement.required_by}, not ${adapter}`);
-    }
-    const resolution = requirement.resolution;
-    if (!resolution || typeof resolution !== 'object' || typeof resolution.installed !== 'boolean') {
-        throw new Error(`required tool ${requirement.name} has an invalid resolution`);
-    }
-    if (typeof resolution.host !== 'string' || !resolution.host.trim()) {
-        throw new Error(`required tool ${requirement.name} has no host resolution`);
-    }
-    if (resolution.installed && (typeof resolution.path !== 'string' || !resolution.path.trim())) {
-        throw new Error(`installed tool ${requirement.name} has no executable path`);
-    }
-    if (resolution.unsupported_reason !== undefined
-        && (typeof resolution.unsupported_reason !== 'string' || !resolution.unsupported_reason.trim())) {
-        throw new Error(`required tool ${requirement.name} has an invalid unsupported reason`);
-    }
-    if (resolution.install) {
-        const install = resolution.install;
-        if (install.source !== 'github-release'
-            || !install.repository
-            || !install.tag
-            || !install.asset
-            || !Array.isArray(install.binary_path)
-            || install.binary_path.length === 0
-            || install.binary_path.some((component) => typeof component !== 'string' || !component.trim())
-            || (install.archive !== 'tar-gz' && install.archive !== 'zip')
-            || (!install.sha256 && !install.checksum_asset)
-            || (install.sha256 !== undefined && !/^[a-f0-9]{64}$/i.test(install.sha256))
-            || (install.checksum_asset !== undefined
-                && (typeof install.checksum_asset !== 'string' || !install.checksum_asset.trim()))) {
-            throw new Error(`required tool ${requirement.name} has an invalid verified release descriptor`);
-        }
-    }
-    if (!resolution.installed && !resolution.install && !resolution.unsupported_reason) {
-        throw new Error(`required tool ${requirement.name} has no installation or unsupported result`);
-    }
-}
-async function installRequiredTools(requirements) {
-    if (requirements.length === 0) {
-        return;
-    }
-    addLocalBinPaths();
-    for (const requirement of requirements) {
-        await installRequiredTool(requirement);
-    }
-}
-async function installRequiredTool(requirement) {
-    if (requirement.resolution.installed) {
-        core.info(`Using existing ${requirement.name} from ${requirement.resolution.path || 'PATH'}`);
-        return;
-    }
-    const { install, unsupported_reason: unsupportedReason } = requirement.resolution;
-    if (!install) {
-        throw new Error(unsupportedReason
-            || `${requirement.name} ${requirement.version} is required by ${requirement.required_by} but has no installable release for this runner.`);
-    }
-    core.info(`Installing ${requirement.name} ${requirement.version} for ${requirement.required_by}...`);
-    await installGithubRelease(install, requirement.binary);
-}
-async function requireAdapterBinariesOnPath(adapter) {
-    addLocalBinPaths();
-    const binaries = ADAPTER_BINARIES[adapter] || [];
-    const missing = [];
-    for (const binary of binaries) {
-        if (!(await isOnPath(binary))) {
-            missing.push(binary);
-        }
-    }
-    if (missing.length > 0) {
-        throw new Error(`This BoringCache CLI cannot report the managed tools that ${adapter} needs. `
-            + `Install ${missing.join(' and ')} on PATH, or use a CLI that supports "boringcache system requirements".`);
-    }
-}
-async function isOnPath(binary) {
-    try {
-        return (await exec.exec(binary, ['--version'], { ignoreReturnCode: true, silent: true })) === 0;
-    }
-    catch {
-        return false;
-    }
-}
-function releasePaths(extractionDirectory, installDirectory, binaryPath, executableName) {
-    const safeSegments = binaryPath.map((segment) => safePathComponent('binary path segment', segment));
-    const safeExecutableName = safePathComponent('executable name', executableName);
-    const sourcePath = path.resolve(extractionDirectory, ...safeSegments.slice(0, -1), safeExecutableName);
-    const destinationPath = path.resolve(installDirectory, safeExecutableName);
-    if (!isPathInside(extractionDirectory, sourcePath)) {
-        throw new Error(`Verified release source escapes its extraction directory: ${sourcePath}`);
-    }
-    if (!isPathInside(installDirectory, destinationPath)) {
-        throw new Error(`Verified release destination escapes its install directory: ${destinationPath}`);
-    }
-    return { sourcePath, destinationPath };
-}
-async function resolveVerifiedReleaseSource(extractionDirectory, sourcePath) {
-    const [physicalExtractionDirectory, physicalSourcePath] = await Promise.all([
-        fs.promises.realpath(extractionDirectory),
-        fs.promises.realpath(sourcePath),
-    ]);
-    if (!isPathInside(physicalExtractionDirectory, physicalSourcePath)) {
-        throw new Error(`Verified release source resolves outside its extraction directory: ${sourcePath}`);
-    }
-    return physicalSourcePath;
-}
-function secureCurlArgs(output, url) {
-    return [
-        '--fail',
-        '--silent',
-        '--show-error',
-        '--location',
-        '--proto',
-        '=https',
-        '--proto-redir',
-        '=https',
-        '--retry',
-        '3',
-        '--output',
-        output,
-        url,
-    ];
-}
-async function download(url, destination, label) {
-    const exitCode = await exec.exec('curl', secureCurlArgs(destination, url), {
-        ignoreReturnCode: true,
-    });
-    if (exitCode !== 0) {
-        throw new Error(`Failed to download ${label} from ${url}`);
-    }
-}
-async function installGithubRelease(install, binaryName) {
-    const asset = safePathComponent('asset name', install.asset);
-    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-release-'));
-    const archivePath = path.resolve(tempDir, asset);
-    const baseUrl = `https://github.com/${install.repository}/releases/download/${install.tag}`;
-    let installDir = null;
-    let installed = false;
-    try {
-        await download(`${baseUrl}/${asset}`, archivePath, binaryName);
-        await verifySha256(archivePath, await expectedDigest(install, tempDir, baseUrl, asset), asset);
-        await extract(install.archive, archivePath, tempDir);
-        installDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-tool-'));
-        const executableName = process.platform === 'win32' ? `${binaryName}.exe` : binaryName;
-        const { sourcePath, destinationPath } = releasePaths(tempDir, installDir, install.binary_path, executableName);
-        const physicalSourcePath = await resolveVerifiedReleaseSource(tempDir, sourcePath);
-        const sourceStat = await fs.promises.stat(physicalSourcePath);
-        if (!sourceStat.isFile()) {
-            throw new Error(`Verified release executable is not a regular file: ${sourcePath}`);
-        }
-        // The source archive is SHA-256 verified and both physical source and
-        // unique destination are bounded to Action-owned temporary directories.
-        // codeql[js/path-injection]
-        await fs.promises.copyFile(physicalSourcePath, destinationPath, fs.constants.COPYFILE_EXCL);
-        if (process.platform !== 'win32') {
-            // codeql[js/path-injection]
-            await fs.promises.chmod(destinationPath, 0o755);
-        }
-        core.addPath(installDir);
-        installed = true;
+        external_fs_namespaceObject.renameSync(temporaryPath, filePath);
     }
     finally {
-        await fs.promises.rm(tempDir, { recursive: true, force: true });
-        if (installDir && !installed) {
-            await fs.promises.rm(installDir, { recursive: true, force: true });
-        }
+        external_fs_namespaceObject.rmSync(temporaryPath, { force: true });
+    }
+    saveState(STATE_ID_KEY, currentStateId());
+}
+function getActionState(key) {
+    return readDocument().values[key] || '';
+}
+function lifecycle_state_saveActionState(key, value) {
+    const document = readDocument();
+    document.values[key] = value;
+    writeDocument(document);
+}
+function removeActionStateDocument() {
+    const id = ((getState(STATE_ID_KEY) || processStateId) ?? '').trim();
+    if (id) {
+        removeStateDocument(id);
+    }
+    processStateId = undefined;
+}
+function lifecycleStateIdForTests(values, id = crypto.randomUUID()) {
+    const previous = processStateId;
+    processStateId = id;
+    writeDocument({ schema_version: STATE_SCHEMA, values });
+    processStateId = previous;
+    return id;
+}
+function lifecycleStateForTests(id) {
+    const previous = processStateId;
+    processStateId = id;
+    try {
+        return { ...readDocument().values };
+    }
+    finally {
+        processStateId = previous;
     }
 }
-async function expectedDigest(install, tempDir, baseUrl, asset) {
-    if (install.sha256) {
-        return install.sha256;
+function resetLifecycleStateForTests() {
+    if (processStateId) {
+        removeStateDocument(processStateId);
     }
-    const checksumAsset = safePathComponent('checksum asset name', install.checksum_asset || `${asset}.sha256`);
-    const checksumPath = path.resolve(tempDir, checksumAsset);
-    await download(`${baseUrl}/${checksumAsset}`, checksumPath, `${asset} checksum`);
-    return readSha256File(checksumPath, asset);
-}
-async function extract(archive, archivePath, destination) {
-    if (archive === 'zip') {
-        await exec.exec('unzip', ['-q', archivePath, '-d', destination]);
-        return;
-    }
-    await exec.exec('tar', ['-xzf', archivePath, '-C', destination]);
+    processStateId = undefined;
 }
 
 ;// CONCATENATED MODULE: ./dist/core/index.js
-
 
 
 
@@ -105027,15 +104046,38 @@ function evidenceSecretValues() {
     const secretNamePattern = /(TOKEN|SECRET|PASSWORD|PASS|PRIVATE|CREDENTIAL|AUTH|KEY)/i;
     const values = new Set();
     for (const [name, value] of Object.entries(process.env)) {
-        if (!value || value.length < 4 || !secretNamePattern.test(name)) {
+        if (!value || value.length < 4 || !secretNamePattern.test(name) || isLocalProxyPlaceholder(name, value)) {
             continue;
         }
         values.add(value);
     }
     return Array.from(values).sort((a, b) => b.length - a.length);
 }
+function isLocalProxyPlaceholder(name, value) {
+    if (value !== 'boringcache') {
+        return false;
+    }
+    const endpointName = name === 'TURBO_TOKEN'
+        ? 'TURBO_API'
+        : name === 'NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN'
+            ? 'NX_SELF_HOSTED_REMOTE_CACHE_SERVER'
+            : '';
+    const endpoint = endpointName ? process.env[endpointName] : '';
+    if (!endpoint) {
+        return false;
+    }
+    try {
+        const url = new URL(endpoint);
+        return url.protocol === 'http:'
+            && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    }
+    catch {
+        return false;
+    }
+}
 
 ;// CONCATENATED MODULE: ./dist/core/diagnostics.js
+
 
 
 
@@ -105084,9 +104126,9 @@ function resolveDiagnosticsConfig(mode, logLines) {
     };
 }
 function loadDiagnosticsConfig(inputs) {
-    const savedLevel = (getState('diagnostics-level') || '').trim().toLowerCase();
+    const savedLevel = (getActionState('diagnostics-level') || '').trim().toLowerCase();
     if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
-        const savedLogLines = normalizeDiagnosticsLogLines((getState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
+        const savedLogLines = normalizeDiagnosticsLogLines((getActionState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
         return {
             level: savedLevel,
             enabled: savedLevel !== 'off',
@@ -105148,473 +104190,347 @@ function readLogTail(filePath, maxLines) {
     }
 }
 
-;// CONCATENATED MODULE: ./dist/core/runtime-tools.js
-
-
-
-
-function normalizeSetup(value) {
-    switch ((value || 'none').trim().toLowerCase()) {
-        case 'mise':
-        case 'none':
-            return (value || 'none').trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported setup "${value}". Expected mise or none.`);
-    }
-}
-const TOOL_LABELS = {
-    bazel: 'Bazel',
-    bun: 'Bun',
-    composer: 'Composer',
-    ccache: 'ccache',
-    elixir: 'Elixir',
-    erlang: 'Erlang',
-    go: 'Go',
-    gradle: 'Gradle',
-    java: 'Java',
-    maven: 'Maven',
-    node: 'Node.js',
-    nodejs: 'Node.js',
-    npm: 'npm',
-    pnpm: 'pnpm',
-    php: 'PHP',
-    python: 'Python',
-    ruby: 'Ruby',
-    rust: 'Rust',
-    turbo: 'Turbo',
-    uv: 'uv',
-    yarn: 'Yarn',
+;// CONCATENATED MODULE: ./dist/modes.js
+const MODE_SPECS = {
+    archive: {
+        resolved: 'archive',
+        implemented: true,
+        description: 'Opaque tar archive caching from a CLI-owned repo profile.',
+    },
+    docker: {
+        resolved: 'docker',
+        implemented: true,
+        description: 'Docker layer and registry-backed cache integration.',
+    },
+    buildkit: {
+        resolved: 'buildkit',
+        implemented: true,
+        description: 'BuildKit remote cache integration.',
+    },
+    bazel: {
+        resolved: 'bazel',
+        implemented: true,
+        description: 'Bazel remote cache proxy integration.',
+    },
+    cargo: {
+        resolved: 'cargo',
+        implemented: true,
+        description: 'Cargo target, dependency, and compiler cache lifecycle.',
+    },
+    ccache: {
+        resolved: 'ccache',
+        implemented: true,
+        description: 'C and C++ ccache proxy integration.',
+    },
+    go: {
+        resolved: 'go',
+        implemented: true,
+        description: 'Go GOCACHEPROG proxy integration.',
+    },
+    gradle: {
+        resolved: 'gradle',
+        implemented: true,
+        description: 'Gradle build cache proxy integration.',
+    },
+    gha: {
+        resolved: 'gha',
+        implemented: true,
+        description: 'GitHub Actions cache and artifact compatibility through a runner-local adapter.',
+    },
+    maven: {
+        resolved: 'maven',
+        implemented: true,
+        description: 'Maven build cache proxy integration.',
+    },
+    nix: {
+        resolved: 'nix',
+        implemented: true,
+        description: 'Nix HTTP binary-cache integration.',
+    },
+    nx: {
+        resolved: 'nx',
+        implemented: true,
+        description: 'Nx self-hosted remote cache proxy integration.',
+    },
+    sccache: {
+        resolved: 'sccache',
+        implemented: true,
+        description: 'Rust sccache proxy integration.',
+    },
+    turbo: {
+        resolved: 'turbo',
+        implemented: true,
+        description: 'Turbo remote cache proxy integration.',
+    },
+    xcode: {
+        resolved: 'xcode',
+        implemented: true,
+        description: 'Xcode and Swift/Clang compilation cache integration on macOS.',
+    },
 };
-function parseToolSpecs(input) {
-    return input
-        .split(/\r?\n|,/)
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .map((entry) => {
-        const atIndex = entry.lastIndexOf('@');
-        if (atIndex <= 0 || atIndex === entry.length - 1) {
-            throw new Error(`Invalid tool spec "${entry}". Expected format tool@version.`);
-        }
-        const name = runtime_tools_normalizeToolName(entry.slice(0, atIndex));
-        const version = entry.slice(atIndex + 1).trim();
-        return {
-            name,
-            version,
-            label: TOOL_LABELS[name] || name,
-            source: 'input',
-        };
-    });
-}
-async function resolveRuntimeTools(setup, mode, toolsInput, workingDirectory) {
-    if (setup !== 'mise') {
-        return [];
-    }
-    const explicitTools = parseToolSpecs(toolsInput);
-    const projectTools = await detectProjectTools(workingDirectory);
-    const modeTools = await detectModeTools(mode, workingDirectory);
-    return mergeTools(explicitTools, projectTools, modeTools);
-}
-async function detectProjectTools(workingDirectory) {
-    const tools = new Map();
-    for (const tool of await readProjectMiseTools(workingDirectory)) {
-        const normalizedName = runtime_tools_normalizeToolName(tool.name);
-        tools.set(normalizedName, {
-            name: normalizedName,
-            version: tool.version,
-            label: TOOL_LABELS[normalizedName] || tool.name,
-            source: 'project',
-        });
-    }
-    const detectedTools = await Promise.all([
-        detectToolFromProjectFiles(workingDirectory, 'ruby', detectRubyVersion),
-        detectToolFromProjectFiles(workingDirectory, 'node', detectNodeVersion),
-        detectToolFromProjectFiles(workingDirectory, 'python', detectPythonVersion),
-        detectToolFromProjectFiles(workingDirectory, 'go', detectGoVersion),
-        detectToolFromProjectFiles(workingDirectory, 'java', detectJavaVersion),
-        detectToolFromProjectFiles(workingDirectory, 'maven', detectMavenVersion),
-        detectToolFromProjectFiles(workingDirectory, 'bazel', detectBazelVersion),
-        detectToolFromProjectFiles(workingDirectory, 'rust', detectRustVersion),
-    ]);
-    for (const tool of detectedTools) {
-        if (tool && !tools.has(tool.name)) {
-            tools.set(tool.name, tool);
-        }
-    }
-    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory);
-    if (packageManagerTool && !tools.has(packageManagerTool.name)) {
-        tools.set(packageManagerTool.name, packageManagerTool);
-    }
-    return Array.from(tools.values());
-}
-async function detectModeTools(mode, workingDirectory) {
-    switch (mode) {
-        case 'turbo':
-        case 'nx':
-            return detectNodeTurboTools(workingDirectory);
+function normalizeMode(value) {
+    const normalized = (value || 'archive').trim().toLowerCase();
+    switch (normalized) {
+        case 'archive':
+        case 'docker':
+        case 'buildkit':
         case 'bazel':
-            return detectBazelTools(workingDirectory);
-        case 'go':
-            return detectGoTools(workingDirectory);
-        case 'gradle':
-            return detectGradleTools(workingDirectory);
-        case 'maven':
-            return detectMavenTools(workingDirectory);
+        case 'cargo':
         case 'ccache':
-            return [];
+        case 'go':
+        case 'gradle':
+        case 'gha':
+        case 'maven':
+        case 'nix':
+        case 'nx':
         case 'sccache':
-            return detectRustTools(workingDirectory);
+        case 'turbo':
+        case 'xcode':
+            return normalized;
         default:
-            return [];
+            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, cargo, ccache, gha, go, gradle, maven, nix, nx, sccache, turbo, or xcode.`);
     }
 }
-async function detectNodeTools(workingDirectory) {
-    const tools = [];
-    const nodeVersion = await detectNodeVersion(workingDirectory);
-    if (nodeVersion) {
-        tools.push({ name: 'node', version: nodeVersion, label: 'Node.js', source: 'mode' });
-    }
-    const packageManagerTool = await detectNodePackageManagerTool(workingDirectory, 'mode');
-    if (packageManagerTool) {
-        tools.push(packageManagerTool);
-    }
-    return tools;
-}
-async function detectNodeTurboTools(workingDirectory) {
-    return detectNodeTools(workingDirectory);
-}
-async function detectGoTools(workingDirectory) {
-    const goVersion = await detectGoVersion(workingDirectory);
-    if (!goVersion) {
-        return [];
-    }
-    return [{ name: 'go', version: goVersion, label: 'Go', source: 'mode' }];
-}
-async function detectBazelTools(workingDirectory) {
-    const bazelVersion = await detectBazelVersion(workingDirectory);
-    if (!bazelVersion) {
-        return [];
-    }
-    return [{ name: 'bazel', version: bazelVersion, label: 'Bazel', source: 'mode' }];
-}
-async function detectGradleTools(workingDirectory) {
-    const javaVersion = await detectJavaVersion(workingDirectory);
-    if (!javaVersion) {
-        return [];
-    }
-    return [{ name: 'java', version: javaVersion, label: 'Java', source: 'mode' }];
-}
-async function detectMavenTools(workingDirectory) {
-    const tools = [];
-    const javaVersion = await detectJavaVersion(workingDirectory);
-    if (javaVersion) {
-        tools.push({ name: 'java', version: javaVersion, label: 'Java', source: 'mode' });
-    }
-    const mavenVersion = await detectMavenVersion(workingDirectory);
-    if (mavenVersion) {
-        tools.push({ name: 'maven', version: mavenVersion, label: 'Maven', source: 'mode' });
-    }
-    return tools;
-}
-async function detectRustTools(workingDirectory) {
-    const rustVersion = await detectRustVersion(workingDirectory);
-    if (!rustVersion) {
-        return [];
-    }
-    return [{ name: 'rust', version: rustVersion, label: 'Rust', source: 'mode' }];
-}
-async function detectRubyVersion(workingDirectory) {
-    const rubyVersion = await readFirstLine(external_path_.join(workingDirectory, '.ruby-version'));
-    if (rubyVersion) {
-        return rubyVersion;
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'ruby');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'ruby');
-}
-async function detectNodeVersion(workingDirectory) {
-    const nodeVersion = await readFirstLine(external_path_.join(workingDirectory, '.node-version'));
-    if (nodeVersion) {
-        return nodeVersion.replace(/^v/, '');
-    }
-    const nvmVersion = await readFirstLine(external_path_.join(workingDirectory, '.nvmrc'));
-    if (nvmVersion) {
-        return nvmVersion.replace(/^v/, '');
-    }
-    const toolVersion = (await readToolVersionsValue(workingDirectory, 'nodejs'))
-        || (await readToolVersionsValue(workingDirectory, 'node'));
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return (await readMiseTomlVersion(workingDirectory, 'node'))
-        || (await readMiseTomlVersion(workingDirectory, 'nodejs'));
-}
-async function detectBazelVersion(workingDirectory) {
-    const bazelVersion = await readFirstLine(external_path_.join(workingDirectory, '.bazelversion'));
-    if (bazelVersion) {
-        return bazelVersion;
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'bazel');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'bazel');
-}
-async function detectPythonVersion(workingDirectory) {
-    const pythonVersion = await readFirstLine(external_path_.join(workingDirectory, '.python-version'));
-    if (pythonVersion) {
-        return pythonVersion;
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'python');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'python');
-}
-async function detectGoVersion(workingDirectory) {
-    const goVersion = await readFirstLine(external_path_.join(workingDirectory, '.go-version'));
-    if (goVersion) {
-        return goVersion;
-    }
-    const toolVersion = (await readToolVersionsValue(workingDirectory, 'go'))
-        || (await readToolVersionsValue(workingDirectory, 'golang'));
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return (await readMiseTomlVersion(workingDirectory, 'go'))
-        || (await readMiseTomlVersion(workingDirectory, 'golang'));
-}
-async function detectJavaVersion(workingDirectory) {
-    const javaVersion = await readFirstLine(external_path_.join(workingDirectory, '.java-version'));
-    if (javaVersion) {
-        return javaVersion;
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'java');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    const miseVersion = await readMiseTomlVersion(workingDirectory, 'java');
-    if (miseVersion) {
-        return miseVersion;
-    }
-    const pomXml = await readFile(external_path_.join(workingDirectory, 'pom.xml'));
-    if (pomXml) {
-        const pomMatch = pomXml.match(/<maven\.compiler\.(?:release|source|target)>\s*([^<\s]+)\s*<\/maven\.compiler\.(?:release|source|target)>/)
-            || pomXml.match(/<java\.version>\s*([^<\s]+)\s*<\/java\.version>/);
-        if (pomMatch?.[1]) {
-            return pomMatch[1].trim();
-        }
-    }
-    return null;
-}
-async function detectMavenVersion(workingDirectory) {
-    const wrapperProps = await readFile(external_path_.join(workingDirectory, '.mvn', 'wrapper', 'maven-wrapper.properties'));
-    if (wrapperProps) {
-        const match = wrapperProps.match(/apache-maven-([0-9]+(?:\.[0-9]+)*)-bin/i);
-        if (match?.[1]) {
-            return match[1];
-        }
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'maven');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'maven');
-}
-async function detectRustVersion(workingDirectory) {
-    const rustToolchainToml = await readFile(external_path_.join(workingDirectory, 'rust-toolchain.toml'));
-    if (rustToolchainToml) {
-        const match = rustToolchainToml.match(/channel\s*=\s*["']([^"']+)["']/);
-        if (match?.[1]) {
-            return match[1];
-        }
-    }
-    const rustToolchain = await readFirstLine(external_path_.join(workingDirectory, 'rust-toolchain'));
-    if (rustToolchain) {
-        return rustToolchain;
-    }
-    const toolVersion = await readToolVersionsValue(workingDirectory, 'rust');
-    if (toolVersion) {
-        return toolVersion;
-    }
-    return readMiseTomlVersion(workingDirectory, 'rust');
-}
-async function detectToolFromProjectFiles(workingDirectory, toolName, detector) {
-    const version = await detector(workingDirectory);
-    if (!version) {
-        return null;
-    }
+function modes_resolveModeSpec(mode) {
+    const spec = MODE_SPECS[mode];
     return {
-        name: runtime_tools_normalizeToolName(toolName),
-        version,
-        label: TOOL_LABELS[runtime_tools_normalizeToolName(toolName)] || toolName,
-        source: 'project',
+        requested: mode,
+        ...spec,
     };
 }
-async function readFirstLine(filePath) {
-    try {
-        const content = await external_fs_namespaceObject.promises.readFile(filePath, 'utf-8');
-        const line = content.split('\n').map((value) => value.trim()).find(Boolean);
-        return line || null;
+function modes_assertImplementedMode(modeSpec) {
+    if (modeSpec.implemented) {
+        return;
     }
-    catch {
-        return null;
-    }
+    throw new Error(`mode=${modeSpec.resolved} is planned for boringcache/one but not implemented yet. ` +
+        `Use the BoringCache CLI directly until this adapter lands.`);
 }
-async function readFile(filePath) {
-    try {
-        return await external_fs_namespaceObject.promises.readFile(filePath, 'utf-8');
-    }
-    catch {
-        return null;
-    }
-}
-async function readPackageJson(workingDirectory) {
-    const packageJson = await readFile(external_path_.join(workingDirectory, 'package.json'));
-    if (!packageJson) {
-        return null;
-    }
-    try {
-        return JSON.parse(packageJson);
-    }
-    catch {
-        return null;
-    }
-}
-function normalizePackageManagerName(name) {
-    const normalized = name.trim().toLowerCase();
-    if (normalized === 'npm' || normalized === 'pnpm' || normalized === 'yarn') {
-        return normalized;
-    }
-    return null;
-}
-function packageManagerCacheDir(workingDirectory, name) {
-    switch (name) {
-        case 'pnpm':
-            return external_path_.join(workingDirectory, '.pnpm-store');
-        case 'yarn':
-            return external_path_.join(workingDirectory, '.yarn-cache');
-        case 'npm':
-            return external_path_.join(workingDirectory, '.npm-cache');
-    }
-}
-async function runtime_tools_detectNodePackageManager(workingDirectory) {
-    const packageJson = await readPackageJson(workingDirectory);
-    const packageManagerField = typeof packageJson?.packageManager === 'string'
-        ? packageJson.packageManager.trim()
-        : '';
-    let name = null;
-    let version = null;
-    if (packageManagerField) {
-        const atIndex = packageManagerField.lastIndexOf('@');
-        if (atIndex > 0) {
-            name = normalizePackageManagerName(packageManagerField.slice(0, atIndex));
-            version = packageManagerField.slice(atIndex + 1).trim().split('+')[0] || null;
-        }
-    }
-    if (!name) {
-        if (await pathExists(external_path_.join(workingDirectory, 'pnpm-lock.yaml'))) {
-            name = 'pnpm';
-        }
-        else if (await pathExists(external_path_.join(workingDirectory, 'yarn.lock'))) {
-            name = 'yarn';
-        }
-        else if (await pathExists(external_path_.join(workingDirectory, 'package-lock.json'))
-            || await pathExists(external_path_.join(workingDirectory, 'npm-shrinkwrap.json'))) {
-            name = 'npm';
-        }
-        else if (packageJson) {
-            name = 'npm';
-        }
-    }
-    if (!name) {
-        return null;
-    }
+
+;// CONCATENATED MODULE: ./dist/core/action-inputs.js
+
+
+
+
+
+const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+function getInputs() {
+    const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     return {
-        name,
-        version,
-        packageManagerField: packageManagerField || null,
-        cacheDir: packageManagerCacheDir(workingDirectory, name),
-        nodeModulesDir: external_path_.join(workingDirectory, 'node_modules'),
+        cliVersion: getInput('cli-version') || 'v1.20.0',
+        cliPlatform: getInput('cli-platform'),
+        mode: normalizeMode(getInput('mode')),
+        workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
+        trustPolicy: normalizeTrustPolicy(getInput('trust-policy') || 'auto'),
+        readOnly: false,
+        stage: false,
+        saveAlways: getBooleanInput('save-always'),
+        diagnostics,
+        diagnosticsLogLines: normalizeDiagnosticsLogLines('40'),
+        proxyPort: getInput('proxy-port'),
+        cacheProfiles: getInput('cache-profiles'),
+        failOnCacheMiss: getBooleanInput('fail-on-cache-miss'),
+        failOnCacheError: getBooleanInput('fail-on-cache-error'),
+        lookupOnly: getBooleanInput('lookup-only'),
+        verbose: diagnostics === 'verbose',
     };
 }
-async function detectNodePackageManagerTool(workingDirectory, source = 'project') {
-    const packageManager = await runtime_tools_detectNodePackageManager(workingDirectory);
-    if (!packageManager?.version) {
+function buildFlagArgs(inputs) {
+    const flagArgs = [];
+    if (inputs.failOnCacheMiss) {
+        flagArgs.push('--fail-on-cache-miss');
+    }
+    if (inputs.failOnCacheError) {
+        flagArgs.push('--fail-on-cache-error');
+    }
+    if (inputs.lookupOnly) {
+        flagArgs.push('--lookup-only');
+    }
+    if (inputs.verbose) {
+        flagArgs.push('--verbose');
+    }
+    if (!inputs.readOnly && !inputs.stage) {
+        flagArgs.push('--include-pr-tag');
+    }
+    return flagArgs;
+}
+
+;// CONCATENATED MODULE: ./dist/core/plan.js
+
+
+
+
+
+
+function splitEntriesInput(entries) {
+    const values = [];
+    let current = '';
+    for (let index = 0; index < entries.length; index += 1) {
+        const character = entries[index];
+        if (character === '\\' && entries[index + 1] === ',') {
+            current += ',';
+            index += 1;
+        }
+        else if (character === ',' || character === '\n') {
+            values.push(current);
+            current = '';
+        }
+        else if (character !== '\r') {
+            current += character;
+        }
+    }
+    values.push(current);
+    return values.filter((entry) => entry.trim());
+}
+function parseCliVersion(version) {
+    const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    if (!match) {
         return null;
     }
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+async function resolveCliCapabilityVersion(version) {
+    const requestedVersion = version.trim();
+    if (requestedVersion.toLowerCase() === 'skip' || parseCliVersion(requestedVersion)) {
+        return requestedVersion;
+    }
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await setup_execBoringCache(['--version'], {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    const output = `${stdout}\n${stderr}`;
+    const match = output.match(/\bboringcache\s+v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/i);
+    if (exitCode !== 0 || !match) {
+        throw new Error(`Unable to determine installed BoringCache CLI capabilities for cli-version '${requestedVersion || '(empty)'}'. `
+            + `Expected 'boringcache --version' to report a semantic version, but it exited ${exitCode}`
+            + `${output.trim() ? `: ${output.trim()}` : '.'}`);
+    }
+    return match[1];
+}
+function plan_appendCliPublicationPolicy(args, readOnly) {
+    args.push(readOnly ? '--read-only' : '--write');
+}
+async function runDryRunPlan(workingDirectory, options) {
+    const { profileNames = [], readOnly = false, noGit = false, } = options;
+    const executePlan = async () => {
+        const args = ['run'];
+        for (const profileName of profileNames) {
+            args.push('--profile', profileName);
+        }
+        if (noGit) {
+            args.push('--no-git');
+        }
+        plan_appendCliPublicationPolicy(args, readOnly);
+        args.push('--dry-run', '--json');
+        let stdout = '';
+        let stderr = '';
+        const exitCode = await exec.exec('boringcache', args, {
+            cwd: workingDirectory,
+            ignoreReturnCode: true,
+            silent: true,
+            listeners: {
+                stdout: (data) => {
+                    stdout += data.toString();
+                },
+                stderr: (data) => {
+                    stderr += data.toString();
+                },
+            },
+        });
+        if (exitCode !== 0) {
+            throw new Error(stderr.trim() || stdout.trim() || `boringcache run --dry-run --json exited with code ${exitCode}`);
+        }
+        try {
+            return JSON.parse(stdout);
+        }
+        catch (error) {
+            throw new Error(`Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    };
+    return executePlan();
+}
+async function buildArchiveEntries(inputs) {
+    const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
+    if (cacheProfiles.length === 0) {
+        return {
+            entries: '',
+            envVars: {},
+            verificationTags: [],
+        };
+    }
+    const plan = await runDryRunPlan(inputs.workingDirectory, {
+        profileNames: cacheProfiles,
+        readOnly: inputs.readOnly,
+        noGit: inputs.stage,
+    });
+    const firstEntry = plan.archive_entries?.[0];
+    const firstPair = plan.tag_path_pairs[0];
+    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
+        || (firstPair ? parseEntries(firstPair, 'restore', { separatorMode: 'single' })[0]?.tag : undefined);
+    const verificationTags = requireCliVerificationTags(plan.verification_tags, 'archive');
+    if (plan.tag_path_pairs.length > 0 && verificationTags.length === 0) {
+        throw new Error('The selected BoringCache CLI returned archive entries without exact verification tags.');
+    }
     return {
-        name: packageManager.name,
-        version: packageManager.version,
-        label: TOOL_LABELS[packageManager.name] || packageManager.name,
-        source,
+        entries: plan.tag_path_pairs.join('\n'),
+        envVars: plan.env_vars,
+        cacheTagPrefix,
+        workspace: plan.workspace,
+        verificationTags,
     };
 }
-async function pathExists(filePath) {
-    try {
-        await external_fs_namespaceObject.promises.access(filePath);
-        return true;
+function validateOneInputs(modeSpec, archiveEntries) {
+    if (modeSpec.resolved === 'archive' && !archiveEntries) {
+        throw new Error('Archive mode requires cache-profiles from the committed .boringcache.toml plan.');
     }
-    catch {
-        return false;
+    if (modeSpec.resolved !== 'archive' && archiveEntries) {
+        throw new Error(`cache-profiles belongs to mode=archive; use a separate archive Action step before mode=${modeSpec.resolved}.`);
     }
 }
-function mergeTools(...toolSets) {
-    const merged = new Map();
-    for (const toolSet of toolSets) {
-        for (const tool of toolSet) {
-            if (tool.source === 'input' || !merged.has(tool.name)) {
-                merged.set(tool.name, tool);
-            }
-        }
+async function buildPlan(inputs) {
+    const modeSpec = resolveModeSpec(inputs.mode);
+    assertImplementedMode(modeSpec);
+    const archiveEntries = await buildArchiveEntries(inputs);
+    validateOneInputs(modeSpec, archiveEntries.entries);
+    const workspace = archiveEntries.workspace || '';
+    if (!workspace && modeSpec.resolved === 'archive') {
+        throw new Error('The BoringCache CLI plan did not resolve a workspace. Set workspace in .boringcache.toml.');
     }
-    return Array.from(merged.values());
+    const cacheTagPrefix = getCacheTagPrefix(archiveEntries.cacheTagPrefix);
+    return {
+        workspace,
+        workingDirectory: inputs.workingDirectory,
+        mode: modeSpec.resolved,
+        modeSpec,
+        cacheTagPrefix,
+        envVars: archiveEntries.envVars,
+        archiveEntries: archiveEntries.entries,
+        archiveVerificationTags: archiveEntries.verificationTags,
+    };
 }
-function runtime_tools_normalizeToolName(name) {
-    const normalized = name.trim().toLowerCase();
-    if (normalized === 'nodejs') {
-        return 'node';
+function getCacheTagPrefix(resolvedArchivePrefix) {
+    if (resolvedArchivePrefix?.trim()) {
+        return resolvedArchivePrefix.trim();
     }
-    if (normalized === 'golang') {
-        return 'go';
-    }
-    return normalized;
+    return 'one';
 }
-async function applyMiseSetup(runtimeTools, cwd) {
-    if (runtimeTools.length === 0) {
-        return false;
+async function applyCliPlanEnv(plan) {
+    for (const [key, value] of Object.entries(plan.envVars)) {
+        core.exportVariable(key, value);
     }
-    const pathAvailable = new Map();
-    for (const tool of runtimeTools) {
-        const available = await hasToolVersionOnPath(tool.name, tool.version);
-        pathAvailable.set(`${tool.name}@${tool.version}`, available);
-        if (available) {
-            core.info(`Using existing ${tool.label} ${tool.version} from PATH`);
-        }
-    }
-    const unresolvedTools = runtimeTools.filter((tool) => !pathAvailable.get(`${tool.name}@${tool.version}`));
-    if (unresolvedTools.length === 0) {
-        return false;
-    }
-    await installMise();
-    for (const tool of unresolvedTools) {
-        if (await hasMiseToolVersion(tool.name, tool.version)) {
-            await activateMiseTool(tool.name, tool.version, { label: tool.label });
-        }
-        else {
-            await installMiseTool(tool.name, tool.version, { label: tool.label });
-        }
-    }
-    await reshimMise();
-    await exportMiseEnv(cwd);
-    return true;
-}
-function serializeTools(runtimeTools) {
-    return runtimeTools.map((tool) => `${tool.name}@${tool.version}`).join('\n');
 }
 
 ;// CONCATENATED MODULE: ./dist/core/evidence.js
+
 
 
 
@@ -105782,7 +104698,7 @@ function writeActionEvidence(phase, payload, productRefs) {
     try {
         external_fs_namespaceObject.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
         setOutput('evidence-path', evidencePath);
-        saveState('evidence-id', currentEvidenceId());
+        lifecycle_state_saveActionState('evidence-id', currentEvidenceId());
         return evidencePath;
     }
     catch (error) {
@@ -105806,7 +104722,7 @@ function actionErrorMessage(error) {
 // Hashing it into a basename keeps state and environment values out of filesystem
 // path expressions while still letting post reopen the main process's envelope.
 function currentEvidenceId() {
-    const savedEvidenceId = (getState('evidence-id') || '').trim();
+    const savedEvidenceId = (getActionState('evidence-id') || '').trim();
     if (savedEvidenceId) {
         return savedEvidenceId;
     }
@@ -105879,665 +104795,6 @@ function sanitizeEvidenceValue(value) {
         ]));
     }
     return value;
-}
-
-;// CONCATENATED MODULE: ./dist/core/verification.js
-
-
-
-
-
-const DEFAULT_VERIFY_TIMEOUT_SECONDS = 180;
-const MAX_VERIFY_TIMEOUT_SECONDS = 900;
-const MAX_VERIFY_CHECK_ATTEMPT_SECONDS = 30;
-function normalizeVerifyMode(value) {
-    const normalized = (value || 'none').trim().toLowerCase();
-    switch (normalized) {
-        case 'none':
-        case 'check':
-        case 'wait':
-        case 'warn':
-            return normalized;
-        default:
-            throw new Error(`Unsupported verify mode "${value}". Expected none, check, wait, or warn.`);
-    }
-}
-function normalizeVerifyTimeoutSeconds(value) {
-    if (!value || !value.trim()) {
-        return DEFAULT_VERIFY_TIMEOUT_SECONDS;
-    }
-    const parsed = parsePositiveIntegerInput(value, 'verify-timeout-seconds');
-    if (parsed > MAX_VERIFY_TIMEOUT_SECONDS) {
-        warning(`verify-timeout-seconds "${value}" is too high; waiting at most ${MAX_VERIFY_TIMEOUT_SECONDS}s to keep verification bounded.`);
-        return MAX_VERIFY_TIMEOUT_SECONDS;
-    }
-    return parsed;
-}
-function envWithOverrides(overrides) {
-    const env = {};
-    for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) {
-            env[key] = value;
-        }
-    }
-    return { ...env, ...overrides };
-}
-function groupVerificationSpecs(specs) {
-    const batch = {
-        tags: [],
-        saveExpectedTags: new Set(),
-    };
-    for (const spec of specs) {
-        if (!batch.tags.includes(spec.tag)) {
-            batch.tags.push(spec.tag);
-        }
-        if (spec.saveExpected) {
-            batch.saveExpectedTags.add(spec.tag);
-        }
-    }
-    return batch.tags.length > 0 ? [batch] : [];
-}
-async function runTagCheck(workspace, batch, options, timeoutSeconds) {
-    const acceptedPendingTags = options.acceptPendingSaveExpected ? batch.saveExpectedTags : new Set();
-    const shouldParseCheckJson = acceptedPendingTags.size > 0;
-    const args = [];
-    if (options.verbose) {
-        args.push('--verbose');
-    }
-    if (options.requireServerSignature) {
-        args.push('--require-server-signature');
-    }
-    args.push('check', workspace, batch.tags.join(','));
-    // The CLI plan already resolved platform and Git scope. Verification checks
-    // those exact opaque tags rather than asking the Action to plan them again.
-    args.push('--no-platform', '--no-git');
-    args.push('--exact', '--fail-on-miss');
-    if (shouldParseCheckJson) {
-        args.push('--json');
-    }
-    let env;
-    if (!options.requireServerSignature) {
-        env = envWithOverrides({ BORINGCACHE_REQUIRE_SERVER_SIGNATURE: '0' });
-    }
-    const result = await runBoringcacheCheckWithTimeout(args, timeoutSeconds, env);
-    if (result.exitCode !== 0 && shouldParseCheckJson) {
-        const acceptedTags = pendingOnlyForAcceptedSaveTags(result.stdout, acceptedPendingTags);
-        if (acceptedTags.length > 0) {
-            info(`Accepted pending save verification for tags: ${acceptedTags.join(', ')}`);
-            return { ...result, exitCode: 0 };
-        }
-    }
-    return result;
-}
-async function runBoringcacheCheckWithTimeout(args, timeoutSeconds, env) {
-    const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
-    const outputLimit = 1024 * 1024;
-    return new Promise((resolve) => {
-        let stdout = '';
-        let stderr = '';
-        let settled = false;
-        let timedOut = false;
-        let killTimer;
-        let timeoutTimer;
-        const finish = (result) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            if (timeoutTimer) {
-                external_timers_namespaceObject.clearTimeout(timeoutTimer);
-            }
-            if (killTimer) {
-                external_timers_namespaceObject.clearTimeout(killTimer);
-            }
-            resolve({
-                ...result,
-                stdout: result.stdout.trim(),
-                stderr: result.stderr.trim(),
-            });
-        };
-        const appendOutput = (current, data) => {
-            const next = current + data.toString();
-            if (next.length <= outputLimit) {
-                return next;
-            }
-            return next.slice(next.length - outputLimit);
-        };
-        let child;
-        try {
-            child = external_child_process_namespaceObject.spawn('boringcache', args, {
-                env: env || process.env,
-                windowsHide: true,
-            });
-        }
-        catch (error) {
-            finish({
-                exitCode: 1,
-                stdout,
-                stderr: appendOutput(stderr, Buffer.from(`${errorMessage(error)}\n`)),
-            });
-            return;
-        }
-        timeoutTimer = external_timers_namespaceObject.setTimeout(() => {
-            timedOut = true;
-            stderr = appendOutput(stderr, Buffer.from(`boringcache check timed out after ${timeoutSeconds}s\n`));
-            killTimer = external_timers_namespaceObject.setTimeout(() => {
-                child.kill('SIGKILL');
-            }, 2000);
-            child.kill('SIGTERM');
-        }, timeoutMs);
-        child.stdout?.on('data', (data) => {
-            stdout = appendOutput(stdout, data);
-        });
-        child.stderr?.on('data', (data) => {
-            stderr = appendOutput(stderr, data);
-        });
-        child.on('error', (error) => {
-            finish({
-                exitCode: 1,
-                stdout,
-                stderr: appendOutput(stderr, Buffer.from(`${error.message}\n`)),
-            });
-        });
-        child.on('close', (code, signal) => {
-            if (timedOut) {
-                finish({
-                    exitCode: 124,
-                    stdout,
-                    stderr,
-                    timedOut: true,
-                });
-                return;
-            }
-            finish({
-                exitCode: code ?? (signal ? 1 : 0),
-                stdout,
-                stderr,
-            });
-        });
-    });
-}
-function boundedCheckAttemptTimeoutSeconds(timeoutSeconds, deadline) {
-    const remainingSeconds = deadline
-        ? Math.max(1, Math.ceil((deadline - Date.now()) / 1000))
-        : Math.max(1, timeoutSeconds);
-    return Math.min(remainingSeconds, timeoutSeconds, MAX_VERIFY_CHECK_ATTEMPT_SECONDS);
-}
-function formatCheckFailure(result) {
-    const details = [result.stderr, result.stdout].filter(Boolean).join('\n');
-    return details || `boringcache check exited with code ${result.exitCode}`;
-}
-function pendingOnlyForAcceptedSaveTags(stdout, acceptedPendingTags) {
-    if (!stdout.trim()) {
-        return [];
-    }
-    let parsed;
-    try {
-        parsed = JSON.parse(stdout);
-    }
-    catch {
-        return [];
-    }
-    if (!Array.isArray(parsed.results)) {
-        return [];
-    }
-    const accepted = [];
-    for (const result of parsed.results) {
-        const status = (result.status || '').toLowerCase();
-        if (status === 'hit') {
-            continue;
-        }
-        const candidateTags = [result.requested_tag, result.tag].filter((tag) => Boolean(tag));
-        const acceptedTag = candidateTags.find((tag) => acceptedPendingTags.has(tag));
-        if ((status === 'pending' || status === 'uploading') && acceptedTag) {
-            accepted.push(acceptedTag);
-            continue;
-        }
-        return [];
-    }
-    return accepted;
-}
-async function verifyResolvedTags(workspace, exactTags, options) {
-    const specs = exactTags.map((tag) => ({ tag }));
-    return verifyVerificationSpecs(workspace, specs, options);
-}
-async function verifyVerificationSpecs(workspace, specs, options) {
-    const batches = groupVerificationSpecs(specs);
-    if (options.mode === 'none' || batches.length === 0) {
-        return;
-    }
-    if (options.mode === 'check') {
-        for (const batch of batches) {
-            const result = await runTagCheck(workspace, batch, options, boundedCheckAttemptTimeoutSeconds(options.timeoutSeconds));
-            if (result.exitCode !== 0) {
-                throw new Error(`Verification failed for tags ${batch.tags.join(', ')}: ${formatCheckFailure(result)}`);
-            }
-        }
-        const total = batches.reduce((sum, batch) => sum + batch.tags.length, 0);
-        info(`Verified ${total} tag${total === 1 ? '' : 's'} in ${workspace}`);
-        return;
-    }
-    const warnOnly = options.mode === 'warn';
-    const deadline = Date.now() + options.timeoutSeconds * 1000;
-    let attempt = 0;
-    let lastFailure = '';
-    const total = batches.reduce((sum, batch) => sum + batch.tags.length, 0);
-    while (Date.now() < deadline) {
-        attempt += 1;
-        let pendingBatch = null;
-        for (const batch of batches) {
-            const result = await runTagCheck(workspace, batch, options, boundedCheckAttemptTimeoutSeconds(options.timeoutSeconds, deadline));
-            if (result.exitCode !== 0) {
-                pendingBatch = batch;
-                lastFailure = formatCheckFailure(result);
-                break;
-            }
-        }
-        if (!pendingBatch) {
-            info(`Verified ${total} tag${total === 1 ? '' : 's'} in ${workspace} after ${attempt} attempt${attempt === 1 ? '' : 's'}`);
-            return;
-        }
-        info(`Waiting for tags to become visible (${attempt}): ${pendingBatch.tags.join(', ')}`);
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-    const failureMessage = `Timed out waiting ${options.timeoutSeconds}s for ${total} tag${total === 1 ? '' : 's'} in ${workspace}: ${lastFailure}`;
-    if (warnOnly) {
-        warning(failureMessage);
-        return;
-    }
-    throw new Error(failureMessage);
-}
-
-;// CONCATENATED MODULE: ./dist/modes.js
-const MODE_SPECS = {
-    archive: {
-        resolved: 'archive',
-        implemented: true,
-        description: 'Opaque tar archive caching from a CLI-owned repo profile.',
-    },
-    docker: {
-        resolved: 'docker',
-        implemented: true,
-        description: 'Docker layer and registry-backed cache integration.',
-    },
-    buildkit: {
-        resolved: 'buildkit',
-        implemented: true,
-        description: 'BuildKit remote cache integration.',
-    },
-    bazel: {
-        resolved: 'bazel',
-        implemented: true,
-        description: 'Bazel remote cache proxy integration.',
-    },
-    cargo: {
-        resolved: 'cargo',
-        implemented: true,
-        description: 'Cargo target, dependency, and compiler cache lifecycle.',
-    },
-    ccache: {
-        resolved: 'ccache',
-        implemented: true,
-        description: 'C and C++ ccache proxy integration.',
-    },
-    go: {
-        resolved: 'go',
-        implemented: true,
-        description: 'Go GOCACHEPROG proxy integration.',
-    },
-    gradle: {
-        resolved: 'gradle',
-        implemented: true,
-        description: 'Gradle build cache proxy integration.',
-    },
-    gha: {
-        resolved: 'gha',
-        implemented: true,
-        description: 'GitHub Actions cache and artifact compatibility through a runner-local adapter.',
-    },
-    maven: {
-        resolved: 'maven',
-        implemented: true,
-        description: 'Maven build cache proxy integration.',
-    },
-    nix: {
-        resolved: 'nix',
-        implemented: true,
-        description: 'Nix HTTP binary-cache integration.',
-    },
-    nx: {
-        resolved: 'nx',
-        implemented: true,
-        description: 'Nx self-hosted remote cache proxy integration.',
-    },
-    sccache: {
-        resolved: 'sccache',
-        implemented: true,
-        description: 'Rust sccache proxy integration.',
-    },
-    turbo: {
-        resolved: 'turbo',
-        implemented: true,
-        description: 'Turbo remote cache proxy integration.',
-    },
-    xcode: {
-        resolved: 'xcode',
-        implemented: true,
-        description: 'Xcode and Swift/Clang compilation cache integration on macOS.',
-    },
-};
-function normalizeMode(value) {
-    const normalized = (value || 'archive').trim().toLowerCase();
-    switch (normalized) {
-        case 'archive':
-        case 'docker':
-        case 'buildkit':
-        case 'bazel':
-        case 'cargo':
-        case 'ccache':
-        case 'go':
-        case 'gradle':
-        case 'gha':
-        case 'maven':
-        case 'nix':
-        case 'nx':
-        case 'sccache':
-        case 'turbo':
-        case 'xcode':
-            return normalized;
-        default:
-            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, cargo, ccache, gha, go, gradle, maven, nix, nx, sccache, turbo, or xcode.`);
-    }
-}
-function resolveModeSpec(mode) {
-    const spec = MODE_SPECS[mode];
-    return {
-        requested: mode,
-        ...spec,
-    };
-}
-function assertImplementedMode(modeSpec) {
-    if (modeSpec.implemented) {
-        return;
-    }
-    throw new Error(`mode=${modeSpec.resolved} is planned for boringcache/one but not implemented yet. ` +
-        `Use the BoringCache CLI directly until this adapter lands.`);
-}
-
-;// CONCATENATED MODULE: ./dist/core/action-inputs.js
-
-
-
-
-
-
-
-const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
-function getInputs() {
-    return {
-        cliVersion: getInput('cli-version') || 'v1.19.6',
-        cliPlatform: getInput('cli-platform'),
-        setup: normalizeSetup(getInput('setup')),
-        mode: normalizeMode(getInput('mode')),
-        workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
-        tools: getInput('tools'),
-        mavenVersion: getInput('maven-version') || '3.9.16',
-        mavenLocalRepo: getInput('maven-local-repo') || '~/.m2/repository',
-        trustPolicy: normalizeTrustPolicy(getInput('trust-policy') || 'auto'),
-        cacheCandidates: getInput('cache-candidates', { trimWhitespace: false }),
-        readOnly: false,
-        stage: false,
-        saveAlways: getBooleanInput('save-always'),
-        verify: normalizeVerifyMode(getInput('verify')),
-        verifyTimeoutSeconds: normalizeVerifyTimeoutSeconds(getInput('verify-timeout-seconds')),
-        verifyRequireServerSignature: getBooleanInput('verify-require-server-signature'),
-        trustedWorkspaceSigningKeyFingerprint: getInput('trusted-workspace-signing-key-fingerprint'),
-        diagnostics: normalizeDiagnosticsMode(getInput('diagnostics')),
-        diagnosticsLogLines: normalizeDiagnosticsLogLines(getInput('diagnostics-log-lines')),
-        metadataHints: getInput('metadata-hints'),
-        proxyPort: getInput('proxy-port'),
-        managedBuildkitImage: getInput('managed-buildkit-image') || 'ghcr.io/boringcache/buildkit@sha256:e46b92c02707107ab1e1396c7609f5a7b7949fbe72bdf4c00230436fbc62e42b',
-        dockerToolCache: getInput('docker-tool-cache'),
-        dockerToolCacheTarget: getInput('docker-tool-cache-target'),
-        cacheProfiles: getInput('cache-profiles'),
-        failOnCacheMiss: getBooleanInput('fail-on-cache-miss'),
-        failOnCacheError: getBooleanInput('fail-on-cache-error'),
-        lookupOnly: getBooleanInput('lookup-only'),
-        force: getBooleanInput('force'),
-        verbose: getBooleanInput('verbose'),
-    };
-}
-function buildFlagArgs(inputs) {
-    const flagArgs = [];
-    if (inputs.failOnCacheMiss) {
-        flagArgs.push('--fail-on-cache-miss');
-    }
-    if (inputs.failOnCacheError) {
-        flagArgs.push('--fail-on-cache-error');
-    }
-    if (inputs.lookupOnly) {
-        flagArgs.push('--lookup-only');
-    }
-    if (inputs.verbose) {
-        flagArgs.push('--verbose');
-    }
-    if (!inputs.readOnly && !inputs.stage) {
-        flagArgs.push('--include-pr-tag');
-    }
-    return flagArgs;
-}
-
-;// CONCATENATED MODULE: ./dist/core/tags.js
-function tags_requireCliVerificationTags(tags, adapter) {
-    if (!Array.isArray(tags) || tags.some((tag) => typeof tag !== 'string' || !tag.trim())) {
-        throw new Error(`The selected BoringCache CLI did not return exact verification tags for ${adapter}. `
-            + 'Use a CLI release that supports the current boringcache/one plan contract.');
-    }
-    return Array.from(new Set(tags));
-}
-function resolveVerificationTags(specs) {
-    return Array.from(new Set(specs.map((spec) => spec.tag)));
-}
-function buildGenericVerificationSpecs(plan, saveExpected = false) {
-    return plan.archiveVerificationTags.map((tag) => ({ tag, saveExpected }));
-}
-
-;// CONCATENATED MODULE: ./dist/core/plan.js
-
-
-
-
-
-
-
-function splitEntriesInput(entries) {
-    const values = [];
-    let current = '';
-    for (let index = 0; index < entries.length; index += 1) {
-        const character = entries[index];
-        if (character === '\\' && entries[index + 1] === ',') {
-            current += ',';
-            index += 1;
-        }
-        else if (character === ',' || character === '\n') {
-            values.push(current);
-            current = '';
-        }
-        else if (character !== '\r') {
-            current += character;
-        }
-    }
-    values.push(current);
-    return values.filter((entry) => entry.trim());
-}
-function parseCliVersion(version) {
-    const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
-    if (!match) {
-        return null;
-    }
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-async function resolveCliCapabilityVersion(version) {
-    const requestedVersion = version.trim();
-    if (requestedVersion.toLowerCase() === 'skip' || parseCliVersion(requestedVersion)) {
-        return requestedVersion;
-    }
-    let stdout = '';
-    let stderr = '';
-    const exitCode = await setup_execBoringCache(['--version'], {
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                stdout += data.toString();
-            },
-            stderr: (data) => {
-                stderr += data.toString();
-            },
-        },
-    });
-    const output = `${stdout}\n${stderr}`;
-    const match = output.match(/\bboringcache\s+v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/i);
-    if (exitCode !== 0 || !match) {
-        throw new Error(`Unable to determine installed BoringCache CLI capabilities for cli-version '${requestedVersion || '(empty)'}'. `
-            + `Expected 'boringcache --version' to report a semantic version, but it exited ${exitCode}`
-            + `${output.trim() ? `: ${output.trim()}` : '.'}`);
-    }
-    return match[1];
-}
-function plan_appendCliPublicationPolicy(args, readOnly) {
-    args.push(readOnly ? '--read-only' : '--write');
-}
-async function runDryRunPlan(workingDirectory, options) {
-    const { profileNames = [], readOnly = false, noGit = false, } = options;
-    const executePlan = async () => {
-        const args = ['run'];
-        for (const profileName of profileNames) {
-            args.push('--profile', profileName);
-        }
-        if (noGit) {
-            args.push('--no-git');
-        }
-        plan_appendCliPublicationPolicy(args, readOnly);
-        args.push('--dry-run', '--json');
-        let stdout = '';
-        let stderr = '';
-        const exitCode = await exec_exec('boringcache', args, {
-            cwd: workingDirectory,
-            ignoreReturnCode: true,
-            silent: true,
-            listeners: {
-                stdout: (data) => {
-                    stdout += data.toString();
-                },
-                stderr: (data) => {
-                    stderr += data.toString();
-                },
-            },
-        });
-        if (exitCode !== 0) {
-            throw new Error(stderr.trim() || stdout.trim() || `boringcache run --dry-run --json exited with code ${exitCode}`);
-        }
-        try {
-            return JSON.parse(stdout);
-        }
-        catch (error) {
-            throw new Error(`Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    };
-    return executePlan();
-}
-async function maybeResolveWorkspaceViaCli(workingDirectory, readOnly) {
-    const plan = await runDryRunPlan(workingDirectory, {
-        readOnly,
-    });
-    return plan.workspace?.trim() || null;
-}
-async function buildArchiveEntries(inputs) {
-    const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
-    if (cacheProfiles.length === 0) {
-        return {
-            entries: '',
-            envVars: {},
-            verificationTags: [],
-        };
-    }
-    const plan = await runDryRunPlan(inputs.workingDirectory, {
-        profileNames: cacheProfiles,
-        readOnly: inputs.readOnly,
-        noGit: inputs.stage,
-    });
-    const firstEntry = plan.archive_entries?.[0];
-    const firstPair = plan.tag_path_pairs[0];
-    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
-        || (firstPair ? parseEntries(firstPair, 'restore', { separatorMode: 'single' })[0]?.tag : undefined);
-    const verificationTags = tags_requireCliVerificationTags(plan.verification_tags, 'archive');
-    if (plan.tag_path_pairs.length > 0 && verificationTags.length === 0) {
-        throw new Error('The selected BoringCache CLI returned archive entries without exact verification tags.');
-    }
-    return {
-        entries: plan.tag_path_pairs.join('\n'),
-        envVars: plan.env_vars,
-        cacheTagPrefix,
-        workspace: plan.workspace,
-        verificationTags,
-    };
-}
-function validateOneInputs(inputs, modeSpec, archiveEntries) {
-    if (inputs.setup !== 'mise' && inputs.tools.trim()) {
-        warning(`Ignoring tools because setup=${inputs.setup}`);
-    }
-    if (modeSpec.resolved === 'archive' && !archiveEntries) {
-        throw new Error('Archive mode requires cache-profiles from the committed .boringcache.toml plan.');
-    }
-}
-async function buildPlan(inputs) {
-    const modeSpec = resolveModeSpec(inputs.mode);
-    assertImplementedMode(modeSpec);
-    const resolvedMavenVersion = inputs.mavenVersion || '3.9.16';
-    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.mode, inputs.tools, inputs.workingDirectory);
-    if (inputs.setup === 'mise'
-        && modeSpec.resolved === 'maven'
-        && resolvedMavenVersion
-        && !runtimeTools.some((tool) => tool.name === 'maven')) {
-        runtimeTools.push({
-            name: 'maven',
-            version: resolvedMavenVersion,
-            label: 'Maven',
-            source: 'mode',
-        });
-    }
-    const archiveEntries = await buildArchiveEntries(inputs);
-    const workspace = archiveEntries.workspace
-        || await maybeResolveWorkspaceViaCli(inputs.workingDirectory, inputs.readOnly);
-    if (!workspace) {
-        throw new Error('The BoringCache CLI plan did not resolve a workspace. Set workspace in .boringcache.toml.');
-    }
-    const cacheTagPrefix = getCacheTagPrefix(archiveEntries.cacheTagPrefix);
-    validateOneInputs(inputs, modeSpec, archiveEntries.entries);
-    return {
-        workspace,
-        workingDirectory: inputs.workingDirectory,
-        setup: inputs.setup,
-        mode: modeSpec.resolved,
-        modeSpec,
-        cacheTagPrefix,
-        runtimeTools,
-        envVars: archiveEntries.envVars,
-        archiveEntries: archiveEntries.entries,
-        archiveVerificationTags: archiveEntries.verificationTags,
-    };
-}
-function getCacheTagPrefix(resolvedArchivePrefix) {
-    if (resolvedArchivePrefix?.trim()) {
-        return resolvedArchivePrefix.trim();
-    }
-    return 'one';
-}
-async function applyCliPlanEnv(plan) {
-    for (const [key, value] of Object.entries(plan.envVars)) {
-        core.exportVariable(key, value);
-    }
 }
 
 ;// CONCATENATED MODULE: ./dist/core/candidates.js
@@ -106613,8 +104870,6 @@ function utils_resolveTrustDecision(requested) {
 
 
 
-
-
 ;// CONCATENATED MODULE: ./dist/modes/shared.js
 
 
@@ -106674,19 +104929,6 @@ function assertSupportedCliDryRunSchema(adapter, plan) {
             + `(expected ${SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION}). Update boringcache/one or pin cli-version.`);
     }
 }
-function shared_parseBooleanInput(value, inputName, defaultValue = false) {
-    if (value === undefined || value === null || value === '') {
-        return defaultValue;
-    }
-    const normalized = String(value).trim();
-    if (['true', 'True', 'TRUE'].includes(normalized)) {
-        return true;
-    }
-    if (['false', 'False', 'FALSE'].includes(normalized)) {
-        return false;
-    }
-    throw new Error(`Unsupported ${inputName} "${value}". Expected true, True, TRUE, false, False, or FALSE.`);
-}
 function parsePortInput(value, inputName) {
     const trimmed = value.trim();
     if (!/^\d+$/.test(trimmed)) {
@@ -106703,32 +104945,6 @@ async function shared_resolvePreferredPort(value, inputName) {
         return parsePortInput(value, inputName);
     }
     return 0;
-}
-function shared_parseList(input, separator = /[\n,]/) {
-    return input
-        .split(separator)
-        .map((item) => item.trim())
-        .filter(Boolean);
-}
-function shared_appendMetadataHintArgs(args, metadataHintsInput) {
-    for (const hint of shared_parseList(metadataHintsInput)) {
-        args.push('--metadata-hint', hint);
-    }
-}
-function shared_parseMultiline(input) {
-    return input
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-}
-function slugify(value) {
-    return value.replace(/[^a-zA-Z0-9]/g, '-');
-}
-function shared_sanitizeBuilderToken(value) {
-    return slugify(value)
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .toLowerCase();
 }
 function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
@@ -106815,10 +105031,10 @@ function modeStateKey(key) {
     return `mode-${key}`;
 }
 function shared_saveModeState(key, value) {
-    saveState(modeStateKey(key), value);
+    lifecycle_state_saveActionState(modeStateKey(key), value);
 }
 function getModeState(key) {
-    return getState(modeStateKey(key));
+    return getActionState(modeStateKey(key));
 }
 function getModeStateList(key) {
     return getModeState(key)
@@ -106848,10 +105064,9 @@ function registryProxyLogPath(port) {
 }
 function shared_setProxyOutputs(port) {
     const logPath = registryProxyLogPath(port);
-    core.saveState('proxy-port', String(port));
-    core.saveState('proxy-log-path', logPath);
+    saveActionState('proxy-port', String(port));
+    saveActionState('proxy-log-path', logPath);
     core.setOutput('proxy-port', String(port));
-    core.setOutput('proxy-log-path', logPath);
 }
 function shared_saveProxyModeState(proxy) {
     shared_saveModeState('proxy-port', String(proxy.port));
@@ -106862,7 +105077,7 @@ function shared_saveProxyModeState(proxy) {
 }
 function reportedProxyStopTimeoutMs() {
     const reported = Number.parseInt(getModeState('proxy-shutdown-budget-secs'), 10);
-    return proxy_proxyStopTimeoutMs(Number.isFinite(reported) ? reported : null);
+    return proxyStopTimeoutMs(Number.isFinite(reported) ? reported : null);
 }
 function getModeStateBoolean(key) {
     return getModeState(key) === 'true';
@@ -106880,15 +105095,38 @@ function emitCliPlannerWarnings(stderr) {
         }
     }
 }
-function shared_normalizeDockerCommand(value) {
-    const command = (value.trim() || 'build');
-    if (command === 'build' || command === 'setup') {
-        return command;
+async function preflightAdapterRequirements(adapter, workingDirectory) {
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await shared_execBoringCache(['system', 'requirements', adapter, '--check'], {
+        cwd: workingDirectory,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    if (exitCode !== 0) {
+        throw new Error(stderr.trim()
+            || stdout.trim()
+            || `boringcache system requirements ${adapter} --check exited with code ${exitCode}`);
     }
-    throw new Error(`Unsupported docker-command "${value}". Expected build or setup.`);
+}
+async function preflightPlannedRequirements(adapter, plan, workingDirectory) {
+    if (Array.isArray(plan.setup?.required_tools) && plan.setup.required_tools.length > 0) {
+        await preflightAdapterRequirements(adapter, workingDirectory);
+    }
 }
 async function shared_resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, readOnly, options = {}) {
-    const args = [adapter, '--workspace', workspace];
+    const args = [adapter];
+    if (workspace.trim()) {
+        args.push('--workspace', workspace.trim());
+    }
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
         args.push('--tag', trimmedCacheTag);
@@ -106896,31 +105134,11 @@ async function shared_resolveAdapterCliPlan(adapter, workspace, workingDirectory
     if (preferredPort > 0) {
         args.push('--port', String(preferredPort));
     }
-    shared_appendCliPublicationPolicy(args, readOnly);
-    shared_appendMetadataHintArgs(args, options.metadataHintsInput || '');
-    for (const line of shared_parseMultiline(options.bazelrcLines || '')) {
-        args.push('--bazelrc-line', line);
+    if (options.stage) {
+        args.push('--stage');
     }
-    if (options.gradleHome?.trim()) {
-        args.push('--gradle-home', options.gradleHome.trim());
-    }
-    if (options.enableGradleBuildCache === false) {
-        args.push('--no-gradle-build-cache-property');
-    }
-    if (options.mavenLocalRepo?.trim()) {
-        args.push('--maven-local-repo', options.mavenLocalRepo.trim());
-    }
-    if (options.mavenExtensionsPath?.trim()) {
-        args.push('--maven-extensions-path', options.mavenExtensionsPath.trim());
-    }
-    if (options.mavenBuildCacheConfigPath?.trim()) {
-        args.push('--maven-build-cache-config-path', options.mavenBuildCacheConfigPath.trim());
-    }
-    if (options.mavenBuildCacheExtensionVersion?.trim()) {
-        args.push('--maven-build-cache-extension-version', options.mavenBuildCacheExtensionVersion.trim());
-    }
-    if (options.mavenBuildCacheId?.trim()) {
-        args.push('--maven-build-cache-id', options.mavenBuildCacheId.trim());
+    else {
+        shared_appendCliPublicationPolicy(args, readOnly);
     }
     if (options.failOnCacheError) {
         args.push('--fail-on-cache-error');
@@ -106953,104 +105171,16 @@ async function shared_resolveAdapterCliPlan(adapter, workspace, workingDirectory
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     assertSupportedCliDryRunSchema(adapter, plan);
+    await preflightPlannedRequirements(adapter, plan, workingDirectory);
     return plan;
-}
-async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
-    const args = [adapter, '--workspace', workspace];
-    const trimmedCacheTag = inputCacheTag.trim();
-    if (trimmedCacheTag) {
-        args.push('--tag', trimmedCacheTag);
-    }
-    if (preferredPort > 0) {
-        args.push('--port', String(preferredPort));
-    }
-    if (host.trim()) {
-        args.push('--host', host.trim());
-    }
-    if (endpointHost.trim()) {
-        args.push('--endpoint-host', endpointHost.trim());
-    }
-    if (stage) {
-        args.push('--stage');
-    }
-    else {
-        shared_appendCliPublicationPolicy(args, readOnly);
-    }
-    for (const candidate of shared_parseList(cacheCandidatesInput)) {
-        args.push('--candidate', candidate);
-    }
-    if (failOnCacheError) {
-        args.push('--fail-on-cache-error');
-    }
-    if (adapter === 'docker') {
-        for (const tool of shared_parseList(dockerToolCacheInput)) {
-            args.push('--tool-cache', tool);
-        }
-        for (const target of shared_parseList(dockerToolCacheTargetInput)) {
-            args.push('--tool-cache-target', target);
-        }
-    }
-    if (mountCache) {
-        args.push('--mount-cache');
-    }
-    shared_appendMetadataHintArgs(args, metadataHintsInput);
-    args.push('--dry-run', '--json', '--', ...adapterCommand);
-    let stdout = '';
-    let stderr = '';
-    const env = {};
-    for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) {
-            env[key] = value;
-        }
-    }
-    if (env.GITHUB_ACTIONS === 'true' && !env.BORINGCACHE_CI_RUN_STARTED_AT) {
-        env.BORINGCACHE_CI_RUN_STARTED_AT = new Date().toISOString();
-        process.env.BORINGCACHE_CI_RUN_STARTED_AT = env.BORINGCACHE_CI_RUN_STARTED_AT;
-    }
-    const exitCode = await exec.exec('boringcache', args, {
-        cwd: workingDirectory,
-        env,
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                stdout += data.toString();
-            },
-            stderr: (data) => {
-                stderr += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0) {
-        throw new Error(stderr.trim() || stdout.trim() || `boringcache ${adapter} --dry-run --json exited with code ${exitCode}`);
-    }
-    emitCliPlannerWarnings(stderr);
-    let plan;
-    try {
-        plan = JSON.parse(stdout);
-    }
-    catch (error) {
-        throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    assertSupportedCliDryRunSchema(adapter, plan);
-    if (!plan.buildkit_cache?.cache_ref || !plan.buildkit_cache.cache_from) {
-        throw new Error(`boringcache ${adapter} dry-run JSON did not include managed BuildKit cache planning data`);
-    }
-    return plan;
-}
-async function shared_resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput, dockerToolCacheTargetInput, mountCache);
-}
-async function shared_resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', stage = false, cacheCandidatesInput = '') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput, '');
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!auth_hasSaveToken()) {
-        notice(`Skipping cache save (${auth_missingSaveTokenMessage()})`);
+    if (!hasSaveToken()) {
+        core.notice(`Skipping cache save (${missingSaveTokenMessage()})`);
         return;
     }
-    if (!external_fs_namespaceObject.existsSync(cacheDir) || external_fs_namespaceObject.readdirSync(cacheDir).length === 0) {
-        notice('No cache files to save');
+    if (!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0) {
+        core.notice('No cache files to save');
         return;
     }
     const args = ['save', workspace, `${cacheKey}:${cacheDir}`, '--force'];
@@ -107059,7 +105189,7 @@ async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     }
     await shared_execBoringCache(args);
 }
-async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
+async function shared_startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
     const proxy = await startRegistryProxy(shared_actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -107071,14 +105201,6 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false, p
         readOnly,
     }, proxyPlan));
     return proxy;
-}
-async function shared_startPortableCacheProxyWithFallback(workspace, preferredPort, tag, readOnly, proxyPlan) {
-    try {
-        return await startPortableCacheProxy(workspace, preferredPort, tag, readOnly, proxyPlan);
-    }
-    catch {
-        return startPortableCacheProxy(workspace, await findAvailablePort(), tag, readOnly, proxyPlan);
-    }
 }
 function shared_emptyDirectCacheTagCheckStatus() {
     return {
@@ -107220,12 +105342,11 @@ async function stopProxyFromState() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
         const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
-        await proxy_stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
+        await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
     }
 }
 
 ;// CONCATENATED MODULE: ./dist/modes/adapters.js
-
 
 
 
@@ -107261,53 +105382,13 @@ function nxEnvForStartedProxy(plan, actualPort) {
     envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
     return envVars;
 }
-function plannedNodePackageManagerCacheDir(packageManager, plan) {
-    if (!packageManager) {
-        return null;
-    }
-    switch (packageManager.name) {
-        case 'pnpm':
-            return plan.env_vars?.PNPM_STORE_DIR || plan.env_vars?.NPM_CONFIG_STORE_DIR || packageManager.cacheDir;
-        case 'yarn':
-            return plan.env_vars?.YARN_CACHE_FOLDER || packageManager.cacheDir;
-        case 'npm':
-            return plan.env_vars?.npm_config_cache || plan.env_vars?.NPM_CONFIG_CACHE || packageManager.cacheDir;
-    }
-}
-async function ensureCorepackPackageManager(workingDirectory, packageManager, runtimeTools) {
-    if (!packageManager || packageManager.name === 'npm' || runtimeTools.some((tool) => tool.name === packageManager.name)) {
-        return;
-    }
-    const corepackEnabled = await exec.exec('corepack', ['enable'], { cwd: workingDirectory, ignoreReturnCode: true });
-    if (corepackEnabled !== 0) {
-        core.notice(`corepack enable failed for ${packageManager.name}; continuing without corepack bootstrap`);
-        return;
-    }
-    if (packageManager.packageManagerField) {
-        await exec.exec('corepack', ['install'], { cwd: workingDirectory, ignoreReturnCode: true });
-        return;
-    }
-    if (packageManager.version) {
-        await exec.exec('corepack', ['prepare', `${packageManager.name}@${packageManager.version}`, '--activate'], { cwd: workingDirectory, ignoreReturnCode: true });
-    }
-}
 async function adapters_runBazelRestore(plan, inputs, options) {
-    const inputVersion = core.getInput('bazel-version') || '';
-    const bazelrcLines = core.getInput('bazelrc-lines') || '';
-    const runtimeVersion = plan.runtimeTools.find((tool) => tool.name === 'bazel')?.version || '';
-    const bazelVersion = inputVersion || runtimeVersion;
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-        bazelrcLines,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('bazel', proxyPlan.setup);
     saveModeState('proxy-pid', '');
-    if (bazelVersion) {
-        core.exportVariable('USE_BAZEL_VERSION', bazelVersion);
-    }
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -107323,10 +105404,9 @@ async function adapters_runBazelRestore(plan, inputs, options) {
     saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheTag,
         verificationSpecs: adapterVerificationSpecs(proxyPlan),
     };
@@ -107350,9 +105430,7 @@ function goCacheProgForProxy(proxyPlan, port) {
 }
 async function adapters_runGoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
@@ -107374,10 +105452,9 @@ async function adapters_runGoRestore(plan, inputs) {
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
     configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -107385,14 +105462,8 @@ async function adapters_runGoRestore(plan, inputs) {
     };
 }
 async function adapters_runGradleRestore(plan, inputs, options) {
-    const gradleHome = core.getInput('gradle-home') || '';
-    const enableBuildCache = parseBooleanInput(core.getInput('enable-build-cache'), 'enable-build-cache', true);
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-        gradleHome,
-        enableGradleBuildCache: enableBuildCache,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('gradle', proxyPlan.setup);
@@ -107415,10 +105486,9 @@ async function adapters_runGradleRestore(plan, inputs, options) {
     saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -107427,19 +105497,7 @@ async function adapters_runGradleRestore(plan, inputs, options) {
 }
 async function adapters_runMavenRestore(plan, inputs, options) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const mavenExtensionsPath = core.getInput('maven-extensions-path') || '';
-    const mavenBuildCacheConfigPath = core.getInput('maven-build-cache-config-path') || '';
-    const mavenLocalRepo = core.getInput('maven-local-repo') || '';
-    const mavenBuildCacheExtensionVersion = core.getInput('maven-build-cache-extension-version') || '';
-    const mavenBuildCacheId = core.getInput('maven-build-cache-id') || '';
-    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-        mavenExtensionsPath,
-        mavenBuildCacheConfigPath,
-        mavenLocalRepo,
-        mavenBuildCacheExtensionVersion,
-        mavenBuildCacheId,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
@@ -107462,16 +105520,12 @@ async function adapters_runMavenRestore(plan, inputs, options) {
     saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    const extensionsPath = requireSetupFilePath(setup, 'extensions.xml', 'maven extensions.xml');
-    const buildCacheConfigPath = requireSetupFilePath(setup, 'maven-build-cache-config.xml', 'maven build-cache config');
-    const localRepo = requireSetupDirectory(setup, 'maven local repository directory');
-    core.setOutput('cache-tag', cacheTag);
+    requireSetupFilePath(setup, 'extensions.xml', 'maven extensions.xml');
+    requireSetupFilePath(setup, 'maven-build-cache-config.xml', 'maven build-cache config');
+    requireSetupDirectory(setup, 'maven local repository directory');
     setProxyOutputs(proxy.port);
-    core.setOutput('maven-extensions-path', extensionsPath);
-    core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
-    core.setOutput('maven-local-repo', localRepo);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -107524,7 +105578,6 @@ async function adapters_runNixRestore(plan, inputs, options) {
     await assertNixTrustedUser();
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('nix', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
         failOnCacheError: inputs.failOnCacheError,
     });
     const setup = requireAdapterSetupPlan('nix', proxyPlan.setup);
@@ -107552,10 +105605,9 @@ async function adapters_runNixRestore(plan, inputs, options) {
     saveModeState('nix-fail-on-cache-error', String(inputs.failOnCacheError));
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    core.setOutput('cache-tag', proxyPlan.tag);
-    core.setOutput('workspace', proxyPlan.workspace);
     setProxyOutputs(proxy.port);
     return {
+        workspace: proxyPlan.workspace,
         cacheTag: proxyPlan.tag,
         verificationSpecs: adapterVerificationSpecs(proxyPlan),
     };
@@ -107565,7 +105617,7 @@ async function adapters_runXcodeRestore(plan, inputs, options) {
         throw new Error('mode=xcode requires a macOS runner with Xcode installed.');
     }
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const setup = requireAdapterSetupPlan('xcode', proxyPlan.setup);
     const env = setup.env_vars || {};
     const socketPath = env.BORINGCACHE_XCODE_PROXY_SOCKET?.trim() || '';
@@ -107595,10 +105647,9 @@ async function adapters_runXcodeRestore(plan, inputs, options) {
     saveModeState('proxy-pid', String(proxy.pid));
     saveModeState('xcode-evidence-json', evidencePath);
     saveProxyModeState(proxy);
-    core.setOutput('cache-tag', proxyPlan.tag);
-    core.setOutput('workspace', proxyPlan.workspace);
     setProxyOutputs(proxy.port);
     return {
+        workspace: proxyPlan.workspace,
         cacheTag: proxyPlan.tag,
         evidence: {
             xcode: {
@@ -107615,42 +105666,20 @@ async function adapters_runXcodeRestore(plan, inputs, options) {
 }
 async function adapters_runTurboProxyRestore(plan, inputs) {
     const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-    });
+    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
-    const packageManager = await detectNodePackageManager(plan.workingDirectory);
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
         noPlatform: turboPlan.proxy.no_platform,
         noGit: turboPlan.proxy.no_git,
     });
-    const proxyPromise = startPortableCacheProxyWithFallback(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
-    const [proxyResult, corepackResult] = await Promise.allSettled([
-        proxyPromise,
-        ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools),
-    ]);
-    if (corepackResult.status === 'rejected') {
-        if (proxyResult.status === 'fulfilled') {
-            await stopRegistryProxy(proxyResult.value.pid, proxyResult.value.port, proxyStopTimeoutMs(proxyResult.value.shutdownBudgetSecs ?? null));
-        }
-        throw corepackResult.reason;
-    }
-    if (proxyResult.status === 'rejected') {
-        throw proxyResult.reason;
-    }
-    const proxy = proxyResult.value;
-    if (packageManager) {
-        core.setOutput('package-manager', packageManager.name);
-        core.setOutput('package-manager-cache-dir', plannedNodePackageManagerCacheDir(packageManager, turboPlan) || packageManager.cacheDir);
-    }
+    const proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
     exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port));
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -107659,23 +105688,20 @@ async function adapters_runTurboProxyRestore(plan, inputs) {
 }
 async function adapters_runNxProxyRestore(plan, inputs) {
     const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-    });
+    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = nxPlan.workspace;
     const cacheTag = nxPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
         noPlatform: nxPlan.proxy.no_platform,
         noGit: nxPlan.proxy.no_git,
     });
-    const proxy = await startPortableCacheProxyWithFallback(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
+    const proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
     exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port));
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -107717,8 +105743,6 @@ function cleanupNixRuntimeDirectory() {
 
 
 
-
-
 function cargoArchiveVerificationSpecs(cargoPlan, _workingDirectory) {
     return adapterVerificationSpecs(cargoPlan);
 }
@@ -107734,7 +105758,7 @@ function cargoCompilerCacheTag(cargoPlan) {
 }
 async function cargo_runCargoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const command = cargoPlan.command || [];
     const targetEntry = (cargoPlan.archive_entries || []).find((entry) => entry.kind === 'cargo-target' || entry.requested === 'cargo-target');
     const compilerCacheEnabled = cargoCompilerCacheEnabled(cargoPlan);
@@ -107757,8 +105781,6 @@ async function cargo_runCargoRestore(plan, inputs) {
     ]);
     const cacheHit = targetEntry ? targetPreflight.cacheEntryHit : compilerPreflight.kvHit;
     const cacheTag = targetEntry?.tag || (compilerCacheEnabled ? compilerCacheTag : '');
-    core.setOutput('sccache-tag', compilerCacheEnabled ? compilerCacheTag : '');
-    core.setOutput('sccache-hit', String(compilerCacheEnabled && compilerPreflight.kvHit));
     if (inputs.failOnCacheMiss && !inputs.lookupOnly) {
         throw new Error('mode=cargo does not support fail-on-cache-miss while executing yet; '
             + 'the CLI adapter does not expose that lifecycle hook. Use lookup-only for a preflight check.');
@@ -107772,6 +105794,7 @@ async function cargo_runCargoRestore(plan, inputs) {
         .join('\n');
     if (inputs.lookupOnly) {
         return {
+            workspace: cargoPlan.workspace,
             cacheHit,
             cacheTag,
             resolvedEntries,
@@ -107787,15 +105810,11 @@ async function cargo_runCargoRestore(plan, inputs) {
             },
         };
     }
-    if (compilerCacheEnabled) {
-        await ensureAdapterTools('cargo', { sccache: core.getInput('sccache-version') }, execBoringCache, plan.workingDirectory);
-    }
     const nativeEvidencePath = compilerCacheEnabled
         ? path.join(os.tmpdir(), `boringcache-one-cargo-native-${process.pid}-${Date.now()}.json`)
         : '';
     const args = ['cargo', '--workspace', cargoPlan.workspace, '--port', String(cargoPlan.proxy.port)];
     appendCliPublicationPolicy(args, cargoPlan.proxy.read_only);
-    appendMetadataHintArgs(args, inputs.metadataHints);
     if (inputs.failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
@@ -107824,9 +105843,8 @@ async function cargo_runCargoRestore(plan, inputs) {
         elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
         native_tool: nativeToolEvidence,
     };
-    core.setOutput('cache-tag', cacheTag);
-    core.setOutput('workspace', cargoPlan.workspace);
     return {
+        workspace: cargoPlan.workspace,
         cacheHit,
         cacheTag,
         resolvedEntries,
@@ -107843,7 +105861,6 @@ async function cargo_runCargoRestore(plan, inputs) {
 }
 
 ;// CONCATENATED MODULE: ./dist/modes/compiler-cache.js
-
 
 
 
@@ -108012,7 +106029,7 @@ function sccacheEnvForStartedProxy(plan, actualPort) {
 }
 async function startCompilerCacheProxy(adapter, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const preflight = await checkDirectCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
@@ -108037,8 +106054,6 @@ async function startCompilerCacheProxy(adapter, plan, inputs) {
     saveModeState(`${adapter}-preflight-kv-checked`, String(preflight.kvChecked));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    core.setOutput('workspace', proxyPlan.workspace);
-    core.setOutput('cache-tag', proxyPlan.tag);
     core.setOutput('cache-hit', String(preflight.kvHit));
     setProxyOutputs(proxy.port);
     return { proxyPlan, proxy, preflight };
@@ -108107,7 +106122,6 @@ async function finishCompilerCacheSave(tool, state, stats, statsDetail, options)
     }
 }
 async function compiler_cache_runCcacheRestore(plan, inputs) {
-    await ensureAdapterTools('ccache', { ccache: core.getInput('ccache-version') }, execBoringCache, plan.workingDirectory);
     const statsDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-ccache-'));
     const statsLog = path.join(statsDirectory, 'stats.log');
     try {
@@ -108118,6 +106132,7 @@ async function compiler_cache_runCcacheRestore(plan, inputs) {
         saveModeState('ccache-stats-directory', statsDirectory);
         saveModeState('ccache-stats-log', statsLog);
         return {
+            workspace: proxyPlan.workspace,
             cacheHit: preflight.kvHit,
             cacheTag: proxyPlan.tag,
             evidence: directCachePreflightEvidence(preflight),
@@ -108143,13 +106158,11 @@ async function runCcacheSave(options = {}) {
     await finishCompilerCacheSave('ccache', state, stats, statsDetail, options);
 }
 async function compiler_cache_runSccacheRestore(plan, inputs) {
-    await ensureAdapterTools('sccache', { sccache: core.getInput('sccache-version') }, execBoringCache, plan.workingDirectory);
     const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('sccache', plan, inputs);
     exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
     await startSccacheServer();
-    core.setOutput('sccache-tag', proxyPlan.tag);
-    core.setOutput('sccache-hit', String(preflight.kvHit));
     return {
+        workspace: proxyPlan.workspace,
         cacheHit: preflight.kvHit,
         cacheTag: proxyPlan.tag,
         evidence: directCachePreflightEvidence(preflight),
@@ -108187,9 +106200,10 @@ async function gha_runGhaRestore(plan, inputs) {
     saveModeState('proxy-pid', String(adapter.pid));
     saveModeState('proxy-port', String(adapter.port));
     saveModeState('proxy-log-path', adapter.logPath);
-    saveModeState('workspace', plan.workspace);
+    saveModeState('workspace', adapter.workspace);
     setProxyOutputs(adapter.port);
     return {
+        workspace: adapter.workspace,
         resolvedEntries: '',
         evidence: {
             adapter: 'gha',
@@ -108202,1088 +106216,67 @@ async function gha_runGhaRestore(plan, inputs) {
     };
 }
 
-;// CONCATENATED MODULE: ./dist/modes/oci-cache.js
-
-
-
-
-async function verifyOciPromotionRefsAfterStop() {
-    const refs = getModeStateList('oci-promotion-ref-tags');
-    if (refs.length === 0) {
-        return;
-    }
-    const workspace = getModeState('workspace');
-    const cacheTag = getModeState('cache-tag');
-    const port = Number.parseInt(getModeState('proxy-port'), 10);
-    if (!workspace || !cacheTag) {
-        throw new Error(`Cannot verify managed cache promotion refs without workspace and cache tag. requested=[${refs.join(', ')}]`);
-    }
-    if (!Number.isFinite(port) || port <= 0) {
-        throw new Error(`Cannot verify managed cache promotion refs without a proxy port. requested=[${refs.join(', ')}]`);
-    }
-    const host = getModeState('proxy-host') || '127.0.0.1';
-    let verificationProxyPid = null;
-    try {
-        const verificationProxy = await proxy_startRegistryProxy({
-            command: 'cache-registry',
-            workspace,
-            tag: cacheTag,
-            host,
-            port,
-            noGit: getModeStateBoolean('proxy-no-git'),
-            noPlatform: getModeStateBoolean('proxy-no-platform'),
-            verbose: getModeStateBoolean('verbose'),
-            readOnly: true,
-            ociRequiredReadableRefs: refs,
-            requireOciImportReady: true,
-            ociImportReadyTimeoutMs: ociPromotionVerificationTimeoutMs(),
-            ociHydration: action_inputs_DEFAULT_OCI_HYDRATION_POLICY,
-        });
-        verificationProxyPid = verificationProxy.pid > 0 ? verificationProxy.pid : null;
-        const readiness = verificationProxy.ociImportReadiness;
-        if (!readiness?.ready) {
-            throw new Error(`Managed cache promotion refs were not readable after proxy shutdown. readable=[${readiness?.readableRefs.join(', ') || ''}] unreadable=[${readiness?.unreadableRefs.join(', ') || refs.join(', ')}]`);
-        }
-        info(`Verified managed cache promotion refs after proxy shutdown: ${readiness.readableRefs.join(', ')}`);
-    }
-    catch (error) {
-        throw new Error(`Managed cache promotion refs were not readable after proxy shutdown. requested=[${refs.join(', ')}]: ${shared_errorMessage(error)}`);
-    }
-    finally {
-        if (verificationProxyPid !== null) {
-            try {
-                await proxy_stopRegistryProxy(verificationProxyPid, port, PROXY_VERIFICATION_STOP_TIMEOUT_MS);
-            }
-            catch (stopError) {
-                warning(`Failed to stop the managed cache verification proxy: ${shared_errorMessage(stopError)}`);
-            }
-        }
-    }
-}
-function ociPromotionVerificationTimeoutMs() {
-    const raw = getState('verify-timeout-seconds') || getInput('verify-timeout-seconds') || '180';
-    return normalizeVerifyTimeoutSeconds(raw) * 1000;
-}
-async function verifyOciPromotionRefsThenStopProxy(proxyPid) {
-    try {
-        const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
-        await proxy_stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
-    }
-    catch (stopError) {
-        throw new Error(`Failed to stop BoringCache proxy cleanly before managed cache promotion verification: ${shared_errorMessage(stopError)}`);
-    }
-    await verifyOciPromotionRefsAfterStop();
-}
-function extractCacheRefTag(cacheFrom) {
-    const refMatch = cacheFrom.match(/(?:^|,)ref=([^,]+)/);
-    const ref = refMatch?.[1]?.trim();
-    if (!ref) {
-        return null;
-    }
-    const lastSlash = ref.lastIndexOf('/');
-    const lastColon = ref.lastIndexOf(':');
-    if (lastColon <= lastSlash || lastColon === ref.length - 1) {
-        return null;
-    }
-    return ref.slice(lastColon + 1);
-}
-function oci_cache_buildKitCacheFromRefTags(buildKitCache) {
-    if (!buildKitCache) {
-        return [];
-    }
-    if (buildKitCache.cache_from_ref_tags?.length) {
-        return buildKitCache.cache_from_ref_tags;
-    }
-    return (buildKitCache.cache_from_refs || [])
-        .map(extractCacheRefTag)
-        .filter((tag) => Boolean(tag));
-}
-function buildKitCacheImportSpecs(buildKitCache, refTags) {
-    const imports = buildKitCache.cache_from_refs?.length ? buildKitCache.cache_from_refs : [buildKitCache.cache_from];
-    const byRefTag = new Map();
-    for (const cacheFrom of imports) {
-        const refTag = extractCacheRefTag(cacheFrom);
-        if (refTag && !byRefTag.has(refTag)) {
-            byRefTag.set(refTag, cacheFrom.trim());
-        }
-    }
-    const selectedImports = refTags
-        ? refTags
-            .map((refTag) => byRefTag.get(refTag))
-            .filter((cacheFrom) => Boolean(cacheFrom))
-        : imports
-            .map((cacheFrom) => cacheFrom.trim())
-            .filter(Boolean);
-    return selectedImports;
-}
-function oci_cache_effectiveBuildKitCacheImports(buildKitCache, proxy) {
-    const requestedRefTags = oci_cache_buildKitCacheFromRefTags(buildKitCache);
-    const readableRefTags = proxy?.ociImportReadiness
-        ? proxy.ociImportReadiness.readableRefs
-        : requestedRefTags;
-    const unreadableRefTags = proxy?.ociImportReadiness?.unreadableRefs || [];
-    return {
-        importSpecs: buildKitCacheImportSpecs(buildKitCache, readableRefTags),
-        readableRefTags,
-        requestedRefTags,
-        unreadableRefTags,
-        importReady: proxy?.ociImportReadiness?.ready ?? true,
-    };
-}
-function oci_cache_buildKitCacheEvidence(adapter, buildKitCache, imports, cacheTo) {
-    const runMetadata = buildKitCache.run_metadata;
-    return {
-        adapter,
-        cache_backend: 'boringcache',
-        buildkit_cache_backend: 'boringcache',
-        cache_ref: buildKitCache.cache_ref,
-        cache_from: imports.importSpecs,
-        cache_to: cacheTo || '',
-        requested_ref_tags: imports.requestedRefTags,
-        readable_ref_tags: imports.readableRefTags,
-        unreadable_ref_tags: imports.unreadableRefTags,
-        import_ready: imports.importReady,
-        immutable_run_ref_tag: buildKitCache.immutable_run_ref_tag || '',
-        promotion_ref_tags: buildKitCache.promotion_ref_tags || [],
-        ci: {
-            provider: runMetadata?.provider || '',
-            run_uid: runMetadata?.run_uid || '',
-            run_attempt: runMetadata?.run_attempt || '',
-            source_ref_type: runMetadata?.source_ref_type || '',
-            source_ref_name: runMetadata?.source_ref_name || '',
-            run_started_at: runMetadata?.run_started_at || '',
-        },
-    };
-}
-function oci_cache_recordBuildKitCachePlanState(buildKitPlan, cacheTag) {
-    saveModeState('workspace', buildKitPlan.workspace);
-    saveModeState('cache-tag', cacheTag);
-    return {
-        resolvedWorkspace: buildKitPlan.workspace,
-        resolvedCacheTag: cacheTag,
-    };
-}
-function oci_cache_setBuildKitCacheOutputs(spec) {
-    core.setOutput('cache-ref', spec.ref);
-    core.setOutput('cache-from', spec.from.join('\n'));
-    core.setOutput('cache-to', spec.to || '');
-    core.setOutput('docker-cache-run-ref', spec.buildKitCache?.immutable_run_ref_tag || '');
-    core.setOutput('docker-cache-from-refs', (spec.usedRefTags || oci_cache_buildKitCacheFromRefTags(spec.buildKitCache)).join('\n'));
-    core.setOutput('docker-cache-requested-from-refs', oci_cache_buildKitCacheFromRefTags(spec.buildKitCache).join('\n'));
-    core.setOutput('docker-cache-unreadable-from-refs', (spec.unreadableRefTags || []).join('\n'));
-    core.setOutput('docker-cache-import-ready', String(spec.importReady ?? true));
-    core.setOutput('docker-cache-promotion-refs', (spec.buildKitCache?.promotion_ref_tags || []).join('\n'));
-    core.setOutput('docker-ci-provider', spec.buildKitCache?.run_metadata?.provider || '');
-    core.setOutput('docker-ci-run-id', spec.buildKitCache?.run_metadata?.run_uid || '');
-    core.setOutput('docker-ci-run-attempt', spec.buildKitCache?.run_metadata?.run_attempt || '');
-    core.setOutput('docker-ci-ref-type', spec.buildKitCache?.run_metadata?.source_ref_type || '');
-    core.setOutput('docker-ci-ref-name', spec.buildKitCache?.run_metadata?.source_ref_name || '');
-    core.setOutput('docker-ci-run-started-at', spec.buildKitCache?.run_metadata?.run_started_at || '');
-    core.setOutput('cache-dir', '');
-    core.setOutput('save-cache-dir', '');
-}
-
 ;// CONCATENATED MODULE: ./dist/modes/oci.js
 
-
-
-
-
-
-
-
-
-
-const DOCKER_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'boringcache-one-docker-metadata.json');
-const BUILDKIT_METADATA_FILE = external_path_.join(external_os_.tmpdir(), 'boringcache-one-buildkit-metadata.json');
-const DEFAULT_MANAGED_BUILDKIT_IMAGE = 'ghcr.io/boringcache/buildkit@sha256:e46b92c02707107ab1e1396c7609f5a7b7949fbe72bdf4c00230436fbc62e42b';
-const DEFAULT_BINFMT_IMAGE = 'docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0';
-const EPHEMERAL_PRIVILEGED_RUNNER_ENV = 'BORINGCACHE_EPHEMERAL_PRIVILEGED_RUNNER';
-async function inspectDockerTemplate(containerName, template) {
-    let output = '';
-    const result = await exec.exec('docker', ['inspect', '-f', template, containerName], {
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
+/**
+ * Docker and BuildKit are synchronous CLI lifecycles. The Action deliberately
+ * does not model Buildx, buildctl, builders, image output, or cache refs. The
+ * command comes from the same committed adapter plan used by a direct CLI run.
+ */
+async function runOciCliLifecycle(mode, plan, inputs) {
+    const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
+    const cliPlan = await resolveAdapterCliPlan(mode, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
+        failOnCacheError: inputs.failOnCacheError,
+        stage: inputs.stage,
     });
-    const value = output.trim();
-    if (result !== 0 || !value || value === '<no value>') {
-        return null;
-    }
-    return value;
-}
-async function getContainerGateway(containerName) {
-    const directGateway = await inspectDockerTemplate(containerName, '{{.NetworkSettings.Gateway}}');
-    if (directGateway) {
-        return directGateway;
-    }
-    const networkGateways = await inspectDockerTemplate(containerName, '{{range .NetworkSettings.Networks}}{{if .Gateway}}{{.Gateway}}{{"\\n"}}{{end}}{{end}}');
-    if (networkGateways) {
-        const firstGateway = networkGateways
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .find(Boolean);
-        if (firstGateway) {
-            return firstGateway;
-        }
-    }
-    core.warning(`Could not determine gateway for container ${containerName}, falling back to 172.17.0.1`);
-    return '172.17.0.1';
-}
-async function getContainerNetworkMode(containerName) {
-    const networkMode = await inspectDockerTemplate(containerName, '{{.HostConfig.NetworkMode}}');
-    if (!networkMode) {
-        core.warning(`Could not determine network mode for container ${containerName}, assuming bridge`);
-        return 'bridge';
-    }
-    return networkMode;
-}
-function qemuInstallArchitectures(platforms) {
-    const requestedPlatforms = parseList(platforms);
-    if (requestedPlatforms.length === 0) {
-        throw new Error('qemu=true requires at least one target in platforms.');
-    }
-    const nativeArchitecture = {
-        x64: 'amd64',
-        ia32: '386',
-        mips64el: 'mips64le',
-    }[process.arch] || process.arch;
-    const installArchitectures = [];
-    for (const platform of requestedPlatforms) {
-        const [operatingSystem, architecture] = platform.split('/');
-        if (operatingSystem !== 'linux' || !architecture) {
-            throw new Error(`qemu=true supports explicit Linux OCI platforms such as linux/arm64; received "${platform}".`);
-        }
-        if (architecture !== nativeArchitecture && !installArchitectures.includes(architecture)) {
-            installArchitectures.push(architecture);
-        }
-    }
-    return installArchitectures;
-}
-async function setupQemu(architectures) {
-    if (architectures.length === 0) {
-        core.info('QEMU setup skipped because every requested platform is native to this runner.');
-        return;
-    }
-    const result = await exec.exec('docker', ['run', '--privileged', '--rm', DEFAULT_BINFMT_IMAGE, '--install', architectures.join(',')], { ignoreReturnCode: true });
-    if (result !== 0) {
-        throw new Error(`Failed to set up QEMU for multi-platform builds (exit ${result})`);
-    }
-}
-function assertPrivilegedRunnerPolicy(operation) {
-    if (process.env.GITHUB_ACTIONS !== 'true') {
-        return;
-    }
-    const runnerEnvironment = (process.env.RUNNER_ENVIRONMENT || '').trim();
-    if (runnerEnvironment === 'github-hosted') {
-        return;
-    }
-    if (process.env[EPHEMERAL_PRIVILEGED_RUNNER_ENV] === '1') {
-        core.warning(`${operation} is using host-level privileges on a self-managed runner because `
-            + `${EPHEMERAL_PRIVILEGED_RUNNER_ENV}=1. Destroy the single-tenant runner after this job.`);
-        return;
-    }
-    const runnerDescription = runnerEnvironment === 'self-hosted'
-        ? 'a self-hosted runner'
-        : 'a runner whose environment could not be verified';
-    throw new Error(`${operation} needs host-level privileges, so BoringCache will not run it on ${runnerDescription}. `
-        + `Use a GitHub-hosted runner, or set ${EPHEMERAL_PRIVILEGED_RUNNER_ENV}=1 only when the `
-        + 'self-hosted runner is single-tenant and destroyed after this job.');
-}
-function buildxBuilderName() {
-    const runId = String(process.env.GITHUB_RUN_ID || Date.now());
-    const actionId = sanitizeBuilderToken(process.env.GITHUB_ACTION || 'one') || 'one';
-    const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    return `boringcache-${runId}-${actionId}-${uniqueSuffix}`;
-}
-function hasDriverImageOpt(driverOpts) {
-    return driverOpts.some((opt) => opt.trim().startsWith('image='));
-}
-function managedBuildKitImage(input) {
-    const image = input.trim() || DEFAULT_MANAGED_BUILDKIT_IMAGE;
-    if (!/^[A-Za-z0-9./:@_-]+$/.test(image)) {
-        throw new Error(`Unsupported managed-buildkit-image "${input}". Expected a Docker image reference.`);
-    }
-    if (image.includes('@') && !/@sha256:[a-f0-9]{64}$/.test(image)) {
-        throw new Error(`Unsupported managed-buildkit-image "${input}". Digest references must use a 64-character lowercase sha256 digest.`);
-    }
-    return image;
-}
-async function pullManagedBuildKitImage(image) {
-    const pullResult = await exec.exec('docker', ['pull', image], { ignoreReturnCode: true });
-    if (pullResult === 0) {
-        return;
-    }
-    const inspectResult = await exec.exec('docker', ['image', 'inspect', image], {
-        ignoreReturnCode: true,
-        silent: true,
-    });
-    if (inspectResult === 0) {
-        core.warning(`Could not refresh managed BuildKit image ${image}; using the local cached copy.`);
-        return;
-    }
-    throw new Error(`Could not pull managed BuildKit image ${image}, and no local copy is available.`);
-}
-async function setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, registryMode, useManagedBuildKitImage, managedImageInput) {
-    const builderName = buildxBuilderName();
-    let driverToUse = driver || 'docker-container';
-    if (driverToUse === 'docker') {
-        core.warning('Buildx driver "docker" does not support cache export; falling back to "docker-container".');
-        driverToUse = 'docker-container';
-    }
-    const effectiveDriverOpts = [...driverOpts];
-    if (useManagedBuildKitImage && driverToUse === 'docker-container' && !hasDriverImageOpt(effectiveDriverOpts)) {
-        const image = managedBuildKitImage(managedImageInput);
-        await pullManagedBuildKitImage(image);
-        effectiveDriverOpts.push(`image=${image}`);
-    }
-    if (registryMode && driverToUse === 'docker-container' && !effectiveDriverOpts.some((opt) => opt.startsWith('network='))) {
-        effectiveDriverOpts.push('network=host');
-    }
-    let configPath = '';
-    if (buildkitdConfigInline.trim()) {
-        configPath = path.join(os.tmpdir(), `buildkitd-${Date.now()}.toml`);
-        fs.writeFileSync(configPath, buildkitdConfigInline);
-    }
-    const args = ['buildx', 'create', '--name', builderName, '--driver', driverToUse];
-    for (const driverOpt of effectiveDriverOpts) {
-        args.push('--driver-opt', driverOpt);
-    }
-    if (driverToUse === 'docker-container') {
-        args.push('--buildkitd-flags', '--oci-worker-gc=false');
-    }
-    if (configPath) {
-        args.push('--config', configPath);
-    }
-    args.push('--use');
-    const createResult = await exec.exec('docker', args, { ignoreReturnCode: true });
-    if (createResult !== 0) {
-        throw new Error(`Failed to create buildx builder (exit ${createResult})`);
-    }
-    return builderName;
-}
-async function cleanupBuildxBuilder(builderName) {
-    if (!builderName) {
-        return;
-    }
-    const removeResult = await exec_exec('docker', ['buildx', 'rm', '--force', builderName], {
-        ignoreReturnCode: true,
-    });
-    if (removeResult !== 0) {
-        warning(`Failed to remove buildx builder ${builderName} (exit ${removeResult})`);
-    }
-}
-async function getBuilderPlatforms(builderName) {
-    let output = '';
-    const result = await exec.exec('docker', ['buildx', 'inspect', builderName, '--bootstrap'], {
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-    });
-    if (result !== 0) {
-        return '';
-    }
-    const line = output.split('\n').find((value) => value.trim().startsWith('Platforms:'));
-    return line ? line.replace('Platforms:', '').trim() : '';
-}
-function dockerBuildxArgs(opts) {
-    const args = ['buildx', 'build'];
-    if (opts.builder) {
-        args.push('--builder', opts.builder);
-    }
-    args.push('-f', opts.dockerfile);
-    for (const tag of opts.tags) {
-        args.push('-t', `${opts.image}:${tag}`);
-    }
-    for (const buildArg of opts.buildArgs) {
-        args.push('--build-arg', buildArg);
-    }
-    for (const label of opts.labels) {
-        args.push('--label', label);
-    }
-    for (const output of opts.outputs) {
-        args.push('--output', output);
-    }
-    for (const secret of opts.secrets) {
-        args.push('--secret', secret);
-    }
-    if (opts.target) {
-        args.push('--target', opts.target);
-    }
-    if (opts.platforms) {
-        args.push('--platform', opts.platforms);
-    }
-    if (opts.push) {
-        args.push('--push');
-    }
-    if (opts.load) {
-        args.push('--load');
-    }
-    if (opts.noCache) {
-        args.push('--no-cache');
-    }
-    args.push(`--provenance=${opts.provenance}`);
-    if (opts.sbom) {
-        args.push('--sbom=true');
-    }
-    if (opts.cacheFrom?.length) {
-        for (const cacheFrom of opts.cacheFrom) {
-            args.push('--cache-from', cacheFrom);
-        }
-    }
-    if (opts.cacheTo) {
-        args.push('--cache-to', opts.cacheTo);
-    }
-    args.push('--metadata-file', DOCKER_METADATA_FILE);
-    args.push('.');
-    return args;
-}
-function resolveDockerfilePath(workingDirectory, contextPath, dockerfileInput) {
-    if (path.isAbsolute(dockerfileInput)) {
-        return dockerfileInput;
-    }
-    const workingDirectoryCandidate = path.resolve(workingDirectory, dockerfileInput);
-    if (fs.existsSync(workingDirectoryCandidate)) {
-        return workingDirectoryCandidate;
-    }
-    return path.resolve(contextPath, dockerfileInput);
-}
-async function buildDockerImage(opts) {
-    const args = dockerBuildxArgs(opts);
-    const result = await exec.exec('docker', args, {
-        cwd: opts.context,
-        env: {
-            ...process.env,
-            DOCKER_BUILDKIT: '1',
-        },
-    });
-    if (result !== 0) {
-        throw new Error(`docker buildx build failed with exit code ${result}`);
-    }
-}
-function ociAdapterCliArgsForAcceleratedBuild(adapter, workspace, cacheTag, port, proxyBindHost, refHost, inputs, command, commandArgs, mountCache) {
-    const args = [adapter, '--workspace', workspace, '--tag', cacheTag];
-    if (port > 0) {
-        args.push('--port', String(port));
-    }
-    if (proxyBindHost.trim()) {
-        args.push('--host', proxyBindHost.trim());
-    }
-    if (refHost.trim()) {
-        args.push('--endpoint-host', refHost.trim());
+    const args = [mode, '--workspace', cliPlan.workspace];
+    if (cliPlan.proxy.port > 0) {
+        args.push('--port', String(cliPlan.proxy.port));
     }
     if (inputs.stage) {
         args.push('--stage');
     }
     else {
-        appendCliPublicationPolicy(args, inputs.readOnly);
-    }
-    for (const candidate of parseList(inputs.cacheCandidates)) {
-        args.push('--candidate', candidate);
+        appendCliPublicationPolicy(args, cliPlan.proxy.read_only);
     }
     if (inputs.failOnCacheError) {
         args.push('--fail-on-cache-error');
     }
-    if (adapter === 'docker') {
-        for (const tool of parseList(inputs.dockerToolCache)) {
-            args.push('--tool-cache', tool);
-        }
-        for (const target of parseList(inputs.dockerToolCacheTarget)) {
-            args.push('--tool-cache-target', target);
-        }
-    }
-    if (mountCache) {
-        args.push('--mount-cache');
-    }
-    appendMetadataHintArgs(args, inputs.metadataHints);
-    args.push('--', command, ...commandArgs);
-    return args;
-}
-async function buildDockerImageWithCliAdapter(workspace, cacheTag, port, proxyBindHost, refHost, inputs, opts, mountCache) {
-    const dockerBuildArgs = dockerBuildxArgs({
-        ...opts,
-        cacheFrom: undefined,
-        cacheTo: undefined,
-    });
-    const args = ociAdapterCliArgsForAcceleratedBuild('docker', workspace, cacheTag, port, proxyBindHost, refHost, inputs, 'docker', dockerBuildArgs, mountCache);
-    const result = await execBoringCache(args, {
-        cwd: opts.context,
-        env: {
-            ...process.env,
-            DOCKER_BUILDKIT: '1',
-            BORINGCACHE_MANAGED_BUILDKIT_IMAGE: managedBuildKitImage(inputs.managedBuildkitImage),
-        },
-    });
-    if (result !== 0) {
-        throw new Error(`boringcache docker failed with exit code ${result}`);
-    }
-}
-function readDockerMetadata() {
-    if (!fs.existsSync(DOCKER_METADATA_FILE)) {
-        return { imageId: '', digest: '' };
-    }
-    try {
-        const data = JSON.parse(fs.readFileSync(DOCKER_METADATA_FILE, 'utf8'));
-        return {
-            imageId: data['containerimage.config.digest'] || '',
-            digest: data['containerimage.digest'] || '',
-        };
-    }
-    catch (error) {
-        core.warning(`Failed to parse Docker metadata file: ${error.message}`);
-        return { imageId: '', digest: '' };
-    }
-}
-function materializeBuildkitTlsFiles(inputs) {
-    let temporaryDirectory = '';
-    const workspaceRoot = path.resolve(process.cwd());
-    const physicalWorkspaceRoot = fs.realpathSync(workspaceRoot);
-    const cleanup = () => {
-        if (!temporaryDirectory) {
-            return;
-        }
-        fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-        temporaryDirectory = '';
-    };
-    const materialize = (value, filename) => {
-        if (!value.trim()) {
-            return '';
-        }
-        const candidate = path.resolve(workspaceRoot, value);
-        // BuildKit TLS file inputs may name files only inside the checked-out workspace.
-        // Absolute or parent-traversal values are treated as inline PEM content instead.
-        const relativeCandidate = path.relative(workspaceRoot, candidate);
-        let candidateStats;
-        if (relativeCandidate === '..'
-            || relativeCandidate.startsWith(`..${path.sep}`)
-            || path.isAbsolute(relativeCandidate)) {
-            core.warning(`Ignoring ${filename} path outside the workspace; treating input as inline content.`);
-        }
-        else {
-            try {
-                candidateStats = fs.lstatSync(candidate);
-            }
-            catch (error) {
-                if (error.code !== 'ENOENT') {
-                    throw error;
-                }
-            }
-        }
-        if (candidateStats) {
-            if (candidateStats.isSymbolicLink() || !candidateStats.isFile()) {
-                throw new Error(`BuildKit TLS ${filename} path must be a regular, non-symlink file inside the workspace.`);
-            }
-            const physicalCandidate = fs.realpathSync(candidate);
-            if (!isPathInside(physicalWorkspaceRoot, physicalCandidate)) {
-                throw new Error(`BuildKit TLS ${filename} path resolves outside the workspace.`);
-            }
-            return physicalCandidate;
-        }
-        if (!temporaryDirectory) {
-            temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'boringcache-buildkit-tls-'));
-            fs.chmodSync(temporaryDirectory, 0o700);
-        }
-        const target = path.join(temporaryDirectory, filename);
-        // The unique private directory and exclusive create prevent a retained
-        // runner from redirecting or recovering inline TLS material.
-        // codeql[js/path-injection]
-        fs.writeFileSync(target, value, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-        return target;
-    };
-    try {
-        return {
-            tlsCa: materialize(inputs.ca, 'buildkit-ca.pem'),
-            tlsCert: materialize(inputs.cert, 'buildkit-cert.pem'),
-            tlsKey: materialize(inputs.key, 'buildkit-key.pem'),
-            cleanup,
-        };
-    }
-    catch (error) {
-        cleanup();
-        throw error;
-    }
-}
-async function buildWithMaterializedBuildkitTls(opts, inputs) {
-    const tls = materializeBuildkitTlsFiles(inputs);
-    try {
-        await buildWithBuildctl({
-            ...opts,
-            tlsCa: tls.tlsCa,
-            tlsCert: tls.tlsCert,
-            tlsKey: tls.tlsKey,
+    const startedAt = Date.now();
+    await runDockerBuildOperation(async () => {
+        const exitCode = await execBoringCache(args, {
+            cwd: plan.workingDirectory,
+            ignoreReturnCode: true,
         });
-    }
-    finally {
-        tls.cleanup();
-    }
-}
-function buildctlArgs(opts) {
-    const args = ['--addr', opts.addr];
-    if (opts.tlsCa || opts.tlsCert || opts.tlsKey) {
-        if (opts.tlsCa) {
-            args.push('--tlscacert', opts.tlsCa);
+        if (exitCode !== 0) {
+            throw new Error(`boringcache ${mode} exited with code ${exitCode}`);
         }
-        if (opts.tlsCert) {
-            args.push('--tlscert', opts.tlsCert);
-        }
-        if (opts.tlsKey) {
-            args.push('--tlskey', opts.tlsKey);
-        }
-    }
-    if (opts.tlsSkipVerify) {
-        args.push('--tlsskipverify');
-    }
-    args.push('build', '--frontend', 'dockerfile.v0');
-    args.push('--local', `context=${opts.contextPath}`);
-    args.push('--local', `dockerfile=${opts.dockerfileDir}`);
-    args.push('--opt', `filename=${opts.dockerfileName}`);
-    if (opts.noCache) {
-        args.push('--no-cache');
-    }
-    if (opts.platforms) {
-        args.push('--opt', `platform=${opts.platforms}`);
-    }
-    if (opts.target) {
-        args.push('--opt', `target=${opts.target}`);
-    }
-    for (const buildArg of opts.buildArgs) {
-        args.push('--opt', `build-arg:${buildArg}`);
-    }
-    for (const secret of opts.secrets) {
-        args.push('--secret', secret);
-    }
-    for (const ssh of opts.sshSpecs) {
-        args.push('--ssh', ssh);
-    }
-    if (opts.importCache?.length) {
-        for (const importCache of opts.importCache) {
-            args.push('--import-cache', importCache);
-        }
-    }
-    if (opts.exportCache) {
-        args.push('--export-cache', opts.exportCache);
-    }
-    if (opts.output?.trim()) {
-        args.push('--output', opts.output.trim());
-    }
-    else {
-        const nameParams = opts.imageTags.map((tag) => `name=${tag}`).join(',');
-        args.push('--output', `type=image,${nameParams},push=${opts.push ? 'true' : 'false'}`);
-    }
-    args.push('--metadata-file', opts.metadataFile);
-    return args;
-}
-async function buildWithBuildctl(opts) {
-    const args = buildctlArgs(opts);
-    const result = await exec.exec('buildctl', args);
-    if (result !== 0) {
-        throw new Error(`buildctl failed with exit code ${result}`);
-    }
-}
-function readBuildkitDigest(metadataFile) {
-    if (!fs.existsSync(metadataFile)) {
-        return '';
-    }
-    try {
-        const data = JSON.parse(fs.readFileSync(metadataFile, 'utf8'));
-        return data['containerimage.digest'] || '';
-    }
-    catch (error) {
-        core.warning(`Failed to parse BuildKit metadata file: ${error.message}`);
-        return '';
-    }
+    });
+    return {
+        workspace: cliPlan.workspace,
+        cacheTag: cliPlan.tag,
+        resolvedEntries: (cliPlan.archive_entries || [])
+            .map((entry) => entry.tag_path_pair)
+            .join('\n'),
+        verificationSpecs: adapterVerificationSpecs(cliPlan),
+        evidence: {
+            command: cliPlan.command || [],
+            command_executed: true,
+            elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
+            buildkit_cache: cliPlan.buildkit_cache || {},
+        },
+    };
 }
 async function oci_runDockerRestore(plan, inputs) {
-    const context = path.resolve(plan.workingDirectory, core.getInput('context') || '.');
-    const dockerfileInput = core.getInput('dockerfile') || 'Dockerfile';
-    const dockerCommand = normalizeDockerCommand(core.getInput('docker-command'));
-    const shouldBuild = dockerCommand !== 'setup';
-    const dockerfile = shouldBuild
-        ? resolveDockerfilePath(plan.workingDirectory, context, dockerfileInput)
-        : dockerfileInput;
-    const imageInput = core.getInput('image') || '';
-    const image = shouldBuild
-        ? core.getInput('image', { required: true })
-        : (imageInput || 'boringcache/docker-setup');
-    const buildArgs = parseMultiline(core.getInput('build-args') || '');
-    const labels = parseMultiline(core.getInput('labels') || '');
-    const outputs = parseMultiline(core.getInput('outputs') || '');
-    const tags = parseList(core.getInput('tags') || (outputs.length === 0 ? 'latest' : ''));
-    const secrets = parseMultiline(core.getInput('secrets') || '');
-    const dockerToolCache = inputs.dockerToolCache;
-    const dockerToolCaches = parseList(dockerToolCache);
-    const target = core.getInput('target') || '';
-    const platforms = parseList(core.getInput('platforms') || '').join(',');
-    const qemu = parseBooleanInput(core.getInput('qemu'), 'qemu', false);
-    const qemuArchitectures = qemu ? qemuInstallArchitectures(platforms) : [];
-    const push = parseBooleanInput(core.getInput('push'), 'push', false);
-    const load = parseBooleanInput(core.getInput('load'), 'load', true)
-        && parseList(platforms).length <= 1
-        && outputs.length === 0;
-    const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
-    const provenance = parseBooleanInput(core.getInput('provenance'), 'provenance', false);
-    const sbom = parseBooleanInput(core.getInput('sbom'), 'sbom', false);
-    const dockerMountCache = parseBooleanInput(core.getInput('docker-mount-cache'), 'docker-mount-cache', false);
-    const driver = core.getInput('driver') || 'docker-container';
-    const driverOpts = parseMultiline(core.getInput('driver-opts') || '');
-    const buildkitdConfigInline = core.getInput('buildkitd-config-inline') || '';
-    const cliOwnsManagedBuild = shouldBuild;
-    if (cliOwnsManagedBuild) {
-        assertPrivilegedRunnerPolicy('Managed BoringCache BuildKit');
-    }
-    if (qemuArchitectures.length > 0) {
-        assertPrivilegedRunnerPolicy('QEMU/binfmt registration');
-    }
-    if (dockerToolCaches.length > 0 && !shouldBuild) {
-        throw new Error('docker-tool-cache requires docker-command=build so boringcache docker can inject the BuildKit secret.');
-    }
-    if (dockerMountCache && !shouldBuild) {
-        throw new Error('docker-mount-cache requires mode=docker with docker-command=build so boringcache docker can install and authenticate the cache-mount worker.');
-    }
-    const requestedCacheTag = '';
-    let modeEvidence;
-    let resolvedWorkspace = plan.workspace;
-    let resolvedCacheTag = '';
-    saveModeState('workspace', plan.workspace);
-    saveModeState('verbose', String(inputs.verbose));
-    if (qemu) {
-        await setupQemu(qemuArchitectures);
-    }
-    let builderName = '';
-    if (cliOwnsManagedBuild) {
-        if (driver !== 'docker-container') {
-            throw new Error('BoringCache owns its managed BuildKit daemon; leave driver set to docker-container.');
-        }
-        if (driverOpts.length > 0 || buildkitdConfigInline.trim()) {
-            throw new Error('BoringCache owns its managed BuildKit daemon for docker-command=build; '
-                + 'use managed-buildkit-image instead of driver-opts and leave buildkitd-config-inline empty.');
-        }
-    }
-    else {
-        builderName = await setupBuildxBuilder(driver, driverOpts, buildkitdConfigInline, true, true, inputs.managedBuildkitImage);
-    }
-    saveModeState('builder-name', builderName);
-    core.setOutput('buildx-name', builderName);
-    core.setOutput('buildx-platforms', builderName ? await getBuilderPlatforms(builderName) : platforms);
-    {
-        let proxyBindHost = cliOwnsManagedBuild ? '' : '127.0.0.1';
-        let refHost = cliOwnsManagedBuild ? '' : '127.0.0.1';
-        if (!cliOwnsManagedBuild && driver === 'docker-container') {
-            const containerName = `buildx_buildkit_${builderName}0`;
-            const networkMode = await getContainerNetworkMode(containerName);
-            if (networkMode !== 'host') {
-                proxyBindHost = '0.0.0.0';
-                refHost = await getContainerGateway(containerName);
-            }
-        }
-        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-        const dockerPlan = await resolveDockerCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, dockerToolCache, inputs.stage, inputs.cacheCandidates, inputs.dockerToolCacheTarget, dockerMountCache);
-        const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
-        const cacheTag = dockerPlan.tag;
-        const usesCliWrappedBuild = cliOwnsManagedBuild || dockerToolCaches.length > 0;
-        if (usesCliWrappedBuild) {
-            const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
-            resolvedWorkspace = planState.resolvedWorkspace;
-            resolvedCacheTag = planState.resolvedCacheTag;
-            const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, undefined);
-            setBuildKitCacheOutputs({
-                ref: dockerPlan.buildkit_cache.cache_ref,
-                from: effectiveImports.importSpecs,
-                to: dockerPlan.buildkit_cache.cache_to,
-                buildKitCache: dockerPlan.buildkit_cache,
-                usedRefTags: effectiveImports.readableRefTags,
-                unreadableRefTags: effectiveImports.unreadableRefTags,
-                importReady: effectiveImports.importReady,
-            });
-            if (shouldBuild) {
-                await runDockerBuildOperation(() => buildDockerImageWithCliAdapter(dockerPlan.workspace, dockerPlan.tag, requestedPort, proxyBindHost, refHost, inputs, {
-                    dockerfile,
-                    context,
-                    image,
-                    tags,
-                    buildArgs,
-                    labels,
-                    outputs,
-                    secrets,
-                    target,
-                    platforms,
-                    push,
-                    load,
-                    noCache,
-                    provenance,
-                    sbom,
-                    builder: cliOwnsManagedBuild ? '' : builderName,
-                }, dockerMountCache));
-            }
-            modeEvidence = buildKitCacheEvidence('docker', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
-        }
-        else {
-            const proxy = await startRegistryProxy(actionProxyOptions({
-                command: 'cache-registry',
-                workspace: dockerPlan.workspace,
-                tag: cacheTag,
-                host: dockerPlan.proxy.host || proxyBindHost,
-                port: dockerPlan.proxy.port,
-                noGit: dockerPlan.proxy.no_git,
-                noPlatform: dockerPlan.proxy.no_platform,
-                verbose: inputs.verbose,
-                readOnly: dockerPlan.proxy.read_only,
-                stage: inputs.stage,
-                candidateDigests: dockerPlan.buildkit_cache?.cache_from_candidate_digests || [],
-                ociRequiredReadableRefs: requestedImportRefTags,
-                ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
-            }, dockerPlan.proxy));
-            saveModeState('proxy-pid', String(proxy.pid));
-            saveProxyModeState(proxy);
-            saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
-            saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
-            saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
-            saveModeState('oci-promotion-ref-tags', (dockerPlan.buildkit_cache?.promotion_ref_tags || []).join(','));
-            setProxyOutputs(proxy.port);
-            const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
-            resolvedWorkspace = planState.resolvedWorkspace;
-            resolvedCacheTag = planState.resolvedCacheTag;
-            const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
-            setBuildKitCacheOutputs({
-                ref: dockerPlan.buildkit_cache.cache_ref,
-                from: effectiveImports.importSpecs,
-                to: dockerPlan.buildkit_cache.cache_to,
-                buildKitCache: dockerPlan.buildkit_cache,
-                usedRefTags: effectiveImports.readableRefTags,
-                unreadableRefTags: effectiveImports.unreadableRefTags,
-                importReady: effectiveImports.importReady,
-            });
-            if (shouldBuild) {
-                await runDockerBuildOperation(() => buildDockerImage({
-                    dockerfile,
-                    context,
-                    image,
-                    tags,
-                    buildArgs,
-                    labels,
-                    outputs,
-                    secrets,
-                    target,
-                    platforms,
-                    push,
-                    load,
-                    noCache,
-                    provenance,
-                    sbom,
-                    builder: builderName,
-                    cacheFrom: effectiveImports.importSpecs,
-                    cacheTo: dockerPlan.buildkit_cache.cache_to,
-                }));
-            }
-            modeEvidence = buildKitCacheEvidence('docker', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
-        }
-    }
-    if (shouldBuild) {
-        const { imageId, digest } = readDockerMetadata();
-        core.setOutput('image-id', imageId);
-        core.setOutput('digest', digest);
-    }
-    core.setOutput('workspace', resolvedWorkspace);
-    core.setOutput('cache-tag', resolvedCacheTag);
-    return {
-        cacheTag: resolvedCacheTag,
-        evidence: modeEvidence,
-        // The CLI proxy owns OCI import and publication readiness. Generic
-        // verification is for archive and direct-tool tags, not registry refs.
-        verificationSpecs: [],
-    };
-}
-async function runDockerSave(options = {}) {
-    const allowSaves = options.allowSaves !== false;
-    const builderName = getModeState('builder-name');
-    try {
-        const proxyPid = getModeState('proxy-pid');
-        if (proxyPid) {
-            if (allowSaves) {
-                await verifyOciPromotionRefsThenStopProxy(proxyPid);
-            }
-            else {
-                await stopProxyFromState();
-            }
-            return;
-        }
-        if (!allowSaves) {
-            return;
-        }
-        const workspace = getModeState('workspace');
-        const cacheDir = getModeState('cache-dir');
-        const cacheTag = getModeState('cache-tag');
-        if (!workspace || !cacheDir || !cacheTag) {
-            return;
-        }
-        paths_addLocalBinPaths();
-        await saveSimpleCache(workspace, cacheTag, cacheDir, {
-            verbose: getModeState('verbose') === 'true',
-        });
-    }
-    finally {
-        await cleanupBuildxBuilder(builderName);
-    }
+    return runOciCliLifecycle('docker', plan, inputs);
 }
 async function oci_runBuildkitRestore(plan, inputs) {
-    const contextInput = core.getInput('context') || '.';
-    const contextPath = path.resolve(plan.workingDirectory, contextInput);
-    const dockerfileInput = core.getInput('dockerfile') || 'Dockerfile';
-    const dockerfilePath = path.resolve(plan.workingDirectory, contextInput, dockerfileInput);
-    const dockerfileDir = path.dirname(dockerfilePath);
-    const dockerfileName = path.basename(dockerfilePath);
-    if (!fs.existsSync(contextPath)) {
-        throw new Error(`Context path does not exist: ${contextPath}`);
-    }
-    if (!fs.existsSync(dockerfilePath)) {
-        throw new Error(`Dockerfile does not exist: ${dockerfilePath}`);
-    }
-    const image = core.getInput('image', { required: true });
-    const tags = parseList(core.getInput('tags') || 'latest');
-    const imageTags = tags.length > 0 ? tags.map((tag) => `${image}:${tag}`) : [`${image}:latest`];
-    const push = parseBooleanInput(core.getInput('push'), 'push', false);
-    const output = core.getInput('output') || '';
-    const buildArgs = parseMultiline(core.getInput('build-args') || '');
-    const secrets = parseMultiline(core.getInput('secrets') || '');
-    const sshSpecs = parseMultiline(core.getInput('ssh') || '');
-    const target = core.getInput('target') || '';
-    const platforms = parseList(core.getInput('platforms') || '').join(',');
-    const noCache = parseBooleanInput(core.getInput('no-cache'), 'no-cache', false);
-    const dockerMountCache = parseBooleanInput(core.getInput('docker-mount-cache'), 'docker-mount-cache', false);
-    if (dockerMountCache) {
-        throw new Error('docker-mount-cache requires mode=docker with docker-command=build; '
-            + 'BuildKit mode connects to a workflow-owned daemon and cannot install the cache-mount worker.');
-    }
-    const buildkitHost = core.getInput('buildkit-host', { required: true });
-    const tlsCaInput = core.getInput('buildkit-tls-ca') || '';
-    const tlsCertInput = core.getInput('buildkit-tls-cert') || '';
-    const tlsKeyInput = core.getInput('buildkit-tls-key') || '';
-    const tlsSkipVerify = parseBooleanInput(core.getInput('buildkit-tls-skip-verify'), 'buildkit-tls-skip-verify', false);
-    const requestedCacheTag = '';
-    let modeEvidence;
-    let resolvedWorkspace = plan.workspace;
-    let resolvedCacheTag = '';
-    saveModeState('workspace', plan.workspace);
-    saveModeState('verbose', String(inputs.verbose));
-    if (fs.existsSync(BUILDKIT_METADATA_FILE)) {
-        fs.rmSync(BUILDKIT_METADATA_FILE);
-    }
-    await ensureAdapterTools('buildkit', {}, execBoringCache, plan.workingDirectory);
-    {
-        let proxyBindHost = '127.0.0.1';
-        let refHost = '127.0.0.1';
-        if (buildkitHost.startsWith('docker-container://')) {
-            const containerName = buildkitHost.replace('docker-container://', '');
-            const networkMode = await getContainerNetworkMode(containerName);
-            if (networkMode !== 'host') {
-                proxyBindHost = '0.0.0.0';
-                refHost = await getContainerGateway(containerName);
-            }
-        }
-        const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-        const dockerPlan = await resolveBuildkitCliPlan(plan.workspace, plan.workingDirectory, requestedCacheTag, requestedPort, proxyBindHost, refHost, proxyPlanningReadOnly(inputs.readOnly), inputs.failOnCacheError, inputs.metadataHints, inputs.stage, inputs.cacheCandidates);
-        const requestedImportRefTags = buildKitCacheFromRefTags(dockerPlan.buildkit_cache);
-        const cacheTag = dockerPlan.tag;
-        const proxy = await startRegistryProxy(actionProxyOptions({
-            command: 'cache-registry',
-            workspace: dockerPlan.workspace,
-            tag: cacheTag,
-            host: dockerPlan.proxy.host || proxyBindHost,
-            port: dockerPlan.proxy.port,
-            noGit: dockerPlan.proxy.no_git,
-            noPlatform: dockerPlan.proxy.no_platform,
-            verbose: inputs.verbose,
-            readOnly: dockerPlan.proxy.read_only,
-            stage: inputs.stage,
-            candidateDigests: dockerPlan.buildkit_cache?.cache_from_candidate_digests || [],
-            ociRequiredReadableRefs: requestedImportRefTags,
-            ociAliasPromotionRefs: dockerPlan.buildkit_cache?.promotion_ref_tags || [],
-        }, dockerPlan.proxy));
-        saveModeState('proxy-pid', String(proxy.pid));
-        saveProxyModeState(proxy);
-        saveModeState('proxy-host', dockerPlan.proxy.host || proxyBindHost);
-        saveModeState('proxy-no-git', String(dockerPlan.proxy.no_git));
-        saveModeState('proxy-no-platform', String(dockerPlan.proxy.no_platform));
-        saveModeState('oci-promotion-ref-tags', (dockerPlan.buildkit_cache?.promotion_ref_tags || []).join(','));
-        setProxyOutputs(proxy.port);
-        const planState = recordBuildKitCachePlanState(dockerPlan, cacheTag);
-        resolvedWorkspace = planState.resolvedWorkspace;
-        resolvedCacheTag = planState.resolvedCacheTag;
-        const effectiveImports = effectiveBuildKitCacheImports(dockerPlan.buildkit_cache, proxy);
-        setBuildKitCacheOutputs({
-            ref: dockerPlan.buildkit_cache.cache_ref,
-            from: effectiveImports.importSpecs,
-            to: dockerPlan.buildkit_cache.cache_to,
-            buildKitCache: dockerPlan.buildkit_cache,
-            usedRefTags: effectiveImports.readableRefTags,
-            unreadableRefTags: effectiveImports.unreadableRefTags,
-            importReady: effectiveImports.importReady,
-        });
-        await buildWithMaterializedBuildkitTls({
-            addr: buildkitHost,
-            tlsSkipVerify,
-            contextPath,
-            dockerfileDir,
-            dockerfileName,
-            buildArgs,
-            secrets,
-            sshSpecs,
-            target,
-            platforms,
-            importCache: effectiveImports.importSpecs,
-            exportCache: dockerPlan.buildkit_cache.cache_to,
-            output,
-            imageTags,
-            push,
-            noCache,
-            metadataFile: BUILDKIT_METADATA_FILE,
-        }, { ca: tlsCaInput, cert: tlsCertInput, key: tlsKeyInput });
-        modeEvidence = buildKitCacheEvidence('buildkit', dockerPlan.buildkit_cache, effectiveImports, dockerPlan.buildkit_cache.cache_to);
-    }
-    core.setOutput('digest', readBuildkitDigest(BUILDKIT_METADATA_FILE));
-    core.setOutput('workspace', resolvedWorkspace);
-    core.setOutput('cache-tag', resolvedCacheTag);
-    return {
-        cacheTag: resolvedCacheTag,
-        evidence: modeEvidence,
-        // BuildKit uses the same CLI-owned OCI readiness boundary as Docker.
-        verificationSpecs: [],
-    };
+    return runOciCliLifecycle('buildkit', plan, inputs);
 }
-async function runBuildkitSave(options = {}) {
-    const allowSaves = options.allowSaves !== false;
-    const proxyPid = getModeState('proxy-pid');
-    if (proxyPid) {
-        if (allowSaves) {
-            await verifyOciPromotionRefsThenStopProxy(proxyPid);
-        }
-        else {
-            await stopProxyFromState();
-        }
-        return;
-    }
-    if (!allowSaves) {
-        return;
-    }
-    const workspace = getModeState('workspace');
-    const cacheDir = getModeState('cache-dir');
-    const cacheTag = getModeState('cache-tag');
-    if (!workspace || !cacheDir || !cacheTag) {
-        return;
-    }
-    paths_addLocalBinPaths();
-    await saveSimpleCache(workspace, cacheTag, cacheDir, {
-        verbose: getModeState('verbose') === 'true',
-    });
-}
+// Synchronous CLI modes complete restore, command, publication, and cleanup in
+// the main entrypoint. Their post hooks intentionally have nothing to do.
+async function runDockerSave(_options = {}) { }
+async function runBuildkitSave(_options = {}) { }
 
 ;// CONCATENATED MODULE: ./dist/mode-handlers.js
 
@@ -109382,53 +106375,11 @@ async function runModeSave(mode, options = {}) {
 
 
 
-function toSaveEntries(entriesString) {
-    if (!entriesString.trim()) {
-        return '';
-    }
-    return parseEntries(entriesString, 'restore', {
-        separatorMode: 'newline',
-    })
-        .map((entry) => `${entry.tag}:${entry.savePath}`)
-        .join('\n');
-}
-function parseSavedVerificationSpecs(raw) {
-    if (!raw.trim()) {
-        return [];
-    }
-    try {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) {
-            return [];
-        }
-        return parsed
-            .filter((spec) => spec && typeof spec.tag === 'string')
-            .map((spec) => ({
-            tag: spec.tag,
-            saveExpected: spec.saveExpected,
-        }));
-    }
-    catch {
-        return [];
-    }
-}
-function filterVerifiableSpecs(specs) {
-    return specs;
-}
-function buildCliSetupOptions(inputs, cliVersion, cliPlatform) {
+function buildCliSetupOptions(cliVersion, cliPlatform) {
     return {
         version: cliVersion,
         platform: cliPlatform,
-        ...(inputs.trustedWorkspaceSigningKeyFingerprint
-            ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
-            : {}),
     };
-}
-function parseSavedTagList(raw) {
-    return new Set(raw
-        .split(',')
-        .map((entry) => entry.trim())
-        .filter(Boolean));
 }
 function readXcodeEvidence(filePath) {
     if (!filePath || !external_fs_namespaceObject.existsSync(filePath)) {
@@ -109450,18 +106401,12 @@ function readXcodeEvidence(filePath) {
         return null;
     }
 }
-function buildLegacyVerificationSpecs(verifySaveTags) {
-    return verifySaveTags.map((tag) => ({
-        tag,
-        saveExpected: true,
-    }));
-}
-async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, saveStatus) {
+async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, trustState, saveStatus) {
     const diagnostics = loadDiagnosticsConfig(inputs);
-    const proxyLogPath = getState('proxy-log-path') || getState('mode-proxy-log-path');
-    const candidateReceiptFile = getState('candidate-receipt-file');
+    const proxyLogPath = getActionState('proxy-log-path') || getActionState('mode-proxy-log-path');
+    const candidateReceiptFile = getActionState('candidate-receipt-file');
     const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
-    const xcodeEvidencePath = getState('mode-xcode-evidence-json');
+    const xcodeEvidencePath = getActionState('mode-xcode-evidence-json');
     const xcodeEvidence = readXcodeEvidence(xcodeEvidencePath);
     writeActionEvidence('post', {
         phase_status: 'completed',
@@ -109470,8 +106415,6 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         working_directory: workingDirectory || process.cwd(),
         workspace: genericWorkspace || '',
         generic_entries: genericEntries || '',
-        verify_mode: verifyMode,
-        verify_save_tags: verifySaveTags,
         trust_state: trustState,
         diagnostics_level: diagnostics.level,
         save_status: saveStatus,
@@ -109485,8 +106428,6 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         info(`working-directory: ${workingDirectory || process.cwd()}`);
         info(`workspace: ${genericWorkspace || '(none)'}`);
         info(`generic-entries: ${genericEntries || '(none)'}`);
-        info(`verify-mode: ${verifyMode}`);
-        info(`verify-save-tags: ${verifySaveTags.join(',') || '(none)'}`);
         info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
         info(`staged-candidates: ${stagedCandidates.map((candidate) => candidate.id).join(',') || '(none)'}`);
         if (xcodeEvidence) {
@@ -109511,82 +106452,51 @@ async function run() {
     let postFailureContext = {};
     let strictPostFailure = false;
     try {
+        let resolvedMode = getActionState('resolved-mode');
+        if (!resolvedMode) {
+            info('Post step skipped: the main step did not create a lifecycle plan.');
+            return;
+        }
         const inputs = getInputs();
         strictPostFailure = inputs.failOnCacheError;
-        const cliVersion = getState('cli-version') || inputs.cliVersion;
-        let cliCapabilityVersion = getState('cli-capability-version');
-        const cliPlatform = getState('cli-platform') || inputs.cliPlatform || undefined;
-        let resolvedMode = getState('resolved-mode');
-        let workingDirectory = getState('working-directory');
-        let genericEntries = getState('generic-cache-entries');
-        let genericWorkspace = getState('generic-cache-workspace');
-        let force = getState('force') === 'true';
-        let verbose = getState('verbose') === 'true';
-        const verifyMode = (getState('verify-mode') || inputs.verify);
-        strictPostFailure ||= verifyMode === 'check';
-        const verifyTimeoutSeconds = normalizeVerifyTimeoutSeconds(getState('verify-timeout-seconds') || String(inputs.verifyTimeoutSeconds));
-        const verifyRequireServerSignature = getState('verify-require-server-signature') === 'true' || inputs.verifyRequireServerSignature;
-        const requestedTrustPolicy = normalizeTrustPolicy(getState('trust-policy') || inputs.trustPolicy);
-        const savedTrustDecision = getState('trust-decision');
+        const cliVersion = getActionState('cli-version');
+        let cliCapabilityVersion = getActionState('cli-capability-version');
+        const cliPlatform = getActionState('cli-platform') || inputs.cliPlatform || undefined;
+        let workingDirectory = getActionState('working-directory');
+        let genericEntries = getActionState('generic-cache-entries');
+        let genericWorkspace = getActionState('generic-cache-workspace');
+        const verbose = getActionState('verbose') === 'true';
+        const requestedTrustPolicy = normalizeTrustPolicy(getActionState('trust-policy') || inputs.trustPolicy);
+        const savedTrustDecision = getActionState('trust-decision');
         const trustDecision = savedTrustDecision
             ? parseSavedTrustDecision(savedTrustDecision, requestedTrustPolicy)
             : await utils_resolveTrustDecision(requestedTrustPolicy);
         const resolvedTrustPolicy = trustDecision.resolved;
         applyTrustEnvPolicy(trustDecision);
         const trustState = buildActionTrustState(trustDecision);
-        if (resolvedMode === 'cargo') {
-            info('Post step skipped: mode cargo completed its synchronous CLI lifecycle in the main Action step.');
+        if (['cargo', 'docker', 'buildkit'].includes(resolvedMode)) {
+            info(`Post step skipped: mode ${resolvedMode} completed its synchronous CLI lifecycle in the main Action step.`);
             return;
         }
-        let candidateReceiptFile = getState('candidate-receipt-file');
+        let candidateReceiptFile = getActionState('candidate-receipt-file');
         if (resolvedTrustPolicy === 'stage' && !candidateReceiptFile) {
             candidateReceiptFile = prepareCandidateReceiptFile();
-            saveState('candidate-receipt-file', candidateReceiptFile);
+            lifecycle_state_saveActionState('candidate-receipt-file', candidateReceiptFile);
         }
         useCandidateReceiptFile(candidateReceiptFile);
-        let verifySaveTags = getState('verify-save-tags')
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter(Boolean);
-        let verifySaveSpecs = parseSavedVerificationSpecs(getState('verify-save-specs'));
         postFailureContext = {
             resolved_mode: resolvedMode || '',
             working_directory: workingDirectory || '',
             workspace: genericWorkspace || '',
             generic_entries: genericEntries || '',
-            verify_mode: verifyMode,
-            verify_save_tags: verifySaveTags,
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
             trust_state: trustState,
         };
         if (cliVersion.toLowerCase() !== 'skip') {
-            await ensureBoringCache(buildCliSetupOptions(inputs, cliVersion, cliPlatform));
-        }
-        if ((resolvedMode || inputs.mode).trim().toLowerCase() === 'xcode') {
-            await ensureXcodePlugin(cliVersion);
+            await ensureBoringCache(buildCliSetupOptions(cliVersion, cliPlatform));
         }
         if (!cliCapabilityVersion) {
             cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);
-        }
-        if (!resolvedMode || (!genericEntries && !genericWorkspace)) {
-            const plan = await buildPlan({
-                ...inputs,
-                cliVersion: cliCapabilityVersion,
-                readOnly: resolvedTrustPolicy === 'restore',
-                stage: resolvedTrustPolicy === 'stage',
-            });
-            resolvedMode = plan.mode;
-            if (!workingDirectory) {
-                workingDirectory = plan.workingDirectory;
-            }
-            if (!genericWorkspace) {
-                genericWorkspace = plan.workspace;
-            }
-            if (!genericEntries) {
-                genericEntries = toSaveEntries(plan.archiveEntries);
-            }
-            force = inputs.force;
-            verbose = inputs.verbose;
         }
         postFailureContext = {
             ...postFailureContext,
@@ -109595,9 +106505,6 @@ async function run() {
             workspace: genericWorkspace || '',
             generic_entries: genericEntries || '',
         };
-        if (verifySaveSpecs.length === 0 && verifySaveTags.length > 0) {
-            verifySaveSpecs = buildLegacyVerificationSpecs(verifySaveTags);
-        }
         if (workingDirectory) {
             process.chdir(workingDirectory);
         }
@@ -109608,7 +106515,7 @@ async function run() {
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
                 info(`Save skipped: trust-policy ${requestedTrustPolicy} resolved to restore.`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
             return;
         }
         const requiredTokenPresent = resolvedTrustPolicy === 'stage' ? hasStageToken() : auth_hasSaveToken();
@@ -109617,46 +106524,29 @@ async function run() {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                notice(`Save skipped: ${resolvedTrustPolicy === 'stage' ? missingStageTokenMessage() : auth_missingSaveTokenMessage()}`);
+                notice(`Save skipped: ${resolvedTrustPolicy === 'stage' ? auth_missingStageTokenMessage() : auth_missingSaveTokenMessage()}`);
             }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_token' : 'skipped_missing_token');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_missing_token' : 'skipped_missing_token');
             return;
         }
         if (resolvedMode && resolvedMode !== 'archive') {
             await runModeSave(resolvedMode);
-            const skippedModeVerifyTags = parseSavedTagList(getState('mode-skipped-verify-tags'));
-            if (skippedModeVerifyTags.size > 0) {
-                verifySaveTags = verifySaveTags.filter((tag) => !skippedModeVerifyTags.has(tag));
-                verifySaveSpecs = verifySaveSpecs.filter((spec) => !skippedModeVerifyTags.has(spec.tag));
-            }
         }
         if (!genericEntries || !genericWorkspace) {
-            if (verifyMode !== 'none' && verifySaveSpecs.length > 0 && genericWorkspace) {
-                await verifyVerificationSpecs(genericWorkspace, verifySaveSpecs, {
-                    mode: verifyMode,
-                    timeoutSeconds: verifyTimeoutSeconds,
-                    requireServerSignature: verifyRequireServerSignature,
-                    verbose,
-                    acceptPendingSaveExpected: true,
-                });
-            }
-            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage' && resolvedMode && resolvedMode !== 'archive'
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedTrustPolicy === 'stage' && resolvedMode && resolvedMode !== 'archive'
                 ? 'mode_post_staged'
                 : resolvedMode && resolvedMode !== 'archive'
                     ? 'mode_post_no_generic_save'
                     : 'no_generic_save');
             return;
         }
-        const saveEntries = parseEntries(genericEntries, 'save', {
+        const saveEntries = inputs_parseEntries(genericEntries, 'save', {
             separatorMode: 'newline',
         })
             .map((entry) => `${entry.tag}:${entry.savePath}`);
         const args = ['save', genericWorkspace];
         for (const entry of saveEntries) {
             args.push('--entry', entry);
-        }
-        if (force) {
-            args.push('--force');
         }
         if (resolvedTrustPolicy === 'stage') {
             args.push('--stage');
@@ -109668,17 +106558,7 @@ async function run() {
             args.push('--fail-on-cache-error');
         }
         await setup_execBoringCache(args);
-        const verifiableSaveSpecs = filterVerifiableSpecs(verifySaveSpecs);
-        if (verifyMode !== 'none' && verifiableSaveSpecs.length > 0) {
-            await verifyVerificationSpecs(genericWorkspace, verifiableSaveSpecs, {
-                mode: verifyMode,
-                timeoutSeconds: verifyTimeoutSeconds,
-                requireServerSignature: verifyRequireServerSignature,
-                verbose,
-                acceptPendingSaveExpected: true,
-            });
-        }
-        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, verifyMode, verifySaveTags, trustState, resolvedTrustPolicy === 'stage'
+        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedTrustPolicy === 'stage'
             ? resolvedMode && resolvedMode !== 'archive'
                 ? 'mode_post_and_generic_stage'
                 : 'staged'
@@ -109698,6 +106578,7 @@ async function run() {
     }
     finally {
         process.chdir(originalCwd);
+        removeActionStateDocument();
     }
 }
 

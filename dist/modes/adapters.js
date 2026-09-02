@@ -2,9 +2,8 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as path from 'path';
-import { proxyStopTimeoutMs, startRegistryProxy, stopRegistryProxy, } from '../core';
-import { detectNodePackageManager, } from '../utils';
-import { actionProxyOptions, adapterVerificationSpecs, applyAdapterSetupPlan, captureCommand, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, execBoringCache, exportEnvVars, getModeState, getModeStateBoolean, parseBooleanInput, prependExistingNixConfig, proxyPlanningReadOnly, requireAdapterSetupPlan, requireSetupDirectory, requireSetupFilePath, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxyWithFallback, waitForArchiveMaterialization, } from './shared';
+import { startRegistryProxy, } from '../core';
+import { actionProxyOptions, adapterVerificationSpecs, applyAdapterSetupPlan, captureCommand, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, execBoringCache, exportEnvVars, getModeState, getModeStateBoolean, prependExistingNixConfig, proxyPlanningReadOnly, requireAdapterSetupPlan, requireSetupDirectory, requireSetupFilePath, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxy, waitForArchiveMaterialization, } from './shared';
 export async function shutdownBazelServer() {
     await exec.exec('bazel', ['shutdown'], {
         ignoreReturnCode: true,
@@ -34,53 +33,13 @@ export function nxEnvForStartedProxy(plan, actualPort) {
     envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
     return envVars;
 }
-export function plannedNodePackageManagerCacheDir(packageManager, plan) {
-    if (!packageManager) {
-        return null;
-    }
-    switch (packageManager.name) {
-        case 'pnpm':
-            return plan.env_vars?.PNPM_STORE_DIR || plan.env_vars?.NPM_CONFIG_STORE_DIR || packageManager.cacheDir;
-        case 'yarn':
-            return plan.env_vars?.YARN_CACHE_FOLDER || packageManager.cacheDir;
-        case 'npm':
-            return plan.env_vars?.npm_config_cache || plan.env_vars?.NPM_CONFIG_CACHE || packageManager.cacheDir;
-    }
-}
-export async function ensureCorepackPackageManager(workingDirectory, packageManager, runtimeTools) {
-    if (!packageManager || packageManager.name === 'npm' || runtimeTools.some((tool) => tool.name === packageManager.name)) {
-        return;
-    }
-    const corepackEnabled = await exec.exec('corepack', ['enable'], { cwd: workingDirectory, ignoreReturnCode: true });
-    if (corepackEnabled !== 0) {
-        core.notice(`corepack enable failed for ${packageManager.name}; continuing without corepack bootstrap`);
-        return;
-    }
-    if (packageManager.packageManagerField) {
-        await exec.exec('corepack', ['install'], { cwd: workingDirectory, ignoreReturnCode: true });
-        return;
-    }
-    if (packageManager.version) {
-        await exec.exec('corepack', ['prepare', `${packageManager.name}@${packageManager.version}`, '--activate'], { cwd: workingDirectory, ignoreReturnCode: true });
-    }
-}
 export async function runBazelRestore(plan, inputs, options) {
-    const inputVersion = core.getInput('bazel-version') || '';
-    const bazelrcLines = core.getInput('bazelrc-lines') || '';
-    const runtimeVersion = plan.runtimeTools.find((tool) => tool.name === 'bazel')?.version || '';
-    const bazelVersion = inputVersion || runtimeVersion;
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-        bazelrcLines,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('bazel', proxyPlan.setup);
     saveModeState('proxy-pid', '');
-    if (bazelVersion) {
-        core.exportVariable('USE_BAZEL_VERSION', bazelVersion);
-    }
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -96,10 +55,9 @@ export async function runBazelRestore(plan, inputs, options) {
     saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheTag,
         verificationSpecs: adapterVerificationSpecs(proxyPlan),
     };
@@ -123,9 +81,7 @@ export function goCacheProgForProxy(proxyPlan, port) {
 }
 export async function runGoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
@@ -147,10 +103,9 @@ export async function runGoRestore(plan, inputs) {
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
     configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -158,14 +113,8 @@ export async function runGoRestore(plan, inputs) {
     };
 }
 export async function runGradleRestore(plan, inputs, options) {
-    const gradleHome = core.getInput('gradle-home') || '';
-    const enableBuildCache = parseBooleanInput(core.getInput('enable-build-cache'), 'enable-build-cache', true);
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-        gradleHome,
-        enableGradleBuildCache: enableBuildCache,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('gradle', proxyPlan.setup);
@@ -188,10 +137,9 @@ export async function runGradleRestore(plan, inputs, options) {
     saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -200,19 +148,7 @@ export async function runGradleRestore(plan, inputs, options) {
 }
 export async function runMavenRestore(plan, inputs, options) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const mavenExtensionsPath = core.getInput('maven-extensions-path') || '';
-    const mavenBuildCacheConfigPath = core.getInput('maven-build-cache-config-path') || '';
-    const mavenLocalRepo = core.getInput('maven-local-repo') || '';
-    const mavenBuildCacheExtensionVersion = core.getInput('maven-build-cache-extension-version') || '';
-    const mavenBuildCacheId = core.getInput('maven-build-cache-id') || '';
-    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-        mavenExtensionsPath,
-        mavenBuildCacheConfigPath,
-        mavenLocalRepo,
-        mavenBuildCacheExtensionVersion,
-        mavenBuildCacheId,
-    });
+    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
@@ -235,16 +171,12 @@ export async function runMavenRestore(plan, inputs, options) {
     saveProxyModeState(proxy);
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    const extensionsPath = requireSetupFilePath(setup, 'extensions.xml', 'maven extensions.xml');
-    const buildCacheConfigPath = requireSetupFilePath(setup, 'maven-build-cache-config.xml', 'maven build-cache config');
-    const localRepo = requireSetupDirectory(setup, 'maven local repository directory');
-    core.setOutput('cache-tag', cacheTag);
+    requireSetupFilePath(setup, 'extensions.xml', 'maven extensions.xml');
+    requireSetupFilePath(setup, 'maven-build-cache-config.xml', 'maven build-cache config');
+    requireSetupDirectory(setup, 'maven local repository directory');
     setProxyOutputs(proxy.port);
-    core.setOutput('maven-extensions-path', extensionsPath);
-    core.setOutput('maven-build-cache-config-path', buildCacheConfigPath);
-    core.setOutput('maven-local-repo', localRepo);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -297,7 +229,6 @@ export async function runNixRestore(plan, inputs, options) {
     await assertNixTrustedUser();
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('nix', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
         failOnCacheError: inputs.failOnCacheError,
     });
     const setup = requireAdapterSetupPlan('nix', proxyPlan.setup);
@@ -325,10 +256,9 @@ export async function runNixRestore(plan, inputs, options) {
     saveModeState('nix-fail-on-cache-error', String(inputs.failOnCacheError));
     await waitForArchiveMaterialization(options);
     applyAdapterSetupPlan(setup);
-    core.setOutput('cache-tag', proxyPlan.tag);
-    core.setOutput('workspace', proxyPlan.workspace);
     setProxyOutputs(proxy.port);
     return {
+        workspace: proxyPlan.workspace,
         cacheTag: proxyPlan.tag,
         verificationSpecs: adapterVerificationSpecs(proxyPlan),
     };
@@ -338,7 +268,7 @@ export async function runXcodeRestore(plan, inputs, options) {
         throw new Error('mode=xcode requires a macOS runner with Xcode installed.');
     }
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const setup = requireAdapterSetupPlan('xcode', proxyPlan.setup);
     const env = setup.env_vars || {};
     const socketPath = env.BORINGCACHE_XCODE_PROXY_SOCKET?.trim() || '';
@@ -368,10 +298,9 @@ export async function runXcodeRestore(plan, inputs, options) {
     saveModeState('proxy-pid', String(proxy.pid));
     saveModeState('xcode-evidence-json', evidencePath);
     saveProxyModeState(proxy);
-    core.setOutput('cache-tag', proxyPlan.tag);
-    core.setOutput('workspace', proxyPlan.workspace);
     setProxyOutputs(proxy.port);
     return {
+        workspace: proxyPlan.workspace,
         cacheTag: proxyPlan.tag,
         evidence: {
             xcode: {
@@ -388,42 +317,20 @@ export async function runXcodeRestore(plan, inputs, options) {
 }
 export async function runTurboProxyRestore(plan, inputs) {
     const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-    });
+    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
-    const packageManager = await detectNodePackageManager(plan.workingDirectory);
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
         noPlatform: turboPlan.proxy.no_platform,
         noGit: turboPlan.proxy.no_git,
     });
-    const proxyPromise = startPortableCacheProxyWithFallback(workspace, turboPlan.proxy.port || preferredPort, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
-    const [proxyResult, corepackResult] = await Promise.allSettled([
-        proxyPromise,
-        ensureCorepackPackageManager(plan.workingDirectory, packageManager, plan.runtimeTools),
-    ]);
-    if (corepackResult.status === 'rejected') {
-        if (proxyResult.status === 'fulfilled') {
-            await stopRegistryProxy(proxyResult.value.pid, proxyResult.value.port, proxyStopTimeoutMs(proxyResult.value.shutdownBudgetSecs ?? null));
-        }
-        throw corepackResult.reason;
-    }
-    if (proxyResult.status === 'rejected') {
-        throw proxyResult.reason;
-    }
-    const proxy = proxyResult.value;
-    if (packageManager) {
-        core.setOutput('package-manager', packageManager.name);
-        core.setOutput('package-manager-cache-dir', plannedNodePackageManagerCacheDir(packageManager, turboPlan) || packageManager.cacheDir);
-    }
+    const proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
     exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port));
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),
@@ -432,23 +339,20 @@ export async function runTurboProxyRestore(plan, inputs) {
 }
 export async function runNxProxyRestore(plan, inputs) {
     const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {
-        metadataHintsInput: inputs.metadataHints,
-    });
+    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const workspace = nxPlan.workspace;
     const cacheTag = nxPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
         noPlatform: nxPlan.proxy.no_platform,
         noGit: nxPlan.proxy.no_git,
     });
-    const proxy = await startPortableCacheProxyWithFallback(workspace, nxPlan.proxy.port || preferredPort, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
+    const proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
     exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port));
-    core.setOutput('cache-tag', cacheTag);
     setProxyOutputs(proxy.port);
-    core.setOutput('workspace', workspace);
     return {
+        workspace,
         cacheHit: preflight.kvHit,
         cacheTag,
         evidence: directCachePreflightEvidence(preflight),

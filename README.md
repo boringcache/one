@@ -15,7 +15,6 @@ then select its archive profile in CI:
 - uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1.19.7
   with:
     trust-policy: auto
-    setup: none
     mode: archive
     cache-profiles: ci
   env:
@@ -28,10 +27,9 @@ The same profile works locally with
 stay in `.boringcache.toml`, so the workflow only chooses what to run.
 
 `trust-policy: auto` restores on pull requests and publishes only when the job
-has `BORINGCACHE_SAVE_TOKEN`. Isolated candidate jobs use
-`BORINGCACHE_STAGE_TOKEN`; trusted publishing jobs receive their exact
-`cache-candidates` output. Every job that reads cache needs
-`BORINGCACHE_RESTORE_TOKEN`.
+has `BORINGCACHE_SAVE_TOKEN`. Isolated archive candidate jobs use
+`BORINGCACHE_STAGE_TOKEN` and expose their exact `cache-candidates` output.
+Every job that reads cache needs `BORINGCACHE_RESTORE_TOKEN`.
 
 ## Supported modes
 
@@ -41,6 +39,11 @@ The released modes are `archive`, `docker`, `buildkit`, `bazel`, `cargo`,
 
 Cargo publishes target state only after the configured command succeeds. A
 failed Cargo build never publishes incomplete target state.
+
+Docker and BuildKit modes invoke the command committed under the matching
+adapter in `.boringcache.toml`. Buildx, buildctl, builder, image, and cache-ref
+configuration stay in the CLI plan. Use `boringcache docker -- ...` or
+`boringcache buildkit -- ...` directly when the command varies per workflow.
 
 `mode: gha` exposes BoringCache's Actions-compatible service, but transparent
 provider-action routing requires a CI runner integration that installs that
@@ -57,6 +60,7 @@ stored by GitHub.
 - [Set up BoringCache in GitHub Actions](https://boringcache.com/docs/github-actions)
 - [Choose an adapter](https://boringcache.com/docs/adapters)
 - [Check every shipped input and output](action.yml)
+- [Review release history](CHANGELOG.md)
 
 ## Updates
 
