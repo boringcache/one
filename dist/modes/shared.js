@@ -3,7 +3,7 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execBoringCache as execBoringCacheCore, findAvailablePort, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, } from '../core';
+import { execBoringCache as execBoringCacheCore, getActionState, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, saveActionState, } from '../core';
 import { DEFAULT_OCI_HYDRATION_POLICY, requireCliVerificationTags, } from '../utils';
 export async function waitForArchiveMaterialization(options) {
     await options.archiveMaterialized;
@@ -56,19 +56,6 @@ export function assertSupportedCliDryRunSchema(adapter, plan) {
             + `(expected ${SUPPORTED_CLI_DRY_RUN_SCHEMA_VERSION}). Update boringcache/one or pin cli-version.`);
     }
 }
-export function parseBooleanInput(value, inputName, defaultValue = false) {
-    if (value === undefined || value === null || value === '') {
-        return defaultValue;
-    }
-    const normalized = String(value).trim();
-    if (['true', 'True', 'TRUE'].includes(normalized)) {
-        return true;
-    }
-    if (['false', 'False', 'FALSE'].includes(normalized)) {
-        return false;
-    }
-    throw new Error(`Unsupported ${inputName} "${value}". Expected true, True, TRUE, false, False, or FALSE.`);
-}
 export function parsePortInput(value, inputName) {
     const trimmed = value.trim();
     if (!/^\d+$/.test(trimmed)) {
@@ -85,32 +72,6 @@ export async function resolvePreferredPort(value, inputName) {
         return parsePortInput(value, inputName);
     }
     return 0;
-}
-export function parseList(input, separator = /[\n,]/) {
-    return input
-        .split(separator)
-        .map((item) => item.trim())
-        .filter(Boolean);
-}
-export function appendMetadataHintArgs(args, metadataHintsInput) {
-    for (const hint of parseList(metadataHintsInput)) {
-        args.push('--metadata-hint', hint);
-    }
-}
-export function parseMultiline(input) {
-    return input
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-}
-export function slugify(value) {
-    return value.replace(/[^a-zA-Z0-9]/g, '-');
-}
-export function sanitizeBuilderToken(value) {
-    return slugify(value)
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .toLowerCase();
 }
 export function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
@@ -197,10 +158,10 @@ export function modeStateKey(key) {
     return `mode-${key}`;
 }
 export function saveModeState(key, value) {
-    core.saveState(modeStateKey(key), value);
+    saveActionState(modeStateKey(key), value);
 }
 export function getModeState(key) {
-    return core.getState(modeStateKey(key));
+    return getActionState(modeStateKey(key));
 }
 export function getModeStateList(key) {
     return getModeState(key)
@@ -230,10 +191,9 @@ export function registryProxyLogPath(port) {
 }
 export function setProxyOutputs(port) {
     const logPath = registryProxyLogPath(port);
-    core.saveState('proxy-port', String(port));
-    core.saveState('proxy-log-path', logPath);
+    saveActionState('proxy-port', String(port));
+    saveActionState('proxy-log-path', logPath);
     core.setOutput('proxy-port', String(port));
-    core.setOutput('proxy-log-path', logPath);
 }
 export function saveProxyModeState(proxy) {
     saveModeState('proxy-port', String(proxy.port));
@@ -262,15 +222,38 @@ export function emitCliPlannerWarnings(stderr) {
         }
     }
 }
-export function normalizeDockerCommand(value) {
-    const command = (value.trim() || 'build');
-    if (command === 'build' || command === 'setup') {
-        return command;
+async function preflightAdapterRequirements(adapter, workingDirectory) {
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await execBoringCache(['system', 'requirements', adapter, '--check'], {
+        cwd: workingDirectory,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    if (exitCode !== 0) {
+        throw new Error(stderr.trim()
+            || stdout.trim()
+            || `boringcache system requirements ${adapter} --check exited with code ${exitCode}`);
     }
-    throw new Error(`Unsupported docker-command "${value}". Expected build or setup.`);
+}
+async function preflightPlannedRequirements(adapter, plan, workingDirectory) {
+    if (Array.isArray(plan.setup?.required_tools) && plan.setup.required_tools.length > 0) {
+        await preflightAdapterRequirements(adapter, workingDirectory);
+    }
 }
 export async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, inputCacheTag, preferredPort, readOnly, options = {}) {
-    const args = [adapter, '--workspace', workspace];
+    const args = [adapter];
+    if (workspace.trim()) {
+        args.push('--workspace', workspace.trim());
+    }
     const trimmedCacheTag = inputCacheTag.trim();
     if (trimmedCacheTag) {
         args.push('--tag', trimmedCacheTag);
@@ -278,31 +261,11 @@ export async function resolveAdapterCliPlan(adapter, workspace, workingDirectory
     if (preferredPort > 0) {
         args.push('--port', String(preferredPort));
     }
-    appendCliPublicationPolicy(args, readOnly);
-    appendMetadataHintArgs(args, options.metadataHintsInput || '');
-    for (const line of parseMultiline(options.bazelrcLines || '')) {
-        args.push('--bazelrc-line', line);
+    if (options.stage) {
+        args.push('--stage');
     }
-    if (options.gradleHome?.trim()) {
-        args.push('--gradle-home', options.gradleHome.trim());
-    }
-    if (options.enableGradleBuildCache === false) {
-        args.push('--no-gradle-build-cache-property');
-    }
-    if (options.mavenLocalRepo?.trim()) {
-        args.push('--maven-local-repo', options.mavenLocalRepo.trim());
-    }
-    if (options.mavenExtensionsPath?.trim()) {
-        args.push('--maven-extensions-path', options.mavenExtensionsPath.trim());
-    }
-    if (options.mavenBuildCacheConfigPath?.trim()) {
-        args.push('--maven-build-cache-config-path', options.mavenBuildCacheConfigPath.trim());
-    }
-    if (options.mavenBuildCacheExtensionVersion?.trim()) {
-        args.push('--maven-build-cache-extension-version', options.mavenBuildCacheExtensionVersion.trim());
-    }
-    if (options.mavenBuildCacheId?.trim()) {
-        args.push('--maven-build-cache-id', options.mavenBuildCacheId.trim());
+    else {
+        appendCliPublicationPolicy(args, readOnly);
     }
     if (options.failOnCacheError) {
         args.push('--fail-on-cache-error');
@@ -335,96 +298,8 @@ export async function resolveAdapterCliPlan(adapter, workspace, workingDirectory
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     assertSupportedCliDryRunSchema(adapter, plan);
+    await preflightPlannedRequirements(adapter, plan, workingDirectory);
     return plan;
-}
-export async function resolveOciCliPlan(adapter, adapterCommand, workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
-    const args = [adapter, '--workspace', workspace];
-    const trimmedCacheTag = inputCacheTag.trim();
-    if (trimmedCacheTag) {
-        args.push('--tag', trimmedCacheTag);
-    }
-    if (preferredPort > 0) {
-        args.push('--port', String(preferredPort));
-    }
-    if (host.trim()) {
-        args.push('--host', host.trim());
-    }
-    if (endpointHost.trim()) {
-        args.push('--endpoint-host', endpointHost.trim());
-    }
-    if (stage) {
-        args.push('--stage');
-    }
-    else {
-        appendCliPublicationPolicy(args, readOnly);
-    }
-    for (const candidate of parseList(cacheCandidatesInput)) {
-        args.push('--candidate', candidate);
-    }
-    if (failOnCacheError) {
-        args.push('--fail-on-cache-error');
-    }
-    if (adapter === 'docker') {
-        for (const tool of parseList(dockerToolCacheInput)) {
-            args.push('--tool-cache', tool);
-        }
-        for (const target of parseList(dockerToolCacheTargetInput)) {
-            args.push('--tool-cache-target', target);
-        }
-    }
-    if (mountCache) {
-        args.push('--mount-cache');
-    }
-    appendMetadataHintArgs(args, metadataHintsInput);
-    args.push('--dry-run', '--json', '--', ...adapterCommand);
-    let stdout = '';
-    let stderr = '';
-    const env = {};
-    for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) {
-            env[key] = value;
-        }
-    }
-    if (env.GITHUB_ACTIONS === 'true' && !env.BORINGCACHE_CI_RUN_STARTED_AT) {
-        env.BORINGCACHE_CI_RUN_STARTED_AT = new Date().toISOString();
-        process.env.BORINGCACHE_CI_RUN_STARTED_AT = env.BORINGCACHE_CI_RUN_STARTED_AT;
-    }
-    const exitCode = await exec.exec('boringcache', args, {
-        cwd: workingDirectory,
-        env,
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                stdout += data.toString();
-            },
-            stderr: (data) => {
-                stderr += data.toString();
-            },
-        },
-    });
-    if (exitCode !== 0) {
-        throw new Error(stderr.trim() || stdout.trim() || `boringcache ${adapter} --dry-run --json exited with code ${exitCode}`);
-    }
-    emitCliPlannerWarnings(stderr);
-    let plan;
-    try {
-        plan = JSON.parse(stdout);
-    }
-    catch (error) {
-        throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    assertSupportedCliDryRunSchema(adapter, plan);
-    if (!plan.buildkit_cache?.cache_ref || !plan.buildkit_cache.cache_from) {
-        throw new Error(`boringcache ${adapter} dry-run JSON did not include managed BuildKit cache planning data`);
-    }
-    return plan;
-}
-export async function resolveDockerCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', dockerToolCacheInput = '', stage = false, cacheCandidatesInput = '', dockerToolCacheTargetInput = '', mountCache = false) {
-    return resolveOciCliPlan('docker', ['docker', 'buildx', 'build', '.'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, dockerToolCacheInput, stage, cacheCandidatesInput, dockerToolCacheTargetInput, mountCache);
-}
-export async function resolveBuildkitCliPlan(workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput = '', stage = false, cacheCandidatesInput = '') {
-    return resolveOciCliPlan('buildkit', ['buildctl', 'build', '--frontend', 'dockerfile.v0'], workspace, workingDirectory, inputCacheTag, preferredPort, host, endpointHost, readOnly, failOnCacheError, metadataHintsInput, '', stage, cacheCandidatesInput, '');
 }
 export async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
     if (!hasSaveToken()) {
@@ -453,14 +328,6 @@ export async function startPortableCacheProxy(workspace, port, tag, readOnly = f
         readOnly,
     }, proxyPlan));
     return proxy;
-}
-export async function startPortableCacheProxyWithFallback(workspace, preferredPort, tag, readOnly, proxyPlan) {
-    try {
-        return await startPortableCacheProxy(workspace, preferredPort, tag, readOnly, proxyPlan);
-    }
-    catch {
-        return startPortableCacheProxy(workspace, await findAvailablePort(), tag, readOnly, proxyPlan);
-    }
 }
 export function emptyDirectCacheTagCheckStatus() {
     return {

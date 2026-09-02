@@ -3,7 +3,6 @@ import * as exec from '@actions/exec';
 import { execBoringCache } from './setup';
 import { parseEntries } from './inputs';
 import { requireCliVerificationTags } from './tags';
-import { resolveRuntimeTools } from './runtime-tools';
 import { assertImplementedMode, resolveModeSpec, } from '../modes';
 function splitEntriesInput(entries) {
     const values = [];
@@ -102,12 +101,6 @@ async function runDryRunPlan(workingDirectory, options) {
     };
     return executePlan();
 }
-async function maybeResolveWorkspaceViaCli(workingDirectory, readOnly) {
-    const plan = await runDryRunPlan(workingDirectory, {
-        readOnly,
-    });
-    return plan.workspace?.trim() || null;
-}
 export async function buildArchiveEntries(inputs) {
     const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
     if (cacheProfiles.length === 0) {
@@ -138,46 +131,30 @@ export async function buildArchiveEntries(inputs) {
         verificationTags,
     };
 }
-export function validateOneInputs(inputs, modeSpec, archiveEntries) {
-    if (inputs.setup !== 'mise' && inputs.tools.trim()) {
-        core.warning(`Ignoring tools because setup=${inputs.setup}`);
-    }
+export function validateOneInputs(modeSpec, archiveEntries) {
     if (modeSpec.resolved === 'archive' && !archiveEntries) {
         throw new Error('Archive mode requires cache-profiles from the committed .boringcache.toml plan.');
+    }
+    if (modeSpec.resolved !== 'archive' && archiveEntries) {
+        throw new Error(`cache-profiles belongs to mode=archive; use a separate archive Action step before mode=${modeSpec.resolved}.`);
     }
 }
 export async function buildPlan(inputs) {
     const modeSpec = resolveModeSpec(inputs.mode);
     assertImplementedMode(modeSpec);
-    const resolvedMavenVersion = inputs.mavenVersion || '3.9.16';
-    const runtimeTools = await resolveRuntimeTools(inputs.setup, inputs.mode, inputs.tools, inputs.workingDirectory);
-    if (inputs.setup === 'mise'
-        && modeSpec.resolved === 'maven'
-        && resolvedMavenVersion
-        && !runtimeTools.some((tool) => tool.name === 'maven')) {
-        runtimeTools.push({
-            name: 'maven',
-            version: resolvedMavenVersion,
-            label: 'Maven',
-            source: 'mode',
-        });
-    }
     const archiveEntries = await buildArchiveEntries(inputs);
-    const workspace = archiveEntries.workspace
-        || await maybeResolveWorkspaceViaCli(inputs.workingDirectory, inputs.readOnly);
-    if (!workspace) {
+    validateOneInputs(modeSpec, archiveEntries.entries);
+    const workspace = archiveEntries.workspace || '';
+    if (!workspace && modeSpec.resolved === 'archive') {
         throw new Error('The BoringCache CLI plan did not resolve a workspace. Set workspace in .boringcache.toml.');
     }
     const cacheTagPrefix = getCacheTagPrefix(archiveEntries.cacheTagPrefix);
-    validateOneInputs(inputs, modeSpec, archiveEntries.entries);
     return {
         workspace,
         workingDirectory: inputs.workingDirectory,
-        setup: inputs.setup,
         mode: modeSpec.resolved,
         modeSpec,
         cacheTagPrefix,
-        runtimeTools,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
         archiveVerificationTags: archiveEntries.verificationTags,

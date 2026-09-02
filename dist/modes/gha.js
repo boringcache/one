@@ -17,9 +17,10 @@ export async function runGhaRestore(plan, inputs) {
     saveModeState('proxy-pid', String(adapter.pid));
     saveModeState('proxy-port', String(adapter.port));
     saveModeState('proxy-log-path', adapter.logPath);
-    saveModeState('workspace', plan.workspace);
+    saveModeState('workspace', adapter.workspace);
     setProxyOutputs(adapter.port);
     return {
+        workspace: adapter.workspace,
         resolvedEntries: '',
         evidence: {
             adapter: 'gha',

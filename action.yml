@@ -1,5 +1,5 @@
 name: 'BoringCache One'
-description: 'GitHub lifecycle for one CLI-owned BoringCache plan across archive, Cargo, native tool, Docker, and BuildKit modes.'
+description: 'GitHub lifecycle for one CLI-owned BoringCache plan.'
 author: 'BoringCache'
 inputs:
   cli-version:
@@ -9,215 +9,31 @@ inputs:
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
     required: false
-  setup:
-    description: 'Optional runtime setup: none or mise. mise auto-detects project tools from mise.toml, .tool-versions, and common version files; it never defines cache policy.'
-    default: 'none'
-    required: false
   mode:
     description: 'Primary cache behavior. Use archive for portable directory caches, gha to start the Actions-compatible service for direct or runner-integrated clients, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nix, nx, sccache, turbo, or xcode. A gha setup step does not redirect later provider actions on GitHub-hosted runners.'
     default: 'archive'
     required: false
   working-directory:
-    description: 'Project root used for tool detection and relative cache paths.'
+    description: 'Project root used for the committed BoringCache plan and relative cache paths.'
     default: '.'
     required: false
-  tools:
-    description: 'Explicit mise tools to install, one per line (for example ruby@3.3, node@22). Overrides auto-detected project tools for the same names.'
-    required: false
   trust-policy:
-    description: 'Cache lifecycle: auto restores on pull requests and publishes on trusted events; restore never writes; stage creates an immutable archive or Docker/BuildKit candidate without moving the published tag; publish updates the published tag. Token capability remains authoritative.'
+    description: 'Cache lifecycle: auto restores on pull requests and publishes on trusted events; restore never writes; stage creates an immutable candidate without moving the published tag; publish updates the published tag. Token capability remains authoritative.'
     default: 'auto'
-    required: false
-  cache-candidates:
-    description: 'Exact staged candidate IDs or manifest-root digests to import for Docker or BuildKit, comma-separated or newline-separated. Candidates are restore-only inputs; publication still targets only the CLI-planned tag.'
-    required: false
-  verify:
-    description: 'Optional internal verification for resolved tags: none, check, wait, or warn. check is one-shot; wait and warn poll explicitly. Save-capable tags verify in the post step after save completes.'
-    default: 'none'
-    required: false
-  verify-timeout-seconds:
-    description: 'Timeout in seconds for verify=wait/warn tag checks and managed Docker/BuildKit cache promotion checks. Values above 900 are clamped to keep verification bounded.'
-    default: '180'
-    required: false
-  verify-require-server-signature:
-    description: 'Require signed cache hits during verification.'
-    default: 'false'
-    required: false
-  trusted-workspace-signing-key-fingerprint:
-    description: 'Optional ed25519-sha256 workspace signing key fingerprint. When set, the CLI only accepts signed cache hits from this workspace key.'
     required: false
   diagnostics:
     description: 'Action-level diagnostics: auto follows ACTIONS_STEP_DEBUG, off disables grouped diagnostics, summary emits grouped state, and verbose also tails proxy logs.'
     default: 'auto'
     required: false
-  diagnostics-log-lines:
-    description: 'When diagnostics includes logs, tail up to this many proxy log lines. Values above 500 are clamped to keep diagnostics bounded.'
-    default: '40'
-    required: false
-  metadata-hints:
-    description: 'Low-cardinality proxy session labels as KEY=VALUE pairs, comma-separated or newline-separated. Use this for grouping hints such as phase=seed, project=web, tool=bazel, or benchmark=grpc-bazel.'
-    required: false
   proxy-port:
     description: 'Runner-local cache port from 1 to 65535. Empty lets the CLI prefer 22243 and fall back to a free port on conflict. Set only for process coordination; an occupied explicit port fails the step.'
     default: ''
-    required: false
-  context:
-    description: 'Docker or BuildKit build context path.'
-    default: '.'
-    required: false
-  dockerfile:
-    description: 'Dockerfile path relative to the working directory or build context.'
-    default: 'Dockerfile'
-    required: false
-  image:
-    description: 'Docker or BuildKit image name (for example ghcr.io/org/app).'
-    required: false
-  tags:
-    description: 'Image tags, comma-separated or newline-separated. Defaults to latest for ordinary builds; explicit outputs add no implicit tag.'
-    required: false
-  build-args:
-    description: 'Build arguments as newline-separated KEY=VALUE pairs.'
-    required: false
-  labels:
-    description: 'Docker mode only: image labels, one per line. Each non-empty line is passed as a separate docker buildx build --label argument.'
-    required: false
-  outputs:
-    description: 'Docker mode only: Buildx output destinations, one per line. Explicit outputs disable the default local load.'
-    required: false
-  target:
-    description: 'Target build stage.'
-    required: false
-  platforms:
-    description: 'Target platforms for Docker or BuildKit builds, comma-separated or newline-separated. This does not install QEMU; set qemu to true when emulation is required.'
-    required: false
-  qemu:
-    description: 'Docker mode only: install QEMU/binfmt for non-native Linux targets requested by platforms. Must be true or false.'
-    default: 'false'
-    required: false
-  push:
-    description: 'Whether to push image output to the registry. Must be true or false.'
-    default: 'false'
-    required: false
-  load:
-    description: 'Whether to load Docker image output into the local daemon when supported. Automatically disabled for multi-platform builds or explicit outputs. Must be true or false.'
-    default: 'true'
-    required: false
-  no-cache:
-    description: 'Whether to disable cache usage for Docker or BuildKit builds. Must be true or false.'
-    default: 'false'
-    required: false
-  provenance:
-    description: 'Docker mode only: control Buildx provenance attestations. Forwarded explicitly so false disables Buildx default provenance. Must be true or false.'
-    default: 'false'
-    required: false
-  sbom:
-    description: 'Docker mode only: pass --sbom=true to docker buildx build. Must be true or false.'
-    default: 'false'
-    required: false
-  secrets:
-    description: 'Docker or BuildKit secrets, newline-separated.'
-    required: false
-  docker-tool-cache:
-    description: 'Docker mode only: expose session-only BoringCache remote-cache config for Turbo, Nx, Bazel, Gradle, Maven, ccache, sccache, or Go inside matching Dockerfile RUN steps. Accepts comma- or newline-separated TOOL:TAG values, or plain tool names backed by [adapters.<tool>].tag.'
-    required: false
-  docker-tool-cache-target:
-    description: 'Docker mode only: limit docker-tool-cache injection to selected Bake targets or Compose services. Comma- or newline-separated. Requires docker-tool-cache.'
-    required: false
-  docker-mount-cache:
-    description: 'Docker build mode only: offload RUN --mount=type=cache directories (Cargo target, package-manager stores) to the CAS between builds. Requires docker-command=build. Opt-in; proves value on changed-lockfile or compile-heavy workloads. Must be true or false.'
-    default: 'false'
-    required: false
-  driver:
-    description: 'Buildx driver for Docker mode.'
-    default: 'docker-container'
-    required: false
-  docker-command:
-    description: 'Docker mode behavior: build (default) runs docker buildx build; setup prepares the managed BuildKit builder. Must be build or setup.'
-    default: 'build'
-    required: false
-  driver-opts:
-    description: 'Additional buildx driver options, newline-separated.'
-    required: false
-  buildkitd-config-inline:
-    description: 'Inline BuildKit daemon TOML config for Docker mode.'
-    required: false
-  managed-buildkit-image:
-    description: 'Managed BoringCache BuildKit image. Defaults to the signed release digest; pass an explicit digest for canaries.'
-    default: 'ghcr.io/boringcache/buildkit@sha256:e46b92c02707107ab1e1396c7609f5a7b7949fbe72bdf4c00230436fbc62e42b'
-    required: false
-  buildkit-host:
-    description: 'BuildKit address for buildctl mode, for example tcp://host:1234 or unix:///run/buildkit/buildkitd.sock.'
-    required: false
-  buildkit-tls-ca:
-    description: 'TLS CA certificate path or PEM contents for BuildKit.'
-    required: false
-  buildkit-tls-cert:
-    description: 'TLS client certificate path or PEM contents for BuildKit.'
-    required: false
-  buildkit-tls-key:
-    description: 'TLS client key path or PEM contents for BuildKit.'
-    required: false
-  buildkit-tls-skip-verify:
-    description: 'Whether to skip TLS verification for BuildKit. Must be true or false.'
-    default: 'false'
-    required: false
-  output:
-    description: 'Custom buildctl output. When set, image, tags, and push are ignored in BuildKit mode.'
-    required: false
-  ssh:
-    description: 'BuildKit SSH specs, newline-separated.'
-    required: false
-  bazel-version:
-    description: 'Bazel version for Bazelisk. Sets USE_BAZEL_VERSION when provided or auto-detected via mise.'
-    required: false
-  bazelrc-lines:
-    description: 'Additional newline-separated Bazel rc lines appended after boringcache/one writes the remote cache block.'
-    required: false
-  gradle-home:
-    description: 'Gradle user home directory.'
-    default: '~/.gradle'
-    required: false
-  enable-build-cache:
-    description: 'Whether to set org.gradle.caching=true in gradle.properties. Must be true or false.'
-    default: 'true'
-    required: false
-  maven-version:
-    description: 'Maven version to install when setup=mise and the project does not already pin it.'
-    default: '3.9.16'
-    required: false
-  maven-local-repo:
-    description: 'Local Maven repository path. Used for archive defaults in Maven mode.'
-    default: '~/.m2/repository'
-    required: false
-  maven-extensions-path:
-    description: 'Path to .mvn/extensions.xml. Maven mode ensures the build-cache extension is present here.'
-    default: '.mvn/extensions.xml'
-    required: false
-  maven-build-cache-config-path:
-    description: 'Path to .mvn/maven-build-cache-config.xml written by Maven mode.'
-    default: '.mvn/maven-build-cache-config.xml'
-    required: false
-  maven-build-cache-extension-version:
-    description: 'Optional exact org.apache.maven.extensions:maven-build-cache-extension version. When unset, Maven mode preserves an existing project declaration and uses the CLI default only when creating the extensions file.'
-    default: ''
-    required: false
-  maven-build-cache-id:
-    description: 'Logical Maven remote build-cache id for the generated config.'
-    default: 'boringcache'
-    required: false
-  sccache-version:
-    description: 'sccache version to install when the CLI-selected plan needs it and the binary is not already available. Explicit versions require the matching publisher .sha256 release asset.'
-    default: '0.17.0'
-    required: false
-  ccache-version:
-    description: 'ccache version to use. The action installs the audited default release and its HTTP storage helper when they are not already available.'
-    default: '4.14'
     required: false
   cache-profiles:
     description: 'Repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). Required for archive mode.'
     required: false
   save-always:
-    description: 'Run the post step to save the cache even if a later workflow step fails. It does not save after an embedded synchronous command, including Cargo, fails. Supports the same true spellings as GitHub boolean inputs.'
+    description: 'Run the post step to save the cache even if a later workflow step fails. It does not save after an embedded synchronous CLI command fails. Supports the same true spellings as GitHub boolean inputs.'
     default: 'false'
     required: false
   # CLI flags (passed directly to boringcache CLI)
@@ -233,97 +49,17 @@ inputs:
     description: 'Check if a cache entry exists without downloading (CLI --lookup-only flag)'
     default: 'false'
     required: false
-  force:
-    description: 'Force save even if cache entry already exists on server (CLI --force flag)'
-    default: 'false'
-    required: false
-  verbose:
-    description: 'Enable detailed output (CLI --verbose flag)'
-    default: 'false'
-    required: false
 outputs:
   cache-hit:
-    description: 'Whether an action-level restore or preflight found reusable cache. Empty means this setup step did not measure reuse; Docker, BuildKit, and GHA report their outcome from the wrapped workload instead.'
-  diagnostics-level:
-    description: 'Effective diagnostics level used by the action: off, summary, or verbose'
+    description: 'Whether an action-level restore or preflight found reusable cache. Empty means this setup step did not measure reuse; synchronous CLI modes and GHA report their outcome from the wrapped workload instead.'
   evidence-path:
     description: 'Path to the local boringcache/one JSON evidence file with restore and post-step state'
-  resolved-mode:
-    description: 'The effective cache mode used by the action'
-  resolved-tools:
-    description: 'Resolved mise tools as a newline-separated list'
-  workspace:
-    description: 'Resolved BoringCache workspace'
-  cache-tag:
-    description: 'Resolved primary cache tag or prefix. Cargo reports its target tag when planned.'
-  resolved-entries:
-    description: 'Resolved archive cache entries from the CLI plan'
-  resolved-tags:
-    description: 'Resolved exact cache tags used by boringcache/one for verification and follow-up checks'
   cache-candidates:
-    description: 'Exact staged candidate IDs created by this Action invocation, newline-separated. Pass Docker/BuildKit candidates to a later trusted cache-candidates input; promote exact archive candidates explicitly.'
+    description: 'Exact staged candidate IDs created by this Action invocation, newline-separated. Carry them to an explicit CLI restore or promotion.'
   cache-candidate-digests:
     description: 'Exact manifest-root digests for candidates staged by this Action invocation, newline-separated.'
   proxy-port:
-    description: 'Resolved proxy port for proxy-backed modes'
-  proxy-log-path:
-    description: 'Proxy log file path for proxy-backed modes'
-  cache-ref:
-    description: 'Resolved managed Docker or BuildKit cache ref.'
-  cache-from:
-    description: 'Resolved Docker --cache-from or BuildKit --import-cache values, newline-separated. Exact candidates are additional restore-only imports beside the current published tag.'
-  cache-to:
-    description: 'Resolved Docker --cache-to or BuildKit --export-cache value. Candidate imports never become export targets.'
-  docker-cache-run-ref:
-    description: 'Provider-neutral immutable Docker or BuildKit cache run ref tag when CI run-ref derivation is active'
-  docker-cache-from-refs:
-    description: 'Newline-separated managed Docker or BuildKit cache ref tags that were actually readable and used for restore'
-  docker-cache-requested-from-refs:
-    description: 'Newline-separated managed Docker or BuildKit cache ref tags requested from the CLI plan before readability filtering'
-  docker-cache-unreadable-from-refs:
-    description: 'Newline-separated managed Docker or BuildKit cache ref tags that were requested but not readable'
-  docker-cache-import-ready:
-    description: 'Whether every requested managed Docker or BuildKit cache ref was readable before the build began'
-  docker-cache-promotion-refs:
-    description: 'Newline-separated managed Docker or BuildKit cache alias ref tags requested for promotion'
-  docker-ci-provider:
-    description: 'Provider-neutral CI provider name used for Docker or BuildKit cache run-ref derivation'
-  docker-ci-run-id:
-    description: 'Provider-neutral CI run id used for Docker or BuildKit cache run-ref derivation'
-  docker-ci-run-attempt:
-    description: 'Provider-neutral CI run attempt used for Docker or BuildKit cache run-ref derivation'
-  docker-ci-ref-type:
-    description: 'Provider-neutral CI ref type used for Docker or BuildKit cache run-ref derivation'
-  docker-ci-ref-name:
-    description: 'Provider-neutral CI ref name used for Docker or BuildKit cache run-ref derivation'
-  docker-ci-run-started-at:
-    description: 'Provider-neutral CI run start timestamp used for Docker or BuildKit alias promotion ordering when available'
-  cache-dir:
-    description: 'Resolved local cache import directory for Docker or BuildKit local backend'
-  save-cache-dir:
-    description: 'Resolved local cache export directory for Docker or BuildKit local backend'
-  image-id:
-    description: 'Built Docker image ID when available'
-  digest:
-    description: 'Built image digest when available'
-  buildx-name:
-    description: 'Docker buildx builder name'
-  buildx-platforms:
-    description: 'Available platforms for the Docker buildx builder'
-  sccache-tag:
-    description: 'Resolved compiler-cache tag for standalone sccache or composed Cargo'
-  sccache-hit:
-    description: 'Whether remote sccache KV rows existed before a standalone sccache or composed Cargo build'
-  package-manager:
-    description: 'Detected Node.js package manager for Turbo mode'
-  package-manager-cache-dir:
-    description: 'Resolved package-manager cache directory exported by Turbo mode'
-  maven-extensions-path:
-    description: 'Resolved Maven extensions.xml path'
-  maven-build-cache-config-path:
-    description: 'Resolved Maven build-cache config path'
-  maven-local-repo:
-    description: 'Resolved Maven local repository path'
+    description: 'Resolved runner-local port for a proxy that remains available to later workflow steps'
 runs:
   using: 'node24'
   main: 'dist/restore/index.js'

@@ -10,7 +10,7 @@ import * as tc from '@actions/tool-cache';
 const isWindows = process.platform === 'win32';
 const MISE_TOOL_NAME = 'mise';
 const MISE_RELEASES_BASE = 'https://github.com/jdx/mise/releases/download';
-const DEFAULT_MISE_VERSION = 'v2026.8.14';
+const DEFAULT_MISE_VERSION = 'v2026.8.16';
 function runnerHomeDir() {
     return process.env.HOME || process.env.USERPROFILE || os.homedir();
 }

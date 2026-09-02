@@ -4,8 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { hasSaveToken, missingSaveTokenMessage, startRegistryProxy, } from '../core';
-import { ensureAdapterTools } from '../core/managed-tools';
-import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, execBoringCache, exportEnvVars, getModeState, markModeVerifyTagSkipped, proxyPlanningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
+import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, exportEnvVars, getModeState, markModeVerifyTagSkipped, proxyPlanningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
 export async function startSccacheServer() {
     await exec.exec('sccache', ['--start-server'], { ignoreReturnCode: true });
 }
@@ -167,7 +166,7 @@ export function sccacheEnvForStartedProxy(plan, actualPort) {
 }
 export async function startCompilerCacheProxy(adapter, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), { metadataHintsInput: inputs.metadataHints });
+    const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
     const preflight = await checkDirectCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
@@ -192,8 +191,6 @@ export async function startCompilerCacheProxy(adapter, plan, inputs) {
     saveModeState(`${adapter}-preflight-kv-checked`, String(preflight.kvChecked));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    core.setOutput('workspace', proxyPlan.workspace);
-    core.setOutput('cache-tag', proxyPlan.tag);
     core.setOutput('cache-hit', String(preflight.kvHit));
     setProxyOutputs(proxy.port);
     return { proxyPlan, proxy, preflight };
@@ -262,7 +259,6 @@ export async function finishCompilerCacheSave(tool, state, stats, statsDetail, o
     }
 }
 export async function runCcacheRestore(plan, inputs) {
-    await ensureAdapterTools('ccache', { ccache: core.getInput('ccache-version') }, execBoringCache, plan.workingDirectory);
     const statsDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'boringcache-ccache-'));
     const statsLog = path.join(statsDirectory, 'stats.log');
     try {
@@ -273,6 +269,7 @@ export async function runCcacheRestore(plan, inputs) {
         saveModeState('ccache-stats-directory', statsDirectory);
         saveModeState('ccache-stats-log', statsLog);
         return {
+            workspace: proxyPlan.workspace,
             cacheHit: preflight.kvHit,
             cacheTag: proxyPlan.tag,
             evidence: directCachePreflightEvidence(preflight),
@@ -298,13 +295,11 @@ export async function runCcacheSave(options = {}) {
     await finishCompilerCacheSave('ccache', state, stats, statsDetail, options);
 }
 export async function runSccacheRestore(plan, inputs) {
-    await ensureAdapterTools('sccache', { sccache: core.getInput('sccache-version') }, execBoringCache, plan.workingDirectory);
     const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('sccache', plan, inputs);
     exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
     await startSccacheServer();
-    core.setOutput('sccache-tag', proxyPlan.tag);
-    core.setOutput('sccache-hit', String(preflight.kvHit));
     return {
+        workspace: proxyPlan.workspace,
         cacheHit: preflight.kvHit,
         cacheTag: proxyPlan.tag,
         evidence: directCachePreflightEvidence(preflight),

@@ -1,22 +1,7 @@
 import * as core from '@actions/core';
-import { applyTrustEnvPolicy, applyCliPlanEnv, applyMiseSetup, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildGenericVerificationSpecs, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, resolveVerificationTags, restorePhaseSummary, runDiagnosticsGroup, serializeTools, verifyVerificationSpecs, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
-const ARCHIVE_OVERLAP_MODES = new Set([
-    'bazel',
-    'ccache',
-    'go',
-    'gradle',
-    'maven',
-    'nix',
-    'nx',
-    'sccache',
-    'turbo',
-    'xcode',
-]);
-function modeRestoreCanOverlapArchive(mode) {
-    return ARCHIVE_OVERLAP_MODES.has(mode);
-}
 function appendRestoreDiagnostic(current, data) {
     return `${current}${data.toString()}`.slice(-MAX_RESTORE_DIAGNOSTIC_CHARS);
 }
@@ -28,27 +13,22 @@ function buildCliSetupOptions(inputs, cliPlatform) {
     return {
         version: inputs.cliVersion,
         platform: cliPlatform,
-        ...(inputs.trustedWorkspaceSigningKeyFingerprint
-            ? { trustedWorkspaceSigningKeyFingerprint: inputs.trustedWorkspaceSigningKeyFingerprint }
-            : {}),
     };
 }
 async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState) {
     const diagnostics = loadDiagnosticsConfig(inputs);
     await runDiagnosticsGroup(diagnostics, 'BoringCache Diagnostics', async () => {
         core.info(`workspace: ${plan.workspace}`);
-        core.info(`setup: ${plan.setup}`);
         core.info(`mode: ${plan.mode}`);
         core.info(`working-directory: ${plan.workingDirectory}`);
         core.info(`cache-tag: ${plan.cacheTagPrefix || '(none)'}`);
         core.info(`resolved-entries: ${plan.archiveEntries || '(none)'}`);
         core.info(`resolved-tags: ${resolvedTags.join(',') || '(none)'}`);
         core.info(`cache-hit: ${overallHit === undefined ? 'not evaluated' : String(overallHit)}`);
-        core.info(`verify-mode: ${inputs.verify}`);
         core.info(`trust-state: status=${trustState.status} event=${trustState.event_name || '(none)'} requested=${trustState.requested_policy} resolved=${trustState.resolved_policy}`);
         core.info(`token-capabilities: restore=${String(trustState.token_capabilities.restore)} stage=${String(trustState.token_capabilities.stage)} save=${String(trustState.token_capabilities.save)}`);
         if (diagnostics.includeLogs) {
-            const proxyLogPath = core.getState('proxy-log-path');
+            const proxyLogPath = getActionState('proxy-log-path');
             if (proxyLogPath) {
                 const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
                 core.info(`proxy-log-path: ${proxyLogPath}`);
@@ -62,7 +42,7 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs, onRestoreStart) {
+async function restoreEntries(workspace, entriesString, flagArgs) {
     if (!entriesString.trim()) {
         return { hit: false, evaluated: false, saveEntries: '' };
     }
@@ -111,7 +91,6 @@ async function restoreEntries(workspace, entriesString, flagArgs, onRestoreStart
                 },
             },
         });
-        onRestoreStart?.();
         const restoreExitCode = await restoreProcess;
         if (restoreExitCode === 0) {
             return { hit: true, evaluated: true, saveEntries };
@@ -187,14 +166,10 @@ export async function run() {
         const inputs = getInputs();
         restoreFailureContext = {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
-            verify_mode: inputs.verify,
         };
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
-        }
-        if (inputs.mode.trim().toLowerCase() === 'xcode') {
-            await ensureXcodePlugin(inputs.cliVersion);
         }
         const trustDecision = await resolveTrustDecision(inputs.trustPolicy);
         applyTrustEnvPolicy(trustDecision);
@@ -205,27 +180,28 @@ export async function run() {
             stage: trustDecision.resolved === 'stage',
         };
         const candidateReceiptFile = effectiveInputs.stage ? prepareCandidateReceiptFile() : '';
-        core.saveState('candidate-receipt-file', candidateReceiptFile);
+        saveActionState('candidate-receipt-file', candidateReceiptFile);
         const cliCapabilityVersion = await resolveCliCapabilityVersion(inputs.cliVersion);
         const capabilityInputs = { ...effectiveInputs, cliVersion: cliCapabilityVersion };
         const plan = await buildPlan(capabilityInputs);
-        const hasCandidateImports = inputs.cacheCandidates.trim().length > 0;
-        if (effectiveInputs.stage && hasCandidateImports) {
-            throw new Error('trust-policy stage cannot import cache-candidates; stage one immutable output, then select it in a separate restore or publish run.');
-        }
         if (effectiveInputs.stage && !['archive', 'docker', 'buildkit'].includes(plan.mode)) {
             throw new Error(`trust-policy stage is not available for ${plan.mode}; direct tool caches do not yet have an immutable candidate boundary.`);
         }
-        if (hasCandidateImports && !['docker', 'buildkit'].includes(plan.mode)) {
-            throw new Error('cache-candidates are supported only for Docker and BuildKit cache manifests. Archives promote one exact complete snapshot, and direct tool caches retain authoritative tool keys.');
-        }
-        if (effectiveInputs.stage && inputs.dockerToolCache.trim()) {
-            throw new Error('trust-policy stage cannot be combined with docker-tool-cache until direct tool caches have an immutable candidate boundary.');
-        }
+        // Persist one versioned lifecycle document before starting any process that
+        // may need post-step cleanup. GitHub state carries only its opaque id.
+        saveActionState('resolved-mode', plan.mode);
+        saveActionState('cli-version', inputs.cliVersion);
+        saveActionState('cli-capability-version', cliCapabilityVersion);
+        saveActionState('cli-platform', cliPlatform || '');
+        saveActionState('working-directory', plan.workingDirectory);
+        saveActionState('verbose', String(inputs.verbose));
+        saveActionState('diagnostics-level', loadDiagnosticsConfig(inputs).level);
+        saveActionState('diagnostics-log-lines', String(loadDiagnosticsConfig(inputs).logLines));
+        saveActionState('trust-policy', inputs.trustPolicy);
+        saveActionState('trust-decision', JSON.stringify(trustDecision));
         restoreFailureContext = {
             ...restoreFailureContext,
             workspace: plan.workspace,
-            setup: plan.setup,
             mode: plan.mode,
             working_directory: plan.workingDirectory,
             cache_tag: plan.cacheTagPrefix || '',
@@ -233,65 +209,28 @@ export async function run() {
         };
         process.chdir(plan.workingDirectory);
         await applyCliPlanEnv(plan);
-        let signalArchiveRestoreStarted = () => { };
-        const archiveRestoreStarted = new Promise((resolve) => {
-            let signaled = false;
-            signalArchiveRestoreStarted = () => {
-                if (!signaled) {
-                    signaled = true;
-                    resolve();
-                }
-            };
-        });
-        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(effectiveInputs), signalArchiveRestoreStarted);
-        void archiveRestorePromise.then(signalArchiveRestoreStarted, signalArchiveRestoreStarted);
-        await archiveRestoreStarted;
-        try {
-            if (plan.setup === 'mise') {
-                await applyMiseSetup(plan.runtimeTools, plan.workingDirectory);
-            }
+        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(effectiveInputs));
+        const archiveRestore = await archiveRestorePromise;
+        const modeRestore = await runModeRestore(plan, effectiveInputs);
+        const completedPlan = {
+            ...plan,
+            workspace: modeRestore.workspace || plan.workspace,
+        };
+        if (!completedPlan.workspace) {
+            throw new Error('The BoringCache CLI mode plan did not resolve a workspace. Set workspace in .boringcache.toml.');
         }
-        catch (error) {
-            // The archive restore was already in flight so mise could benefit from
-            // restored package-manager state. Settle it before preserving the setup error.
-            await archiveRestorePromise.catch(() => undefined);
-            throw error;
-        }
-        const [archiveRestore, modeRestore] = modeRestoreCanOverlapArchive(plan.mode)
-            ? await Promise.all([
-                archiveRestorePromise,
-                runModeRestore(plan, effectiveInputs, {
-                    archiveMaterialized: archiveRestorePromise,
-                }),
-            ])
-            : [
-                await archiveRestorePromise,
-                await runModeRestore(plan, effectiveInputs),
-            ];
         const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
         const genericSaveEntries = archiveRestore.saveEntries;
-        const verificationSpecs = [
-            ...buildGenericVerificationSpecs(plan, true),
-            ...(modeRestore.verificationSpecs || []),
-        ];
-        const resolvedTags = resolveVerificationTags(verificationSpecs);
+        const resolvedTags = Array.from(new Set([
+            ...completedPlan.archiveVerificationTags,
+            ...(modeRestore.verificationSpecs || []).map((spec) => spec.tag),
+        ]));
         const saveCapable = trustDecision.write_allowed;
-        const saveExpectedSpecs = verificationSpecs.filter((spec) => spec.saveExpected);
-        const deferredVerifySpecs = trustDecision.resolved === 'publish' ? saveExpectedSpecs : [];
-        const immediateVerifySpecs = verificationSpecs.filter((spec) => !spec.saveExpected);
-        const deferredVerifyTags = resolveVerificationTags(deferredVerifySpecs);
         const overallHit = modeRestore.cacheHit ?? (archiveRestore.evaluated ? archiveRestore.hit : undefined);
         const cacheResult = overallHit === undefined ? 'not_evaluated' : overallHit ? 'hit' : 'miss';
-        const resolvedEntries = modeRestore.resolvedEntries ?? plan.archiveEntries;
+        const resolvedEntries = modeRestore.resolvedEntries ?? completedPlan.archiveEntries;
         const diagnostics = loadDiagnosticsConfig(inputs);
         core.setOutput('cache-hit', overallHit === undefined ? '' : String(overallHit));
-        core.setOutput('diagnostics-level', diagnostics.level);
-        core.setOutput('resolved-mode', plan.mode);
-        core.setOutput('resolved-tools', serializeTools(plan.runtimeTools));
-        core.setOutput('workspace', plan.workspace);
-        core.setOutput('cache-tag', modeRestore.cacheTag || plan.cacheTagPrefix);
-        core.setOutput('resolved-entries', resolvedEntries);
-        core.setOutput('resolved-tags', resolvedTags.join(','));
         writeActionEvidence('restore', {
             phase_status: 'completed',
             phase_summary: restorePhaseSummary({
@@ -299,11 +238,10 @@ export async function run() {
                 trustState,
                 saveCapable,
             }),
-            workspace: plan.workspace,
-            setup: plan.setup,
-            mode: plan.mode,
-            working_directory: plan.workingDirectory,
-            cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
+            workspace: completedPlan.workspace,
+            mode: completedPlan.mode,
+            working_directory: completedPlan.workingDirectory,
+            cache_tag: modeRestore.cacheTag || completedPlan.cacheTagPrefix || '',
             resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
@@ -312,8 +250,6 @@ export async function run() {
             diagnostics_level: diagnostics.level,
             trust_state: trustState,
             trust_policy: trustDecision.resolved,
-            verify_mode: inputs.verify,
-            verify_save_tags: deferredVerifyTags,
             token_capabilities: {
                 ...trustState.token_capabilities,
             },
@@ -321,7 +257,8 @@ export async function run() {
         }, actionEvidenceProductRefs(cliCapabilityVersion));
         restoreFailureContext = {
             ...restoreFailureContext,
-            cache_tag: modeRestore.cacheTag || plan.cacheTagPrefix || '',
+            workspace: completedPlan.workspace,
+            cache_tag: modeRestore.cacheTag || completedPlan.cacheTagPrefix || '',
             resolved_entries: resolvedEntries,
             resolved_tags: resolvedTags,
             cache_hit: overallHit,
@@ -329,39 +266,10 @@ export async function run() {
             mode_evidence: modeRestore.evidence || {},
             trust_state: trustState,
             trust_policy: trustDecision.resolved,
-            verify_save_tags: deferredVerifyTags,
         };
-        core.saveState('resolved-mode', plan.mode);
-        core.saveState('cli-version', inputs.cliVersion);
-        core.saveState('cli-capability-version', cliCapabilityVersion);
-        core.saveState('cli-platform', cliPlatform || '');
-        core.saveState('working-directory', plan.workingDirectory);
-        core.saveState('generic-cache-entries', genericSaveEntries);
-        core.saveState('generic-cache-workspace', plan.workspace);
-        core.saveState('force', String(inputs.force));
-        core.saveState('verbose', String(inputs.verbose));
-        core.saveState('diagnostics-level', diagnostics.level);
-        core.saveState('diagnostics-log-lines', String(diagnostics.logLines));
-        core.saveState('resolved-tags', resolvedTags.join(','));
-        core.saveState('verify-save-specs', JSON.stringify(deferredVerifySpecs));
-        core.saveState('verify-save-tags', deferredVerifyTags.join(','));
-        core.saveState('verify-mode', inputs.verify);
-        core.saveState('verify-timeout-seconds', String(inputs.verifyTimeoutSeconds));
-        core.saveState('verify-require-server-signature', String(inputs.verifyRequireServerSignature));
-        core.saveState('trust-policy', inputs.trustPolicy);
-        core.saveState('trust-decision', JSON.stringify(trustDecision));
-        if (!saveCapable && inputs.verify !== 'none' && saveExpectedSpecs.length > 0) {
-            core.info('Skipping save-expected tag verification in restore step: no save-capable token is available.');
-        }
-        if (inputs.verify !== 'none' && immediateVerifySpecs.length > 0) {
-            await verifyVerificationSpecs(plan.workspace, immediateVerifySpecs, {
-                mode: inputs.verify,
-                timeoutSeconds: inputs.verifyTimeoutSeconds,
-                requireServerSignature: inputs.verifyRequireServerSignature,
-                verbose: inputs.verbose,
-            });
-        }
-        await emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, trustState);
+        saveActionState('generic-cache-entries', genericSaveEntries);
+        saveActionState('generic-cache-workspace', completedPlan.workspace);
+        await emitRestoreDiagnostics(completedPlan, inputs, resolvedTags, overallHit, trustState);
         if (!trustDecision.write_allowed) {
             core.info(`Post step is restore-only (trust-policy: ${inputs.trustPolicy}).`);
         }
