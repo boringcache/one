@@ -97340,6 +97340,8 @@ async function saveImmutableToolCache(paths, key, label) {
 
 const TOOL_NAME = 'boringcache';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
+const XCODE_PLUGIN_ASSET = 'libboringcache_xcode_cas-macos-universal.dylib';
+const XCODE_PLUGIN_NAME = 'libboringcache_xcode_cas.dylib';
 function findToolCachePath(toolName, version, arch) {
     const found = find(toolName, version, arch);
     if (found) {
@@ -97677,6 +97679,65 @@ async function ensureBoringCache(options) {
     const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName);
     addPath(stableToolPath);
     info(`BoringCache CLI ${normalizedVersion} ready`);
+}
+/** Install the release-owned Xcode CAS companion beside the stable CLI. */
+async function ensureXcodePlugin(version, verify = true, stableBinDir = getStableCliBinDir()) {
+    if (process.platform !== 'darwin') {
+        throw new Error('The BoringCache Xcode plugin can only be installed on macOS.');
+    }
+    const configuredPath = (process.env.BORINGCACHE_XCODE_PLUGIN_PATH || '').trim();
+    if (configuredPath) {
+        // The CLI validates and hashes explicit source-tree or canary overrides.
+        // Avoid probing a repository-controlled path in the Action itself.
+        return configuredPath;
+    }
+    const pluginPath = external_path_.join(stableBinDir, XCODE_PLUGIN_NAME);
+    if (external_fs_namespaceObject.existsSync(pluginPath)) {
+        if (version.toLowerCase() !== 'skip' && verify) {
+            const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
+            try {
+                const expectedChecksum = await getExpectedChecksum(normalizedVersion, XCODE_PLUGIN_ASSET);
+                const actualChecksum = await computeFileHash(pluginPath);
+                if (actualChecksum === expectedChecksum) {
+                    exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
+                    return pluginPath;
+                }
+                warning('Installed Xcode adapter is stale (checksum mismatch), re-downloading');
+            }
+            catch (error) {
+                warning(`Could not verify the installed Xcode adapter; downloading a verified copy: ${error instanceof Error ? error.message : error}`);
+            }
+        }
+        else {
+            exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
+            return pluginPath;
+        }
+    }
+    if (version.toLowerCase() === 'skip') {
+        throw new Error(`mode=xcode needs ${XCODE_PLUGIN_NAME} beside the BoringCache CLI, `
+            + 'or BORINGCACHE_XCODE_PLUGIN_PATH when cli-version is skip.');
+    }
+    const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
+    const downloadUrl = getDownloadUrl(normalizedVersion, XCODE_PLUGIN_ASSET);
+    info(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
+    let downloadedPath;
+    try {
+        downloadedPath = await downloadTool(downloadUrl);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to download ${XCODE_PLUGIN_ASSET} from ${downloadUrl}: ${message}`);
+    }
+    if (verify) {
+        const expectedChecksum = await getExpectedChecksum(normalizedVersion, XCODE_PLUGIN_ASSET);
+        await verifyChecksum(downloadedPath, expectedChecksum, XCODE_PLUGIN_ASSET);
+    }
+    await external_fs_namespaceObject.promises.mkdir(stableBinDir, { recursive: true });
+    await external_fs_namespaceObject.promises.copyFile(downloadedPath, pluginPath);
+    await external_fs_namespaceObject.promises.chmod(pluginPath, 0o755);
+    exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
+    info('BoringCache Xcode adapter ready');
+    return pluginPath;
 }
 async function setup_execBoringCache(args, options = {}) {
     const isWindows = external_os_.platform() === 'win32';
@@ -106494,6 +106555,9 @@ async function run() {
         };
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(cliVersion, cliPlatform));
+        }
+        if (resolvedMode === 'xcode') {
+            await ensureXcodePlugin(cliVersion);
         }
         if (!cliCapabilityVersion) {
             cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);

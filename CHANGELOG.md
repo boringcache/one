@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Install the matching checksum-verified Xcode CAS companion automatically for
+  `mode: xcode`.
 
 ## [1.20.0] - 2026-09-02
 
@@ -38,8 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing wrappers, setup actions, or runner images.
 - Remove the associated setup/version inputs and installation-only outputs.
 - Remove Action-owned Docker/BuildKit build requests, builders, QEMU, buildctl
-  connections, portable verification polling, Xcode companion downloads, and
-  observation-only outputs.
+  connections, portable verification polling, and observation-only outputs.
 
 ## [1.19.7] - 2026-08-28
 
