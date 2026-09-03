@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 function appendRestoreDiagnostic(current, data) {
@@ -170,6 +170,9 @@ export async function run() {
         const cliPlatform = inputs.cliPlatform || undefined;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
+        }
+        if (inputs.mode.trim().toLowerCase() === 'xcode') {
+            await ensureXcodePlugin(inputs.cliVersion);
         }
         const trustDecision = await resolveTrustDecision(inputs.trustPolicy);
         applyTrustEnvPolicy(trustDecision);

@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.20.1] - 2026-09-03
+
+### Changed
+
+- Install BoringCache CLI `v1.20.2` by default.
+
+### Fixed
+
+- Install the matching checksum-verified Xcode CAS companion automatically for
+  `mode: xcode`.
+- Bound sccache server startup, verify its runner-local listener independently,
+  and fail with recovery guidance instead of leaving the setup step waiting
+  indefinitely.
+
 ## [1.20.0] - 2026-09-02
 
 ### Added
@@ -38,8 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing wrappers, setup actions, or runner images.
 - Remove the associated setup/version inputs and installation-only outputs.
 - Remove Action-owned Docker/BuildKit build requests, builders, QEMU, buildctl
-  connections, portable verification polling, Xcode companion downloads, and
-  observation-only outputs.
+  connections, portable verification polling, and observation-only outputs.
 
 ## [1.19.7] - 2026-08-28
 
@@ -47,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.20.1...HEAD
+[1.20.1]: https://github.com/boringcache/one/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/boringcache/one/compare/v1.19.7...v1.20.0
 [1.19.7]: https://github.com/boringcache/one/releases/tag/v1.19.7

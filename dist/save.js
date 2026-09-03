@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
-import { actionErrorMessage, buildActionTrustState, ensureBoringCache, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
+import { actionErrorMessage, buildActionTrustState, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
 function buildCliSetupOptions(cliVersion, cliPlatform) {
     return {
@@ -122,6 +122,9 @@ export async function run() {
         };
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(cliVersion, cliPlatform));
+        }
+        if (resolvedMode === 'xcode') {
+            await ensureXcodePlugin(cliVersion);
         }
         if (!cliCapabilityVersion) {
             cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);

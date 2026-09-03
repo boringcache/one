@@ -97340,6 +97340,8 @@ async function saveImmutableToolCache(paths, key, label) {
 
 const TOOL_NAME = 'boringcache';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
+const XCODE_PLUGIN_ASSET = 'libboringcache_xcode_cas-macos-universal.dylib';
+const XCODE_PLUGIN_NAME = 'libboringcache_xcode_cas.dylib';
 function findToolCachePath(toolName, version, arch) {
     const found = find(toolName, version, arch);
     if (found) {
@@ -97677,6 +97679,65 @@ async function ensureBoringCache(options) {
     const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName);
     addPath(stableToolPath);
     info(`BoringCache CLI ${normalizedVersion} ready`);
+}
+/** Install the release-owned Xcode CAS companion beside the stable CLI. */
+async function ensureXcodePlugin(version, verify = true, stableBinDir = getStableCliBinDir()) {
+    if (process.platform !== 'darwin') {
+        throw new Error('The BoringCache Xcode plugin can only be installed on macOS.');
+    }
+    const configuredPath = (process.env.BORINGCACHE_XCODE_PLUGIN_PATH || '').trim();
+    if (configuredPath) {
+        // The CLI validates and hashes explicit source-tree or canary overrides.
+        // Avoid probing a repository-controlled path in the Action itself.
+        return configuredPath;
+    }
+    const pluginPath = external_path_.join(stableBinDir, XCODE_PLUGIN_NAME);
+    if (external_fs_namespaceObject.existsSync(pluginPath)) {
+        if (version.toLowerCase() !== 'skip' && verify) {
+            const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
+            try {
+                const expectedChecksum = await getExpectedChecksum(normalizedVersion, XCODE_PLUGIN_ASSET);
+                const actualChecksum = await computeFileHash(pluginPath);
+                if (actualChecksum === expectedChecksum) {
+                    exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
+                    return pluginPath;
+                }
+                warning('Installed Xcode adapter is stale (checksum mismatch), re-downloading');
+            }
+            catch (error) {
+                warning(`Could not verify the installed Xcode adapter; downloading a verified copy: ${error instanceof Error ? error.message : error}`);
+            }
+        }
+        else {
+            exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
+            return pluginPath;
+        }
+    }
+    if (version.toLowerCase() === 'skip') {
+        throw new Error(`mode=xcode needs ${XCODE_PLUGIN_NAME} beside the BoringCache CLI, `
+            + 'or BORINGCACHE_XCODE_PLUGIN_PATH when cli-version is skip.');
+    }
+    const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
+    const downloadUrl = getDownloadUrl(normalizedVersion, XCODE_PLUGIN_ASSET);
+    info(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
+    let downloadedPath;
+    try {
+        downloadedPath = await downloadTool(downloadUrl);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to download ${XCODE_PLUGIN_ASSET} from ${downloadUrl}: ${message}`);
+    }
+    if (verify) {
+        const expectedChecksum = await getExpectedChecksum(normalizedVersion, XCODE_PLUGIN_ASSET);
+        await verifyChecksum(downloadedPath, expectedChecksum, XCODE_PLUGIN_ASSET);
+    }
+    await external_fs_namespaceObject.promises.mkdir(stableBinDir, { recursive: true });
+    await external_fs_namespaceObject.promises.copyFile(downloadedPath, pluginPath);
+    await external_fs_namespaceObject.promises.chmod(pluginPath, 0o755);
+    exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
+    info('BoringCache Xcode adapter ready');
+    return pluginPath;
 }
 async function setup_execBoringCache(args, options = {}) {
     const isWindows = external_os_.platform() === 'win32';
@@ -98272,7 +98333,7 @@ async function proxy_startRegistryProxy(options) {
     }
     catch (error) {
         try {
-            await stopRegistryProxy(child.pid, options.port);
+            await proxy_stopRegistryProxy(child.pid, options.port);
         }
         catch {
             // Keep the original readiness failure as the primary error.
@@ -98285,7 +98346,7 @@ async function proxy_startRegistryProxy(options) {
  * Graceful stop: SIGTERM, wait out the derived shutdown budget, then SIGKILL
  * and fail with the proxy log tail.
  */
-async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTimeoutMs()) {
+async function proxy_stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTimeoutMs()) {
     if (pid <= 0) {
         info('No proxy PID to stop (was reused from another invocation)');
         return;
@@ -104316,7 +104377,7 @@ const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.20.0',
+        cliVersion: getInput('cli-version') || 'v1.20.2',
         cliPlatform: getInput('cli-platform'),
         mode: normalizeMode(getInput('mode')),
         workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
@@ -105342,7 +105403,7 @@ async function stopProxyFromState() {
     const proxyPid = getModeState('proxy-pid');
     if (proxyPid) {
         const proxyPort = Number.parseInt(getModeState('proxy-port'), 10);
-        await stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
+        await proxy_stopRegistryProxy(parseInt(proxyPid, 10), Number.isFinite(proxyPort) ? proxyPort : undefined, reportedProxyStopTimeoutMs());
     }
 }
 
@@ -105868,9 +105929,140 @@ async function cargo_runCargoRestore(plan, inputs) {
 
 
 
-async function startSccacheServer() {
-    await exec.exec('sccache', ['--start-server'], { ignoreReturnCode: true });
+
+
+const SCCACHE_DEFAULT_SERVER_PORT = 4226;
+const SCCACHE_START_TIMEOUT_MS = 15_000;
+const SCCACHE_READY_TIMEOUT_MS = 5_000;
+const SCCACHE_READY_POLL_INTERVAL_MS = 250;
+const SCCACHE_STOP_AFTER_FAILURE_TIMEOUT_MS = 5_000;
+const SCCACHE_FAILED_START_PROXY_STOP_TIMEOUT_MS = 10_000;
+function sccacheServerAddress() {
+    const unixSocket = process.platform === 'win32'
+        ? ''
+        : (process.env.SCCACHE_SERVER_UDS || '').trim();
+    if (unixSocket) {
+        const socketPath = unixSocket.startsWith('\\x00')
+            ? `\0${unixSocket.slice(4)}`
+            : unixSocket;
+        return {
+            connect: () => external_net_.createConnection({ path: socketPath }),
+            label: unixSocket,
+        };
+    }
+    const configuredPort = (process.env.SCCACHE_SERVER_PORT || '').trim();
+    const port = configuredPort
+        ? Number.parseInt(configuredPort, 10)
+        : SCCACHE_DEFAULT_SERVER_PORT;
+    if ((configuredPort && !/^\d+$/.test(configuredPort)) || port < 1 || port > 65_535) {
+        throw new Error(`SCCACHE_SERVER_PORT must be an integer from 1 to 65535; received "${configuredPort}".`);
+    }
+    return {
+        connect: () => external_net_.createConnection({ host: '127.0.0.1', port }),
+        label: `127.0.0.1:${port}`,
+    };
 }
+async function probeSccacheServer(address = sccacheServerAddress()) {
+    return await new Promise((resolve) => {
+        let settled = false;
+        const socket = address.connect();
+        const finish = (ready) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            socket.destroy();
+            resolve(ready);
+        };
+        socket.setTimeout(500);
+        socket.once('connect', () => finish(true));
+        socket.once('timeout', () => finish(false));
+        socket.once('error', () => finish(false));
+        socket.once('close', () => finish(false));
+    });
+}
+async function waitForSccacheServer(probe, timeoutMs, pollIntervalMs) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+        if (await probe()) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    throw new Error(`sccache did not accept connections within ${Math.ceil(timeoutMs / 1000)} seconds.`);
+}
+async function runSccacheProcess(args, timeoutMs, spawnProcess, stdio) {
+    return await new Promise((resolve, reject) => {
+        let settled = false;
+        const child = spawnProcess('sccache', args, {
+            env: process.env,
+            stdio,
+            windowsHide: true,
+        });
+        const timeout = setTimeout(() => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            try {
+                child.kill('SIGKILL');
+            }
+            catch {
+            }
+            reject(new Error(`sccache ${args.join(' ')} did not exit within ${Math.ceil(timeoutMs / 1000)} seconds; the launcher was terminated.`));
+        }, timeoutMs);
+        child.once('error', (error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            reject(error);
+        });
+        // Resolve on launcher exit, not stdio close. A daemon inheriting a pipe can
+        // keep close pending after the launcher has completed successfully.
+        child.once('exit', (exitCode, signal) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            resolve({ exitCode, signal });
+        });
+    });
+}
+async function stopSccacheAfterFailedStartup(spawnProcess) {
+    try {
+        await runSccacheProcess(['--stop-server'], SCCACHE_STOP_AFTER_FAILURE_TIMEOUT_MS, spawnProcess, 'ignore');
+    }
+    catch {
+    }
+}
+async function startSccacheServer(options = {}) {
+    const spawnProcess = options.spawnProcess || external_child_process_namespaceObject.spawn;
+    const address = sccacheServerAddress();
+    try {
+        const result = await runSccacheProcess(['--start-server'], options.startTimeoutMs ?? SCCACHE_START_TIMEOUT_MS, spawnProcess, 'inherit');
+        if (result.exitCode !== 0) {
+            const outcome = result.exitCode === null
+                ? `signal ${result.signal || 'unknown'}`
+                : `exit code ${result.exitCode}`;
+            throw new Error(`sccache --start-server failed with ${outcome}.`);
+        }
+        await waitForSccacheServer(options.readinessProbe || (() => probeSccacheServer(address)), options.readyTimeoutMs ?? SCCACHE_READY_TIMEOUT_MS, options.readyPollIntervalMs ?? SCCACHE_READY_POLL_INTERVAL_MS);
+        info(`sccache server is ready on ${address.label}`);
+    }
+    catch (error) {
+        await stopSccacheAfterFailedStartup(spawnProcess);
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Unable to start sccache safely: ${detail} Stop any stale daemon with `
+            + '`sccache --stop-server`, then retry. If startup still fails, set '
+            + '`SCCACHE_LOG=debug` and `SCCACHE_ERROR_LOG` to capture the daemon error.');
+    }
+}
+const sccacheServerLifecycle = {
+    start: startSccacheServer,
+};
 async function stopSccacheServer() {
     let output = '';
     try {
@@ -106160,7 +106352,19 @@ async function runCcacheSave(options = {}) {
 async function compiler_cache_runSccacheRestore(plan, inputs) {
     const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('sccache', plan, inputs);
     exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
-    await startSccacheServer();
+    try {
+        await sccacheServerLifecycle.start();
+    }
+    catch (error) {
+        try {
+            await stopRegistryProxy(proxy.pid, proxy.port, SCCACHE_FAILED_START_PROXY_STOP_TIMEOUT_MS);
+        }
+        catch (cleanupError) {
+            const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+            core.warning(`sccache startup failed and the BoringCache proxy could not be stopped cleanly: ${detail}`);
+        }
+        throw error;
+    }
     return {
         workspace: proxyPlan.workspace,
         cacheHit: preflight.kvHit,
@@ -106494,6 +106698,9 @@ async function run() {
         };
         if (cliVersion.toLowerCase() !== 'skip') {
             await ensureBoringCache(buildCliSetupOptions(cliVersion, cliPlatform));
+        }
+        if (resolvedMode === 'xcode') {
+            await ensureXcodePlugin(cliVersion);
         }
         if (!cliCapabilityVersion) {
             cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);

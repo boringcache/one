@@ -3,7 +3,7 @@ import { resolveTrustDecision as resolveCliTrustDecision, } from './core/trust';
 export function resolveTrustDecision(requested) {
     return resolveCliTrustDecision(requested, execBoringCache);
 }
-export { ensureBoringCache, execBoringCache, getActionState, saveActionState, parseEntries, } from './core';
+export { ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, saveActionState, parseEntries, } from './core';
 export { buildFlagArgs, getInputs, DEFAULT_OCI_HYDRATION_POLICY, } from './core/action-inputs';
 export { applyCliPlanEnv, buildArchiveEntries, buildPlan, getCacheTagPrefix, resolveCliCapabilityVersion, validateOneInputs, } from './core/plan';
 export { requireCliVerificationTags, resolveVerificationTags, } from './core/tags';
