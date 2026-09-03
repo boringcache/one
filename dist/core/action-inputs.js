@@ -7,7 +7,7 @@ export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 export function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(core.getInput('diagnostics'));
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.20.0',
+        cliVersion: core.getInput('cli-version') || 'v1.20.1',
         cliPlatform: core.getInput('cli-platform'),
         mode: normalizeMode(core.getInput('mode')),
         workingDirectory: path.resolve(core.getInput('working-directory') || '.'),

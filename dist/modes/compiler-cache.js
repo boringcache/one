@@ -1,13 +1,144 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { hasSaveToken, missingSaveTokenMessage, startRegistryProxy, } from '../core';
+import { hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from '../core';
 import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, exportEnvVars, getModeState, markModeVerifyTagSkipped, proxyPlanningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
-export async function startSccacheServer() {
-    await exec.exec('sccache', ['--start-server'], { ignoreReturnCode: true });
+const SCCACHE_DEFAULT_SERVER_PORT = 4226;
+const SCCACHE_START_TIMEOUT_MS = 15_000;
+const SCCACHE_READY_TIMEOUT_MS = 5_000;
+const SCCACHE_READY_POLL_INTERVAL_MS = 250;
+const SCCACHE_STOP_AFTER_FAILURE_TIMEOUT_MS = 5_000;
+const SCCACHE_FAILED_START_PROXY_STOP_TIMEOUT_MS = 10_000;
+function sccacheServerAddress() {
+    const unixSocket = process.platform === 'win32'
+        ? ''
+        : (process.env.SCCACHE_SERVER_UDS || '').trim();
+    if (unixSocket) {
+        const socketPath = unixSocket.startsWith('\\x00')
+            ? `\0${unixSocket.slice(4)}`
+            : unixSocket;
+        return {
+            connect: () => net.createConnection({ path: socketPath }),
+            label: unixSocket,
+        };
+    }
+    const configuredPort = (process.env.SCCACHE_SERVER_PORT || '').trim();
+    const port = configuredPort
+        ? Number.parseInt(configuredPort, 10)
+        : SCCACHE_DEFAULT_SERVER_PORT;
+    if ((configuredPort && !/^\d+$/.test(configuredPort)) || port < 1 || port > 65_535) {
+        throw new Error(`SCCACHE_SERVER_PORT must be an integer from 1 to 65535; received "${configuredPort}".`);
+    }
+    return {
+        connect: () => net.createConnection({ host: '127.0.0.1', port }),
+        label: `127.0.0.1:${port}`,
+    };
 }
+async function probeSccacheServer(address = sccacheServerAddress()) {
+    return await new Promise((resolve) => {
+        let settled = false;
+        const socket = address.connect();
+        const finish = (ready) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            socket.destroy();
+            resolve(ready);
+        };
+        socket.setTimeout(500);
+        socket.once('connect', () => finish(true));
+        socket.once('timeout', () => finish(false));
+        socket.once('error', () => finish(false));
+        socket.once('close', () => finish(false));
+    });
+}
+async function waitForSccacheServer(probe, timeoutMs, pollIntervalMs) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+        if (await probe()) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    throw new Error(`sccache did not accept connections within ${Math.ceil(timeoutMs / 1000)} seconds.`);
+}
+async function runSccacheProcess(args, timeoutMs, spawnProcess, stdio) {
+    return await new Promise((resolve, reject) => {
+        let settled = false;
+        const child = spawnProcess('sccache', args, {
+            env: process.env,
+            stdio,
+            windowsHide: true,
+        });
+        const timeout = setTimeout(() => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            try {
+                child.kill('SIGKILL');
+            }
+            catch {
+            }
+            reject(new Error(`sccache ${args.join(' ')} did not exit within ${Math.ceil(timeoutMs / 1000)} seconds; the launcher was terminated.`));
+        }, timeoutMs);
+        child.once('error', (error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            reject(error);
+        });
+        // Resolve on launcher exit, not stdio close. A daemon inheriting a pipe can
+        // keep close pending after the launcher has completed successfully.
+        child.once('exit', (exitCode, signal) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            resolve({ exitCode, signal });
+        });
+    });
+}
+async function stopSccacheAfterFailedStartup(spawnProcess) {
+    try {
+        await runSccacheProcess(['--stop-server'], SCCACHE_STOP_AFTER_FAILURE_TIMEOUT_MS, spawnProcess, 'ignore');
+    }
+    catch {
+    }
+}
+export async function startSccacheServer(options = {}) {
+    const spawnProcess = options.spawnProcess || spawn;
+    const address = sccacheServerAddress();
+    try {
+        const result = await runSccacheProcess(['--start-server'], options.startTimeoutMs ?? SCCACHE_START_TIMEOUT_MS, spawnProcess, 'inherit');
+        if (result.exitCode !== 0) {
+            const outcome = result.exitCode === null
+                ? `signal ${result.signal || 'unknown'}`
+                : `exit code ${result.exitCode}`;
+            throw new Error(`sccache --start-server failed with ${outcome}.`);
+        }
+        await waitForSccacheServer(options.readinessProbe || (() => probeSccacheServer(address)), options.readyTimeoutMs ?? SCCACHE_READY_TIMEOUT_MS, options.readyPollIntervalMs ?? SCCACHE_READY_POLL_INTERVAL_MS);
+        core.info(`sccache server is ready on ${address.label}`);
+    }
+    catch (error) {
+        await stopSccacheAfterFailedStartup(spawnProcess);
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Unable to start sccache safely: ${detail} Stop any stale daemon with `
+            + '`sccache --stop-server`, then retry. If startup still fails, set '
+            + '`SCCACHE_LOG=debug` and `SCCACHE_ERROR_LOG` to capture the daemon error.');
+    }
+}
+export const sccacheServerLifecycle = {
+    start: startSccacheServer,
+};
 export async function stopSccacheServer() {
     let output = '';
     try {
@@ -297,7 +428,19 @@ export async function runCcacheSave(options = {}) {
 export async function runSccacheRestore(plan, inputs) {
     const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('sccache', plan, inputs);
     exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
-    await startSccacheServer();
+    try {
+        await sccacheServerLifecycle.start();
+    }
+    catch (error) {
+        try {
+            await stopRegistryProxy(proxy.pid, proxy.port, SCCACHE_FAILED_START_PROXY_STOP_TIMEOUT_MS);
+        }
+        catch (cleanupError) {
+            const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+            core.warning(`sccache startup failed and the BoringCache proxy could not be stopped cleanly: ${detail}`);
+        }
+        throw error;
+    }
     return {
         workspace: proxyPlan.workspace,
         cacheHit: preflight.kvHit,
