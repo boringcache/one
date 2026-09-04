@@ -104377,7 +104377,7 @@ const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.20.2',
+        cliVersion: getInput('cli-version') || 'v1.20.3',
         cliPlatform: getInput('cli-platform'),
         mode: normalizeMode(getInput('mode')),
         workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
