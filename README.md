@@ -9,10 +9,29 @@ runner, restores available work, and publishes from trusted jobs.
 ## First run
 
 Run `boringcache onboard` in the repository first. Commit `.boringcache.toml`,
-then select its archive profile in CI:
+then select its archive profile in CI. On BoringBuild or another
+runner-integrated service, connect the runner to the Workspace once. The Action
+uses that short-lived Machine connection automatically, so the workflow does
+not need a BoringCache token:
 
 ```yaml
-- uses: boringcache/one@c62af42c5c1e29388ceeea77b6a7f1db51f641e7 # v1.20.2
+- uses: boringcache/one@dd0c732a76a5c8d70090a259c1255823acaf85b8 # v1.20.3
+  with:
+    trust-policy: auto
+    mode: archive
+    cache-profiles: ci
+```
+
+The signed job identity and Workspace policy decide whether that job can
+publish. An approved same-repository collaborator job may publish; a fork or
+other untrusted job remains restore-only.
+
+On a standard GitHub-hosted runner, either use the native OIDC flow from the
+[GitHub Actions guide](https://boringcache.com/docs/github-actions) or add
+explicitly scoped credentials to the Action step:
+
+```yaml
+- uses: boringcache/one@dd0c732a76a5c8d70090a259c1255823acaf85b8 # v1.20.3
   with:
     trust-policy: auto
     mode: archive
@@ -26,10 +45,11 @@ The same profile works locally with
 `boringcache run --profile ci -- COMMAND`. Workspace, paths, and cache names
 stay in `.boringcache.toml`, so the workflow only chooses what to run.
 
-`trust-policy: auto` restores on pull requests and publishes only when the job
-has `BORINGCACHE_SAVE_TOKEN`. Isolated archive candidate jobs use
-`BORINGCACHE_STAGE_TOKEN` and expose their exact `cache-candidates` output.
-Every job that reads cache needs `BORINGCACHE_RESTORE_TOKEN`.
+With scoped credentials, `trust-policy: auto` restores on pull requests and
+publishes only when the job has `BORINGCACHE_SAVE_TOKEN`. Isolated archive
+candidate jobs use `BORINGCACHE_STAGE_TOKEN` and expose their exact
+`cache-candidates` output. Every job on that path that reads cache needs
+`BORINGCACHE_RESTORE_TOKEN`.
 
 ## Supported modes
 
@@ -64,11 +84,11 @@ stored by GitHub.
 
 ## Updates
 
-The examples pin Action `v1.20.2` to its immutable distribution commit. A full commit SHA
+The examples pin Action `v1.20.3` to its immutable distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. Action
-`v1.20.2` installs CLI `v1.20.3` by default; `cli-version` is an explicit
+`v1.20.3` installs CLI `v1.20.5` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.

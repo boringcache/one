@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import { startWorkloadIdentity, stopWorkloadIdentity } from './core/workload-identity';
 import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
@@ -174,6 +175,7 @@ export async function run() {
         if (inputs.mode.trim().toLowerCase() === 'xcode') {
             await ensureXcodePlugin(inputs.cliVersion);
         }
+        await startWorkloadIdentity();
         const trustDecision = await resolveTrustDecision(inputs.trustPolicy);
         applyTrustEnvPolicy(trustDecision);
         const trustState = buildActionTrustState(trustDecision);
@@ -278,6 +280,12 @@ export async function run() {
         }
     }
     catch (error) {
+        try {
+            await stopWorkloadIdentity();
+        }
+        catch {
+            core.warning('Unable to finish Machine connection cleanup after startup failed.');
+        }
         writeActionFailureEvidence('restore', error, restoreFailureContext);
         const failureOperation = error instanceof DockerBuildFailure ? 'Docker build' : 'restore';
         core.setFailed(`boringcache/one ${failureOperation} failed: ${actionErrorMessage(error)}`);

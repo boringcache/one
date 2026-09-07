@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import { checkWorkloadIdentity, restoreWorkloadIdentity, stopWorkloadIdentity, WorkloadIdentityError, } from './core/workload-identity';
 import * as fs from 'fs';
 import { hasStageCredential, hasSaveCredential, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
 import { actionErrorMessage, buildActionTrustState, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
@@ -79,7 +80,10 @@ export async function run() {
     const originalCwd = process.cwd();
     let postFailureContext = {};
     let strictPostFailure = false;
+    let identityFailed = false;
     try {
+        restoreWorkloadIdentity();
+        await checkWorkloadIdentity();
         let resolvedMode = getActionState('resolved-mode');
         if (!resolvedMode) {
             core.info('Post step skipped: the main step did not create a lifecycle plan.');
@@ -200,9 +204,10 @@ export async function run() {
                 : 'saved');
     }
     catch (error) {
+        identityFailed = error instanceof WorkloadIdentityError;
         writeActionFailureEvidence('post', error, postFailureContext);
         const message = `boringcache/one save failed: ${actionErrorMessage(error)}`;
-        if (strictPostFailure) {
+        if (strictPostFailure || error instanceof WorkloadIdentityError) {
             core.setFailed(message);
         }
         else {
@@ -211,6 +216,22 @@ export async function run() {
     }
     finally {
         process.chdir(originalCwd);
-        removeActionStateDocument();
+        if (!identityFailed) {
+            try {
+                await checkWorkloadIdentity();
+            }
+            catch (error) {
+                core.setFailed(`Machine connection failed during post-save: ${actionErrorMessage(error)}`);
+            }
+        }
+        try {
+            await stopWorkloadIdentity();
+        }
+        catch (error) {
+            core.setFailed(`Machine connection cleanup failed: ${actionErrorMessage(error)}`);
+        }
+        finally {
+            removeActionStateDocument();
+        }
     }
 }
