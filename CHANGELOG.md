@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.20.4] - 2026-09-07
+
+### Added
+
+- Start and renew a Machine connection automatically on GitHub Actions when
+  the connected job has `id-token: write` and no explicit scoped credentials.
+  Keep ordinary build and test steps, share the session across One steps, and
+  close it after post-save.
+
 ## [1.20.3] - 2026-09-07
 
 ### Changed
@@ -77,7 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.20.3...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.20.4...HEAD
+[1.20.4]: https://github.com/boringcache/one/compare/v1.20.3...v1.20.4
 [1.20.3]: https://github.com/boringcache/one/compare/v1.20.2...v1.20.3
 [1.20.2]: https://github.com/boringcache/one/compare/v1.20.1...v1.20.2
 [1.20.1]: https://github.com/boringcache/one/compare/v1.20.0...v1.20.1

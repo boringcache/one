@@ -43629,6 +43629,115 @@ function getIDToken(aud) {
  */
 
 //# sourceMappingURL=core.js.map
+;// CONCATENATED MODULE: external "timers/promises"
+const promises_namespaceObject = require("timers/promises");
+;// CONCATENATED MODULE: ./dist/core/lifecycle-state.js
+
+
+
+
+
+const STATE_ID_KEY = 'lifecycle-id';
+const STATE_SCHEMA = 'boringcache_one_lifecycle.v1';
+const MAX_STATE_BYTES = 256 * 1024;
+let processStateId;
+function currentStateId() {
+    const saved = (getState(STATE_ID_KEY) || '').trim();
+    if (saved) {
+        return saved;
+    }
+    processStateId ||= external_crypto_namespaceObject.randomUUID();
+    return processStateId;
+}
+function statePath(id = currentStateId()) {
+    const digest = external_crypto_namespaceObject.createHash('sha256').update(id).digest('hex');
+    return external_path_.join(external_os_.tmpdir(), `boringcache-one-lifecycle-${digest}.json`);
+}
+function removeStateDocument(id) {
+    external_fs_namespaceObject.rmSync(statePath(id), { force: true });
+}
+function emptyDocument() {
+    return { schema_version: STATE_SCHEMA, values: {} };
+}
+function readDocument() {
+    const filePath = statePath();
+    if (!external_fs_namespaceObject.existsSync(filePath)) {
+        return emptyDocument();
+    }
+    const stat = external_fs_namespaceObject.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_STATE_BYTES) {
+        throw new Error('The BoringCache lifecycle state document is invalid.');
+    }
+    const parsed = JSON.parse(external_fs_namespaceObject.readFileSync(filePath, 'utf8'));
+    if (!parsed
+        || typeof parsed !== 'object'
+        || Array.isArray(parsed)
+        || parsed.schema_version !== STATE_SCHEMA
+        || typeof parsed.values !== 'object'
+        || Array.isArray(parsed.values)) {
+        throw new Error(`Unsupported BoringCache lifecycle state; expected ${STATE_SCHEMA}.`);
+    }
+    const values = parsed.values;
+    if (Object.values(values).some((value) => typeof value !== 'string')) {
+        throw new Error('The BoringCache lifecycle state document contains a non-string value.');
+    }
+    return { schema_version: STATE_SCHEMA, values };
+}
+function writeDocument(document) {
+    const filePath = statePath();
+    const body = `${JSON.stringify(document)}\n`;
+    if (Buffer.byteLength(body) > MAX_STATE_BYTES) {
+        throw new Error('The BoringCache lifecycle state document exceeds its 256 KiB limit.');
+    }
+    const temporaryPath = `${filePath}.${process.pid}.${external_crypto_namespaceObject.randomUUID()}.tmp`;
+    external_fs_namespaceObject.writeFileSync(temporaryPath, body, { mode: 0o600 });
+    try {
+        external_fs_namespaceObject.renameSync(temporaryPath, filePath);
+    }
+    finally {
+        external_fs_namespaceObject.rmSync(temporaryPath, { force: true });
+    }
+    saveState(STATE_ID_KEY, currentStateId());
+}
+function getActionState(key) {
+    return readDocument().values[key] || '';
+}
+function lifecycle_state_saveActionState(key, value) {
+    const document = readDocument();
+    document.values[key] = value;
+    writeDocument(document);
+}
+function removeActionStateDocument() {
+    const id = ((getState(STATE_ID_KEY) || processStateId) ?? '').trim();
+    if (id) {
+        removeStateDocument(id);
+    }
+    processStateId = undefined;
+}
+function lifecycleStateIdForTests(values, id = crypto.randomUUID()) {
+    const previous = processStateId;
+    processStateId = id;
+    writeDocument({ schema_version: STATE_SCHEMA, values });
+    processStateId = previous;
+    return id;
+}
+function lifecycleStateForTests(id) {
+    const previous = processStateId;
+    processStateId = id;
+    try {
+        return { ...readDocument().values };
+    }
+    finally {
+        processStateId = previous;
+    }
+}
+function resetLifecycleStateForTests() {
+    if (processStateId) {
+        removeStateDocument(processStateId);
+    }
+    processStateId = undefined;
+}
+
 // EXTERNAL MODULE: ./node_modules/semver/index.js
 var node_modules_semver = __nccwpck_require__(2088);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/lib/manifest.js
@@ -97753,6 +97862,179 @@ async function setup_execBoringCache(args, options = {}) {
     }
 }
 
+;// CONCATENATED MODULE: ./dist/core/workload-identity.js
+
+
+
+
+
+
+
+
+
+const BROKER_FILE_ENV = 'BORINGCACHE_CI_BROKER_FILE';
+const START_TIMEOUT_MS = 90_000;
+const STOP_TIMEOUT_MS = 60_000;
+const POLL_MS = 100;
+// GitHub owns the interval between main and post. The CLI owns authentication
+// and renews its session while this credential-free child waits for post-save.
+const KEEP_SESSION = (/* unused pure expression or super */ null && (`
+const fs = require('fs');
+const path = require('path');
+const directory = process.argv[1];
+const brokerFile = process.env.BORINGCACHE_CI_BROKER_FILE;
+if (!brokerFile) process.exit(1);
+const ready = path.join(directory, 'ready');
+fs.writeFileSync(ready + '.tmp', brokerFile, { mode: 0o600 });
+fs.renameSync(ready + '.tmp', ready);
+const timer = setInterval(() => {
+  if (!fs.existsSync(path.join(directory, 'keepalive'))) clearInterval(timer);
+}, 100);
+`));
+class WorkloadIdentityError extends Error {
+}
+function useBroker(file) {
+    process.env[BROKER_FILE_ENV] = file;
+    // The supervisor retains the provider request credential for renewal.
+    // Cache commands launched by this Action receive only the broker handle.
+    for (const name of [
+        'BORINGCACHE_RESTORE_TOKEN', 'BORINGCACHE_STAGE_TOKEN', 'BORINGCACHE_SAVE_TOKEN',
+        'BORINGCACHE_ADMIN_TOKEN', 'BORINGCACHE_API_TOKEN', 'BORINGCACHE_TOKEN',
+        'BORINGCACHE_TOKEN_FILE', 'ACTIONS_ID_TOKEN_REQUEST_URL', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+        'CIRCLE_OIDC_TOKEN', 'CIRCLE_OIDC_TOKEN_V2', 'BORINGCACHE_OIDC_TOKEN',
+    ]) {
+        delete process.env[name];
+    }
+}
+function rememberBroker(file) {
+    saveActionState('ci-broker-file', file);
+    useBroker(file);
+}
+async function startWorkloadIdentity() {
+    if (hasBrokeredWorkloadIdentity()) {
+        rememberBroker(process.env[BROKER_FILE_ENV].trim());
+        return;
+    }
+    // Explicit split credentials select the static path. Once either path is
+    // selected, an authentication failure never switches to the other one.
+    if (hasRestoreToken())
+        return;
+    if (!process.env.ACTIONS_ID_TOKEN_REQUEST_URL && !process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN)
+        return;
+    const directory = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'boringcache-one-session-'));
+    fs.chmodSync(directory, 0o700);
+    saveActionState('ci-session-directory', directory);
+    fs.writeFileSync(path.join(directory, 'keepalive'), '', { mode: 0o600 });
+    const log = fs.openSync(path.join(directory, 'session.log'), 'wx', 0o600);
+    let child;
+    try {
+        child = spawn('boringcache', [
+            'ci', 'run', '--oidc-provider', 'auto', '--',
+            process.execPath, '-e', KEEP_SESSION, directory,
+        ], {
+            detached: true,
+            windowsHide: true,
+            stdio: ['ignore', 'ignore', log],
+            // Keep RUNNER_TRACKING_ID so GitHub also reaps the supervisor if a
+            // failed or cancelled job skips post-save. Its temp cleanup owns every
+            // file, including the CLI's private broker directory, on that path.
+            env: { ...process.env, TMPDIR: directory, TMP: directory, TEMP: directory },
+        });
+    }
+    finally {
+        fs.closeSync(log);
+    }
+    let spawnError;
+    child.on('error', (error) => { spawnError = error; });
+    child.unref();
+    try {
+        const deadline = Date.now() + START_TIMEOUT_MS;
+        const ready = path.join(directory, 'ready');
+        while (!fs.existsSync(ready)) {
+            if (spawnError || child.exitCode !== null || child.signalCode !== null) {
+                throw new WorkloadIdentityError('Unable to start the Machine connection. Approve this repository through Connect CI, grant the job id-token: write, and use CLI v1.20.5 or newer. No static credential was used.');
+            }
+            if (Date.now() >= deadline) {
+                throw new WorkloadIdentityError('Timed out starting the Machine connection. Check the identity provider and BoringCache availability. No static credential was used.');
+            }
+            await delay(POLL_MS);
+        }
+        const stat = fs.lstatSync(ready);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096) {
+            throw new WorkloadIdentityError('The Machine connection returned an invalid startup handle.');
+        }
+        const file = fs.readFileSync(ready, 'utf8');
+        if (!path.isAbsolute(file) || /[\r\n\0]/.test(file)) {
+            throw new WorkloadIdentityError('The Machine connection returned an invalid broker path.');
+        }
+        rememberBroker(file);
+        await checkWorkloadIdentity();
+        core.exportVariable(BROKER_FILE_ENV, file);
+        core.info('Machine connection ready. The CLI will renew it through post-save.');
+    }
+    catch (error) {
+        fs.rmSync(path.join(directory, 'keepalive'), { force: true });
+        const deadline = Date.now() + 10_000;
+        while (!spawnError && child.exitCode === null && child.signalCode === null && Date.now() < deadline) {
+            await delay(POLL_MS);
+        }
+        // Before readiness no other Action can use this process. Retain its child
+        // object instead of persisting a PID that a later step could reuse.
+        if (child.exitCode === null && child.signalCode === null && !spawnError) {
+            if (process.platform === 'win32') {
+                child.kill('SIGTERM');
+            }
+            else if (child.pid) {
+                // The CLI and its broker share this detached process group. Its
+                // separately grouped keeper exits when keepalive is removed above.
+                try {
+                    process.kill(-child.pid, 'SIGTERM');
+                }
+                catch { /* Already stopped. */ }
+            }
+        }
+        throw error;
+    }
+}
+function restoreWorkloadIdentity() {
+    const file = getActionState('ci-broker-file');
+    if (file)
+        useBroker(file);
+}
+async function checkWorkloadIdentity() {
+    if (!getActionState('ci-broker-file'))
+        return;
+    try {
+        // Validate the live session without replacing the saved publication plan.
+        const status = await setup_execBoringCache(['ci', 'trust', '--request', 'restore', '--json'], { silent: true });
+        if (status !== 0)
+            throw new WorkloadIdentityError('The session check failed.');
+    }
+    catch {
+        throw new WorkloadIdentityError('The Machine connection is unavailable or expired. Cache access has stopped without falling back to a static credential. Rerun the job after restoring the connection.');
+    }
+}
+async function stopWorkloadIdentity() {
+    const directory = getActionState('ci-session-directory');
+    if (!directory)
+        return;
+    external_fs_namespaceObject.rmSync(external_path_.join(directory, 'keepalive'), { force: true });
+    const file = getActionState('ci-broker-file');
+    const deadline = Date.now() + STOP_TIMEOUT_MS;
+    while (file && external_fs_namespaceObject.existsSync(file)) {
+        if (Date.now() >= deadline) {
+            throw new WorkloadIdentityError('The Machine connection did not stop within 60 seconds.');
+        }
+        await (0,promises_namespaceObject.setTimeout)(POLL_MS);
+    }
+    external_fs_namespaceObject.rmSync(directory, { recursive: true, force: true });
+    lifecycle_state_saveActionState('ci-session-directory', '');
+    if (process.env[BROKER_FILE_ENV] === file) {
+        delete process.env[BROKER_FILE_ENV];
+        exportVariable(BROKER_FILE_ENV, '');
+    }
+}
+
 ;// CONCATENATED MODULE: ./dist/core/auth.js
 const CI_BROKER_FILE_ENV = 'BORINGCACHE_CI_BROKER_FILE';
 function auth_getAuthTokens() {
@@ -97787,7 +98069,7 @@ function auth_hasSaveCredential() {
     return auth_hasBrokeredWorkloadIdentity() || auth_hasSaveToken();
 }
 function auth_missingRestoreTokenMessage() {
-    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
+    return 'A Machine connection or restore-capable token is required. For GitHub OIDC, approve this repository through Connect CI and grant the job id-token: write. For scoped credentials, set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
 }
 function auth_missingSaveTokenMessage() {
     return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN.';
@@ -103961,113 +104243,6 @@ function safePathComponent(label, value) {
     return value;
 }
 
-;// CONCATENATED MODULE: ./dist/core/lifecycle-state.js
-
-
-
-
-
-const STATE_ID_KEY = 'lifecycle-id';
-const STATE_SCHEMA = 'boringcache_one_lifecycle.v1';
-const MAX_STATE_BYTES = 256 * 1024;
-let processStateId;
-function currentStateId() {
-    const saved = (getState(STATE_ID_KEY) || '').trim();
-    if (saved) {
-        return saved;
-    }
-    processStateId ||= external_crypto_namespaceObject.randomUUID();
-    return processStateId;
-}
-function statePath(id = currentStateId()) {
-    const digest = external_crypto_namespaceObject.createHash('sha256').update(id).digest('hex');
-    return external_path_.join(external_os_.tmpdir(), `boringcache-one-lifecycle-${digest}.json`);
-}
-function removeStateDocument(id) {
-    external_fs_namespaceObject.rmSync(statePath(id), { force: true });
-}
-function emptyDocument() {
-    return { schema_version: STATE_SCHEMA, values: {} };
-}
-function readDocument() {
-    const filePath = statePath();
-    if (!external_fs_namespaceObject.existsSync(filePath)) {
-        return emptyDocument();
-    }
-    const stat = external_fs_namespaceObject.lstatSync(filePath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_STATE_BYTES) {
-        throw new Error('The BoringCache lifecycle state document is invalid.');
-    }
-    const parsed = JSON.parse(external_fs_namespaceObject.readFileSync(filePath, 'utf8'));
-    if (!parsed
-        || typeof parsed !== 'object'
-        || Array.isArray(parsed)
-        || parsed.schema_version !== STATE_SCHEMA
-        || typeof parsed.values !== 'object'
-        || Array.isArray(parsed.values)) {
-        throw new Error(`Unsupported BoringCache lifecycle state; expected ${STATE_SCHEMA}.`);
-    }
-    const values = parsed.values;
-    if (Object.values(values).some((value) => typeof value !== 'string')) {
-        throw new Error('The BoringCache lifecycle state document contains a non-string value.');
-    }
-    return { schema_version: STATE_SCHEMA, values };
-}
-function writeDocument(document) {
-    const filePath = statePath();
-    const body = `${JSON.stringify(document)}\n`;
-    if (Buffer.byteLength(body) > MAX_STATE_BYTES) {
-        throw new Error('The BoringCache lifecycle state document exceeds its 256 KiB limit.');
-    }
-    const temporaryPath = `${filePath}.${process.pid}.${external_crypto_namespaceObject.randomUUID()}.tmp`;
-    external_fs_namespaceObject.writeFileSync(temporaryPath, body, { mode: 0o600 });
-    try {
-        external_fs_namespaceObject.renameSync(temporaryPath, filePath);
-    }
-    finally {
-        external_fs_namespaceObject.rmSync(temporaryPath, { force: true });
-    }
-    saveState(STATE_ID_KEY, currentStateId());
-}
-function getActionState(key) {
-    return readDocument().values[key] || '';
-}
-function lifecycle_state_saveActionState(key, value) {
-    const document = readDocument();
-    document.values[key] = value;
-    writeDocument(document);
-}
-function removeActionStateDocument() {
-    const id = ((getState(STATE_ID_KEY) || processStateId) ?? '').trim();
-    if (id) {
-        removeStateDocument(id);
-    }
-    processStateId = undefined;
-}
-function lifecycleStateIdForTests(values, id = crypto.randomUUID()) {
-    const previous = processStateId;
-    processStateId = id;
-    writeDocument({ schema_version: STATE_SCHEMA, values });
-    processStateId = previous;
-    return id;
-}
-function lifecycleStateForTests(id) {
-    const previous = processStateId;
-    processStateId = id;
-    try {
-        return { ...readDocument().values };
-    }
-    finally {
-        processStateId = previous;
-    }
-}
-function resetLifecycleStateForTests() {
-    if (processStateId) {
-        removeStateDocument(processStateId);
-    }
-    processStateId = undefined;
-}
-
 ;// CONCATENATED MODULE: ./dist/core/index.js
 
 
@@ -106595,6 +106770,7 @@ async function runModeSave(mode, options = {}) {
 
 
 
+
 function buildCliSetupOptions(cliVersion, cliPlatform) {
     return {
         version: cliVersion,
@@ -106671,7 +106847,10 @@ async function run() {
     const originalCwd = process.cwd();
     let postFailureContext = {};
     let strictPostFailure = false;
+    let identityFailed = false;
     try {
+        restoreWorkloadIdentity();
+        await checkWorkloadIdentity();
         let resolvedMode = getActionState('resolved-mode');
         if (!resolvedMode) {
             info('Post step skipped: the main step did not create a lifecycle plan.');
@@ -106792,9 +106971,10 @@ async function run() {
                 : 'saved');
     }
     catch (error) {
+        identityFailed = error instanceof WorkloadIdentityError;
         writeActionFailureEvidence('post', error, postFailureContext);
         const message = `boringcache/one save failed: ${actionErrorMessage(error)}`;
-        if (strictPostFailure) {
+        if (strictPostFailure || error instanceof WorkloadIdentityError) {
             setFailed(message);
         }
         else {
@@ -106803,7 +106983,23 @@ async function run() {
     }
     finally {
         process.chdir(originalCwd);
-        removeActionStateDocument();
+        if (!identityFailed) {
+            try {
+                await checkWorkloadIdentity();
+            }
+            catch (error) {
+                setFailed(`Machine connection failed during post-save: ${actionErrorMessage(error)}`);
+            }
+        }
+        try {
+            await stopWorkloadIdentity();
+        }
+        catch (error) {
+            setFailed(`Machine connection cleanup failed: ${actionErrorMessage(error)}`);
+        }
+        finally {
+            removeActionStateDocument();
+        }
     }
 }
 
