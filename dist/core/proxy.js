@@ -5,7 +5,7 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, missingStageTokenMessage, } from './auth';
+import { getAuthTokens, hasBrokeredWorkloadIdentity, missingRestoreTokenMessage, missingSaveTokenMessage, missingStageTokenMessage, } from './auth';
 export const DEFAULT_PROXY_PORT = 22243;
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS = 7455;
@@ -354,6 +354,7 @@ export function assertOciImportReady(readiness) {
  */
 export async function startRegistryProxy(options) {
     const { restoreToken, stageToken, saveToken } = getAuthTokens();
+    const brokeredWorkloadIdentity = hasBrokeredWorkloadIdentity();
     if (options.readOnly && options.stage) {
         throw new Error('Proxy stage cannot be combined with read-only mode.');
     }
@@ -365,13 +366,13 @@ export async function startRegistryProxy(options) {
         : effectiveStage
             ? stageToken
             : saveToken;
-    if (!authToken && !effectiveReadOnly && restoreToken) {
+    if (!brokeredWorkloadIdentity && !authToken && !effectiveReadOnly && restoreToken) {
         effectiveReadOnly = true;
         effectiveStage = false;
         authToken = restoreToken;
         core.info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
-    if (!authToken) {
+    if (!brokeredWorkloadIdentity && !authToken) {
         if (effectiveReadOnly) {
             throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
         }

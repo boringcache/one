@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { getAuthTokens, missingRestoreTokenMessage, missingSaveTokenMessage, } from './auth';
+import { getAuthTokens, hasBrokeredWorkloadIdentity, missingRestoreTokenMessage, missingSaveTokenMessage, } from './auth';
 const GHA_READY_TIMEOUT_MS = 300_000;
 const GHA_READY_POLL_MS = 200;
 function createServiceDirectory() {
@@ -121,15 +121,16 @@ async function waitForReady(readyPath, child, host, port, logPath) {
 }
 export async function startGhaAdapter(options) {
     const { restoreToken, saveToken } = getAuthTokens();
+    const brokeredWorkloadIdentity = hasBrokeredWorkloadIdentity();
     let readOnly = options.readOnly === true;
-    if (!readOnly && !saveToken && restoreToken) {
+    if (!brokeredWorkloadIdentity && !readOnly && !saveToken && restoreToken) {
         readOnly = true;
         core.info('No save-capable token configured; starting the GitHub Actions cache adapter in restore-only mode.');
     }
-    if (readOnly && !restoreToken) {
+    if (!brokeredWorkloadIdentity && readOnly && !restoreToken) {
         throw new Error(`${missingRestoreTokenMessage()} This is required for GitHub Actions cache mode.`);
     }
-    if (!readOnly && !saveToken) {
+    if (!brokeredWorkloadIdentity && !readOnly && !saveToken) {
         throw new Error(`${missingSaveTokenMessage()} This is required for GitHub Actions cache mode.`);
     }
     const host = options.host || '127.0.0.1';

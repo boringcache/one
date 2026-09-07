@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
-import { hasStageToken, hasSaveToken, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
+import { hasStageCredential, hasSaveCredential, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
 import { actionErrorMessage, buildActionTrustState, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
 function buildCliSetupOptions(cliVersion, cliPlatform) {
@@ -149,8 +149,10 @@ export async function run() {
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
             return;
         }
-        const requiredTokenPresent = resolvedTrustPolicy === 'stage' ? hasStageToken() : hasSaveToken();
-        if (!requiredTokenPresent) {
+        const requiredCredentialPresent = resolvedTrustPolicy === 'stage'
+            ? hasStageCredential()
+            : hasSaveCredential();
+        if (!requiredCredentialPresent) {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }

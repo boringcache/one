@@ -1,3 +1,4 @@
+const CI_BROKER_FILE_ENV = 'BORINGCACHE_CI_BROKER_FILE';
 export function getAuthTokens() {
     const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || undefined;
     const stageToken = process.env.BORINGCACHE_STAGE_TOKEN || saveToken;
@@ -16,6 +17,18 @@ export function hasSaveToken() {
 }
 export function hasStageToken() {
     return Boolean(getAuthTokens().stageToken);
+}
+export function hasBrokeredWorkloadIdentity() {
+    return Boolean(process.env[CI_BROKER_FILE_ENV]?.trim());
+}
+export function hasRestoreCredential() {
+    return hasBrokeredWorkloadIdentity() || hasRestoreToken();
+}
+export function hasStageCredential() {
+    return hasBrokeredWorkloadIdentity() || hasStageToken();
+}
+export function hasSaveCredential() {
+    return hasBrokeredWorkloadIdentity() || hasSaveToken();
 }
 export function missingRestoreTokenMessage() {
     return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';

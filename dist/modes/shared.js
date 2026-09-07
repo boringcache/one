@@ -3,7 +3,7 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execBoringCache as execBoringCacheCore, getActionState, hasRestoreToken, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, saveActionState, } from '../core';
+import { execBoringCache as execBoringCacheCore, getActionState, hasBrokeredWorkloadIdentity, hasRestoreToken, hasSaveCredential, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, saveActionState, } from '../core';
 import { DEFAULT_OCI_HYDRATION_POLICY, requireCliVerificationTags, } from '../utils';
 export async function waitForArchiveMaterialization(options) {
     await options.archiveMaterialized;
@@ -77,7 +77,8 @@ export function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
 }
 export function proxyPlanningReadOnly(requestedReadOnly) {
-    return requestedReadOnly || (!hasSaveToken() && hasRestoreToken());
+    return requestedReadOnly
+        || (!hasBrokeredWorkloadIdentity() && !hasSaveToken() && hasRestoreToken());
 }
 export function appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
@@ -302,7 +303,7 @@ export async function resolveAdapterCliPlan(adapter, workspace, workingDirectory
     return plan;
 }
 export async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!hasSaveToken()) {
+    if (!hasSaveCredential()) {
         core.notice(`Skipping cache save (${missingSaveTokenMessage()})`);
         return;
     }

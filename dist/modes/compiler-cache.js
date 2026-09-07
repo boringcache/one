@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from '../core';
+import { hasSaveCredential, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from '../core';
 import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, exportEnvVars, getModeState, markModeVerifyTagSkipped, proxyPlanningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
 const SCCACHE_DEFAULT_SERVER_PORT = 4226;
 const SCCACHE_START_TIMEOUT_MS = 15_000;
@@ -342,7 +342,7 @@ export async function finishCompilerCacheSave(tool, state, stats, statsDetail, o
     if (!state.workspace || !state.tag || options.allowSaves === false) {
         return;
     }
-    if (!hasSaveToken()) {
+    if (!hasSaveCredential()) {
         core.notice(`Save skipped: ${missingSaveTokenMessage()}`);
         return;
     }

@@ -97754,6 +97754,7 @@ async function setup_execBoringCache(args, options = {}) {
 }
 
 ;// CONCATENATED MODULE: ./dist/core/auth.js
+const CI_BROKER_FILE_ENV = 'BORINGCACHE_CI_BROKER_FILE';
 function getAuthTokens() {
     const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || undefined;
     const stageToken = process.env.BORINGCACHE_STAGE_TOKEN || saveToken;
@@ -97767,11 +97768,23 @@ function getAuthTokens() {
 function hasRestoreToken() {
     return Boolean(getAuthTokens().restoreToken);
 }
-function auth_hasSaveToken() {
+function hasSaveToken() {
     return Boolean(getAuthTokens().saveToken);
 }
 function hasStageToken() {
     return Boolean(getAuthTokens().stageToken);
+}
+function hasBrokeredWorkloadIdentity() {
+    return Boolean(process.env[CI_BROKER_FILE_ENV]?.trim());
+}
+function hasRestoreCredential() {
+    return hasBrokeredWorkloadIdentity() || hasRestoreToken();
+}
+function hasStageCredential() {
+    return hasBrokeredWorkloadIdentity() || hasStageToken();
+}
+function auth_hasSaveCredential() {
+    return hasBrokeredWorkloadIdentity() || hasSaveToken();
 }
 function missingRestoreTokenMessage() {
     return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
@@ -98190,6 +98203,7 @@ function assertOciImportReady(readiness) {
  */
 async function startRegistryProxy(options) {
     const { restoreToken, stageToken, saveToken } = getAuthTokens();
+    const brokeredWorkloadIdentity = hasBrokeredWorkloadIdentity();
     if (options.readOnly && options.stage) {
         throw new Error('Proxy stage cannot be combined with read-only mode.');
     }
@@ -98201,13 +98215,13 @@ async function startRegistryProxy(options) {
         : effectiveStage
             ? stageToken
             : saveToken;
-    if (!authToken && !effectiveReadOnly && restoreToken) {
+    if (!brokeredWorkloadIdentity && !authToken && !effectiveReadOnly && restoreToken) {
         effectiveReadOnly = true;
         effectiveStage = false;
         authToken = restoreToken;
         info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
-    if (!authToken) {
+    if (!brokeredWorkloadIdentity && !authToken) {
         if (effectiveReadOnly) {
             throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
         }
@@ -103438,15 +103452,16 @@ async function waitForReady(readyPath, child, host, port, logPath) {
 }
 async function startGhaAdapter(options) {
     const { restoreToken, saveToken } = getAuthTokens();
+    const brokeredWorkloadIdentity = hasBrokeredWorkloadIdentity();
     let readOnly = options.readOnly === true;
-    if (!readOnly && !saveToken && restoreToken) {
+    if (!brokeredWorkloadIdentity && !readOnly && !saveToken && restoreToken) {
         readOnly = true;
         info('No save-capable token configured; starting the GitHub Actions cache adapter in restore-only mode.');
     }
-    if (readOnly && !restoreToken) {
+    if (!brokeredWorkloadIdentity && readOnly && !restoreToken) {
         throw new Error(`${missingRestoreTokenMessage()} This is required for GitHub Actions cache mode.`);
     }
-    if (!readOnly && !saveToken) {
+    if (!brokeredWorkloadIdentity && !readOnly && !saveToken) {
         throw new Error(`${auth_missingSaveTokenMessage()} This is required for GitHub Actions cache mode.`);
     }
     const host = options.host || '127.0.0.1';
@@ -103833,7 +103848,7 @@ function compatibilityTrustDecision(requested) {
     const capabilities = {
         restore: hasRestoreToken(),
         stage: hasStageToken(),
-        save: auth_hasSaveToken(),
+        save: hasSaveToken(),
     };
     const intended = requested === 'auto' ? (untrustedSource ? 'restore' : 'publish') : requested;
     const [resolved, status, reason] = compatibilityOutcome(requested, intended, capabilities);
@@ -104377,7 +104392,7 @@ const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.20.3',
+        cliVersion: getInput('cli-version') || 'v1.20.5',
         cliPlatform: getInput('cli-platform'),
         mode: normalizeMode(getInput('mode')),
         workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
@@ -105023,7 +105038,8 @@ function ensureDir(dir) {
     external_fs_namespaceObject.mkdirSync(dir, { recursive: true });
 }
 function proxyPlanningReadOnly(requestedReadOnly) {
-    return requestedReadOnly || (!auth_hasSaveToken() && hasRestoreToken());
+    return requestedReadOnly
+        || (!hasBrokeredWorkloadIdentity() && !hasSaveToken() && hasRestoreToken());
 }
 function shared_appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
@@ -105248,7 +105264,7 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     return plan;
 }
 async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!hasSaveToken()) {
+    if (!hasSaveCredential()) {
         core.notice(`Skipping cache save (${missingSaveTokenMessage()})`);
         return;
     }
@@ -106278,7 +106294,7 @@ async function finishCompilerCacheSave(tool, state, stats, statsDetail, options)
     if (!state.workspace || !state.tag || options.allowSaves === false) {
         return;
     }
-    if (!hasSaveToken()) {
+    if (!hasSaveCredential()) {
         core.notice(`Save skipped: ${missingSaveTokenMessage()}`);
         return;
     }
