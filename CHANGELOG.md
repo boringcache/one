@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Start and renew a Machine connection automatically on GitHub Actions when
+  the connected job has `id-token: write` and no explicit scoped credentials.
+  Keep ordinary build and test steps, share the session across One steps, and
+  close it after post-save.
+
 
 ## [1.20.3] - 2026-09-07
 

@@ -31,7 +31,7 @@ export function hasSaveCredential() {
     return hasBrokeredWorkloadIdentity() || hasSaveToken();
 }
 export function missingRestoreTokenMessage() {
-    return 'A restore-capable token is required. Set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
+    return 'A Machine connection or restore-capable token is required. For GitHub OIDC, approve this repository through Connect CI and grant the job id-token: write. For scoped credentials, set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
 }
 export function missingSaveTokenMessage() {
     return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN.';
