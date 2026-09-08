@@ -104567,7 +104567,7 @@ const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.20.5',
+        cliVersion: getInput('cli-version') || 'v1.21.0',
         cliPlatform: getInput('cli-platform'),
         mode: normalizeMode(getInput('mode')),
         workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
@@ -104745,6 +104745,9 @@ async function buildArchiveEntries(inputs) {
     }
     return {
         entries: plan.tag_path_pairs.join('\n'),
+        exclusions: Object.fromEntries((plan.archive_entries || [])
+            .filter((entry) => entry.exclude?.length)
+            .map((entry) => [entry.tag_path_pair, entry.exclude])),
         envVars: plan.env_vars,
         cacheTagPrefix,
         workspace: plan.workspace,
@@ -104777,6 +104780,7 @@ async function buildPlan(inputs) {
         cacheTagPrefix,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
+        archiveExclusions: archiveEntries.exclusions,
         archiveVerificationTags: archiveEntries.verificationTags,
     };
 }
@@ -106029,9 +106033,11 @@ async function runCargoRestore(plan, inputs) {
     const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
     const [targetPreflight, compilerPreflight] = await Promise.all([
         targetEntry
-            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
-                noPlatform: cargoPlan.proxy.no_platform,
-                noGit: cargoPlan.proxy.no_git,
+            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.resolved_tag || targetEntry.tag, {
+                // Exact archive identities already include their own scope. Older
+                // CLI plans used one scope for both layers and omit resolved_tag.
+                noPlatform: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_platform,
+                noGit: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_git,
                 requireServerSignature: true,
             })
             : emptyDirectCacheTagCheckStatus(),
@@ -107052,6 +107058,7 @@ async function run() {
             trust_policy: trustDecision.resolved,
         };
         saveActionState('generic-cache-entries', genericSaveEntries);
+        saveActionState('generic-cache-exclusions', JSON.stringify(completedPlan.archiveExclusions || {}));
         saveActionState('generic-cache-workspace', completedPlan.workspace);
         await emitRestoreDiagnostics(completedPlan, inputs, resolvedTags, overallHit, trustState);
         if (!trustDecision.write_allowed) {

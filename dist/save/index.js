@@ -104567,7 +104567,7 @@ const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.20.5',
+        cliVersion: getInput('cli-version') || 'v1.21.0',
         cliPlatform: getInput('cli-platform'),
         mode: normalizeMode(getInput('mode')),
         workingDirectory: external_path_.resolve(getInput('working-directory') || '.'),
@@ -104733,6 +104733,9 @@ async function buildArchiveEntries(inputs) {
     }
     return {
         entries: plan.tag_path_pairs.join('\n'),
+        exclusions: Object.fromEntries((plan.archive_entries || [])
+            .filter((entry) => entry.exclude?.length)
+            .map((entry) => [entry.tag_path_pair, entry.exclude])),
         envVars: plan.env_vars,
         cacheTagPrefix,
         workspace: plan.workspace,
@@ -104765,6 +104768,7 @@ async function buildPlan(inputs) {
         cacheTagPrefix,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
+        archiveExclusions: archiveEntries.exclusions,
         archiveVerificationTags: archiveEntries.verificationTags,
     };
 }
@@ -106017,9 +106021,11 @@ async function cargo_runCargoRestore(plan, inputs) {
     const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
     const [targetPreflight, compilerPreflight] = await Promise.all([
         targetEntry
-            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
-                noPlatform: cargoPlan.proxy.no_platform,
-                noGit: cargoPlan.proxy.no_git,
+            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.resolved_tag || targetEntry.tag, {
+                // Exact archive identities already include their own scope. Older
+                // CLI plans used one scope for both layers and omit resolved_tag.
+                noPlatform: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_platform,
+                noGit: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_git,
                 requireServerSignature: true,
             })
             : emptyDirectCacheTagCheckStatus(),
@@ -106863,6 +106869,7 @@ async function run() {
         const cliPlatform = getActionState('cli-platform') || inputs.cliPlatform || undefined;
         let workingDirectory = getActionState('working-directory');
         let genericEntries = getActionState('generic-cache-entries');
+        const genericExclusions = JSON.parse(getActionState('generic-cache-exclusions') || '{}');
         let genericWorkspace = getActionState('generic-cache-workspace');
         const verbose = getActionState('verbose') === 'true';
         const requestedTrustPolicy = normalizeTrustPolicy(getActionState('trust-policy') || inputs.trustPolicy);
@@ -106948,20 +106955,32 @@ async function run() {
             separatorMode: 'newline',
         })
             .map((entry) => `${entry.tag}:${entry.savePath}`);
-        const args = ['save', genericWorkspace];
+        const saveGroups = new Map();
         for (const entry of saveEntries) {
-            args.push('--entry', entry);
+            const selection = JSON.stringify(genericExclusions[entry] || []);
+            const group = saveGroups.get(selection) || [];
+            group.push(entry);
+            saveGroups.set(selection, group);
         }
-        if (resolvedTrustPolicy === 'stage') {
-            args.push('--stage');
+        for (const [selection, entries] of saveGroups) {
+            const args = ['save', genericWorkspace];
+            for (const entry of entries) {
+                args.push('--entry', entry);
+            }
+            for (const pattern of JSON.parse(selection)) {
+                args.push('--exclude-pattern', pattern);
+            }
+            if (resolvedTrustPolicy === 'stage') {
+                args.push('--stage');
+            }
+            if (verbose) {
+                args.push('--verbose');
+            }
+            if (inputs.failOnCacheError) {
+                args.push('--fail-on-cache-error');
+            }
+            await setup_execBoringCache(args);
         }
-        if (verbose) {
-            args.push('--verbose');
-        }
-        if (inputs.failOnCacheError) {
-            args.push('--fail-on-cache-error');
-        }
-        await setup_execBoringCache(args);
         await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedTrustPolicy === 'stage'
             ? resolvedMode && resolvedMode !== 'archive'
                 ? 'mode_post_and_generic_stage'

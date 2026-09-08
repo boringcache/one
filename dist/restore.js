@@ -273,6 +273,7 @@ export async function run() {
             trust_policy: trustDecision.resolved,
         };
         saveActionState('generic-cache-entries', genericSaveEntries);
+        saveActionState('generic-cache-exclusions', JSON.stringify(completedPlan.archiveExclusions || {}));
         saveActionState('generic-cache-workspace', completedPlan.workspace);
         await emitRestoreDiagnostics(completedPlan, inputs, resolvedTags, overallHit, trustState);
         if (!trustDecision.write_allowed) {

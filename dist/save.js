@@ -96,6 +96,7 @@ export async function run() {
         const cliPlatform = getActionState('cli-platform') || inputs.cliPlatform || undefined;
         let workingDirectory = getActionState('working-directory');
         let genericEntries = getActionState('generic-cache-entries');
+        const genericExclusions = JSON.parse(getActionState('generic-cache-exclusions') || '{}');
         let genericWorkspace = getActionState('generic-cache-workspace');
         const verbose = getActionState('verbose') === 'true';
         const requestedTrustPolicy = normalizeTrustPolicy(getActionState('trust-policy') || inputs.trustPolicy);
@@ -181,20 +182,32 @@ export async function run() {
             separatorMode: 'newline',
         })
             .map((entry) => `${entry.tag}:${entry.savePath}`);
-        const args = ['save', genericWorkspace];
+        const saveGroups = new Map();
         for (const entry of saveEntries) {
-            args.push('--entry', entry);
+            const selection = JSON.stringify(genericExclusions[entry] || []);
+            const group = saveGroups.get(selection) || [];
+            group.push(entry);
+            saveGroups.set(selection, group);
         }
-        if (resolvedTrustPolicy === 'stage') {
-            args.push('--stage');
+        for (const [selection, entries] of saveGroups) {
+            const args = ['save', genericWorkspace];
+            for (const entry of entries) {
+                args.push('--entry', entry);
+            }
+            for (const pattern of JSON.parse(selection)) {
+                args.push('--exclude-pattern', pattern);
+            }
+            if (resolvedTrustPolicy === 'stage') {
+                args.push('--stage');
+            }
+            if (verbose) {
+                args.push('--verbose');
+            }
+            if (inputs.failOnCacheError) {
+                args.push('--fail-on-cache-error');
+            }
+            await execBoringCache(args);
         }
-        if (verbose) {
-            args.push('--verbose');
-        }
-        if (inputs.failOnCacheError) {
-            args.push('--fail-on-cache-error');
-        }
-        await execBoringCache(args);
         await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedTrustPolicy === 'stage'
             ? resolvedMode && resolvedMode !== 'archive'
                 ? 'mode_post_and_generic_stage'
