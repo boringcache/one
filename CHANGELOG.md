@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Check Cargo target hits using the CLI-resolved archive tag when compiler
+  and target caches use different Git or platform scopes.
 
 ## [1.20.4] - 2026-09-07
 

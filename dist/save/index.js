@@ -106017,9 +106017,11 @@ async function cargo_runCargoRestore(plan, inputs) {
     const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
     const [targetPreflight, compilerPreflight] = await Promise.all([
         targetEntry
-            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.tag, {
-                noPlatform: cargoPlan.proxy.no_platform,
-                noGit: cargoPlan.proxy.no_git,
+            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.resolved_tag || targetEntry.tag, {
+                // Exact archive identities already include their own scope. Older
+                // CLI plans used one scope for both layers and omit resolved_tag.
+                noPlatform: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_platform,
+                noGit: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_git,
                 requireServerSignature: true,
             })
             : emptyDirectCacheTagCheckStatus(),
