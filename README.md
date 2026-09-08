@@ -8,30 +8,36 @@ runner, restores available work, and publishes from trusted jobs.
 
 ## First run
 
-Run `boringcache onboard` in the repository first. Commit `.boringcache.toml`,
-then select its archive profile in CI. On BoringBuild or another
-runner-integrated service, connect the runner to the Workspace once. The Action
-uses that short-lived Machine connection automatically, so the workflow does
-not need a BoringCache token:
+Run `boringcache onboard` in the repository first, commit `.boringcache.toml`,
+and approve the repository-to-Workspace binding once through **Connect CI**.
+On a standard GitHub-hosted runner, grant the job OIDC permission and select the
+profile. The Action starts and renews the short-lived Machine connection for the
+job, so the workflow does not need a BoringCache token:
 
 ```yaml
-- uses: boringcache/one@dd0c732a76a5c8d70090a259c1255823acaf85b8 # v1.20.3
-  with:
-    trust-policy: auto
-    mode: archive
-    cache-profiles: ci
+permissions:
+  contents: read
+  id-token: write
+
+steps:
+  - uses: boringcache/one@e4ead12dabc993eba201c402a82e396166dade03 # v1.20.4
+    with:
+      trust-policy: auto
+      mode: archive
+      cache-profiles: ci
 ```
 
 The signed job identity and Workspace policy decide whether that job can
 publish. An approved same-repository collaborator job may publish; a fork or
-other untrusted job remains restore-only.
+other untrusted job remains restore-only. On BoringBuild, the same Action step
+uses the runner-provided Machine connection instead; that connection takes
+precedence and does not require a BoringCache token.
 
-On a standard GitHub-hosted runner, either use the native OIDC flow from the
-[GitHub Actions guide](https://boringcache.com/docs/github-actions) or add
-explicitly scoped credentials to the Action step:
+If workload identity is unavailable, use explicitly scoped credentials as a
+fallback:
 
 ```yaml
-- uses: boringcache/one@dd0c732a76a5c8d70090a259c1255823acaf85b8 # v1.20.3
+- uses: boringcache/one@e4ead12dabc993eba201c402a82e396166dade03 # v1.20.4
   with:
     trust-policy: auto
     mode: archive
@@ -84,11 +90,11 @@ stored by GitHub.
 
 ## Updates
 
-The examples pin Action `v1.20.3` to its immutable distribution commit. A full commit SHA
+The examples pin Action `v1.20.4` to its immutable distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. Action
-`v1.20.3` installs CLI `v1.20.5` by default; `cli-version` is an explicit
+`v1.20.4` installs CLI `v1.20.5` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.
