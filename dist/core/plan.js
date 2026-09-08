@@ -125,6 +125,9 @@ export async function buildArchiveEntries(inputs) {
     }
     return {
         entries: plan.tag_path_pairs.join('\n'),
+        exclusions: Object.fromEntries((plan.archive_entries || [])
+            .filter((entry) => entry.exclude?.length)
+            .map((entry) => [entry.tag_path_pair, entry.exclude])),
         envVars: plan.env_vars,
         cacheTagPrefix,
         workspace: plan.workspace,
@@ -157,6 +160,7 @@ export async function buildPlan(inputs) {
         cacheTagPrefix,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
+        archiveExclusions: archiveEntries.exclusions,
         archiveVerificationTags: archiveEntries.verificationTags,
     };
 }
