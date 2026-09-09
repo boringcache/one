@@ -20,7 +20,7 @@ permissions:
   id-token: write
 
 steps:
-  - uses: boringcache/one@90111526eb218a7f1e119ac2b29f765bd4d82734 # v1.21.0
+  - uses: boringcache/one@a610ec5a564efd9b360925056dbade04deb5def6 # v1.30.0
     with:
       trust-policy: auto
       mode: archive
@@ -37,7 +37,7 @@ If workload identity is unavailable, use explicitly scoped credentials as a
 fallback:
 
 ```yaml
-- uses: boringcache/one@90111526eb218a7f1e119ac2b29f765bd4d82734 # v1.21.0
+- uses: boringcache/one@a610ec5a564efd9b360925056dbade04deb5def6 # v1.30.0
   with:
     trust-policy: auto
     mode: archive
@@ -90,11 +90,11 @@ stored by GitHub.
 
 ## Updates
 
-The examples pin Action `v1.21.0` to its immutable distribution commit. A full commit SHA
+The examples pin Action `v1.30.0` to its immutable distribution commit. A full commit SHA
 is immutable; `v1` and ordinary semver tags are update channels and may move.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. Action
-`v1.21.0` installs CLI `v1.21.0` by default; `cli-version` is an explicit
+`v1.30.0` installs CLI `v1.30.0` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.
