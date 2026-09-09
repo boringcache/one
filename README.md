@@ -81,6 +81,10 @@ redirect later provider actions; they remain GitHub-backed. Use
 standard GitHub-hosted runner. BoringCache does not import objects already
 stored by GitHub.
 
+Artifact upload and download through `mode: artifact` are unreleased and are
+not available in `v1.21.0`. See
+[Artifacts](https://boringcache.com/docs/artifacts) for the current CLI path.
+
 ## Guides and reference
 
 - [Set up BoringCache in GitHub Actions](https://boringcache.com/docs/github-actions)

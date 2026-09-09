@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import { transferArtifact } from './core/artifacts';
 import { startWorkloadIdentity, stopWorkloadIdentity } from './core/workload-identity';
 import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
@@ -163,8 +164,15 @@ function checkFlagArgs(restoreFlagArgs) {
 export async function run() {
     const originalCwd = process.cwd();
     let restoreFailureContext = {};
+    let failureOperation = 'restore';
     try {
+        if (core.getInput('mode').trim().toLowerCase() === 'artifact')
+            failureOperation = 'artifact transfer';
         const inputs = getInputs();
+        if (inputs.artifact) {
+            failureOperation = `artifact ${inputs.artifact.command}`;
+            process.chdir(inputs.workingDirectory);
+        }
         restoreFailureContext = {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
         };
@@ -176,7 +184,7 @@ export async function run() {
             await ensureXcodePlugin(inputs.cliVersion);
         }
         await startWorkloadIdentity();
-        const trustDecision = await resolveTrustDecision(inputs.trustPolicy);
+        const trustDecision = await resolveTrustDecision(inputs.artifact?.command === 'pull' ? 'restore' : inputs.trustPolicy);
         applyTrustEnvPolicy(trustDecision);
         const trustState = buildActionTrustState(trustDecision);
         const effectiveInputs = {
@@ -184,6 +192,27 @@ export async function run() {
             readOnly: trustDecision.resolved === 'restore',
             stage: trustDecision.resolved === 'stage',
         };
+        if (inputs.artifact) {
+            if (inputs.artifact.command === 'push' && !trustDecision.write_allowed) {
+                throw new Error(`Artifact upload denied: ${trustDecision.detail}`);
+            }
+            saveActionState('resolved-mode', 'artifact');
+            const evidence = await transferArtifact(inputs.artifact);
+            writeActionEvidence('restore', {
+                phase_status: 'completed',
+                phase_summary: {
+                    status: 'completed',
+                    headline: inputs.artifact.command === 'push' ? 'Artifact uploaded' : 'Artifact downloaded',
+                    detail: `Artifact ${evidence.artifact_id} is ready.`,
+                    next_step: '',
+                },
+                mode: 'artifact',
+                working_directory: inputs.workingDirectory,
+                mode_evidence: evidence,
+                trust_state: trustState,
+            }, actionEvidenceProductRefs(inputs.cliVersion));
+            return;
+        }
         const candidateReceiptFile = effectiveInputs.stage ? prepareCandidateReceiptFile() : '';
         saveActionState('candidate-receipt-file', candidateReceiptFile);
         const cliCapabilityVersion = await resolveCliCapabilityVersion(inputs.cliVersion);
@@ -288,7 +317,8 @@ export async function run() {
             core.warning('Unable to finish Machine connection cleanup after startup failed.');
         }
         writeActionFailureEvidence('restore', error, restoreFailureContext);
-        const failureOperation = error instanceof DockerBuildFailure ? 'Docker build' : 'restore';
+        if (error instanceof DockerBuildFailure)
+            failureOperation = 'Docker build';
         core.setFailed(`boringcache/one ${failureOperation} failed: ${actionErrorMessage(error)}`);
     }
     finally {

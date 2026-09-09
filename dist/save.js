@@ -89,6 +89,10 @@ export async function run() {
             core.info('Post step skipped: the main step did not create a lifecycle plan.');
             return;
         }
+        if (resolvedMode === 'artifact') {
+            core.info('Post step skipped: the artifact transfer ran in the main Action step.');
+            return;
+        }
         const inputs = getInputs();
         strictPostFailure = inputs.failOnCacheError;
         const cliVersion = getActionState('cli-version');

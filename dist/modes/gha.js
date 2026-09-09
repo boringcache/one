@@ -1,6 +1,8 @@
+import * as core from '@actions/core';
 import { resolveGitHubCacheIdentity, startGhaAdapter, } from '../core';
 import { resolvePreferredPort, saveModeState, setProxyOutputs, } from './shared';
 export async function runGhaRestore(plan, inputs) {
+    core.notice('mode: gha configures direct clients. On standard GitHub runners, later official cache and artifact Actions still use GitHub storage. Use mode: artifact for BoringCache uploads and downloads.');
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const identity = resolveGitHubCacheIdentity();
     const adapter = await startGhaAdapter({
@@ -29,6 +31,8 @@ export async function runGhaRestore(plan, inputs) {
             fallback_scope_count: identity.readScopes.length,
             results_url: adapter.resultsUrl,
             read_only: adapter.readOnly,
+            activation: 'direct-client',
+            redirects_provider_actions: false,
         },
     };
 }

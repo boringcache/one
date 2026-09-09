@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
 
+- Upload and download immutable build outputs with `mode: artifact` and
+  `artifact-command: push|pull`. Return artifact IDs and content digests, and
+  resolve names only within the exact workflow run and attempt.
+
+### Changed
+
+- Report that `mode: gha` configures direct clients and does not redirect
+  later official Actions on standard GitHub runners.
 ## [1.30.0] - 2026-09-09
 
 ### Changed
