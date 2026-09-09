@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.30.1] - 2026-09-09
+
+### Added
+
+- Upload and download immutable build outputs with `mode: artifact` and
+  `artifact-command: push|pull`. Return artifact IDs and content digests, and
+  resolve names only within the exact workflow run and attempt.
+
+### Changed
+
+- Install BoringCache CLI `v1.30.1` by default, including native BuildKit
+  configuration and managed-worker CPU controls.
+- Report that `mode: gha` configures direct clients and does not redirect
+  later official Actions on standard GitHub runners.
+
 ## [1.30.0] - 2026-09-09
 
 ### Changed
@@ -104,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.30.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.30.1...HEAD
+[1.30.1]: https://github.com/boringcache/one/compare/v1.30.0...v1.30.1
 [1.30.0]: https://github.com/boringcache/one/compare/v1.21.0...v1.30.0
 [1.21.0]: https://github.com/boringcache/one/compare/v1.20.4...v1.21.0
 [1.20.4]: https://github.com/boringcache/one/compare/v1.20.3...v1.20.4

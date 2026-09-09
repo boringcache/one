@@ -6,6 +6,8 @@ import { runBuildkitRestore, runBuildkitSave, runDockerRestore, runDockerSave, }
 import { stopProxyFromState, } from './modes/shared';
 export async function runModeRestore(plan, inputs, options = {}) {
     switch (plan.mode) {
+        case 'artifact':
+            throw new Error('Artifact transfers must run through the synchronous Artifact lifecycle.');
         case 'docker':
             return runDockerRestore(plan, inputs);
         case 'buildkit':
@@ -40,6 +42,8 @@ export async function runModeRestore(plan, inputs, options = {}) {
 }
 export async function runModeSave(mode, options = {}) {
     switch (mode) {
+        case 'artifact':
+            return;
         case 'docker':
             await runDockerSave(options);
             return;

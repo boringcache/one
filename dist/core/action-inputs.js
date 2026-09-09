@@ -3,13 +3,16 @@ import * as path from 'path';
 import { normalizeDiagnosticsLogLines, normalizeDiagnosticsMode } from './diagnostics';
 import { normalizeTrustPolicy } from './trust';
 import { normalizeMode } from '../modes';
+import { getArtifactInputs } from './artifacts';
 export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 export function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(core.getInput('diagnostics'));
+    const mode = normalizeMode(core.getInput('mode'));
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.30.0',
+        cliVersion: core.getInput('cli-version') || 'v1.30.1',
         cliPlatform: core.getInput('cli-platform'),
-        mode: normalizeMode(core.getInput('mode')),
+        mode,
+        artifact: getArtifactInputs(mode),
         workingDirectory: path.resolve(core.getInput('working-directory') || '.'),
         trustPolicy: normalizeTrustPolicy(core.getInput('trust-policy') || 'auto'),
         readOnly: false,

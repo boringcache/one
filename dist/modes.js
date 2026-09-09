@@ -1,4 +1,9 @@
 const MODE_SPECS = {
+    artifact: {
+        resolved: 'artifact',
+        implemented: true,
+        description: 'Upload or download immutable build outputs through the Artifact CLI.',
+    },
     archive: {
         resolved: 'archive',
         implemented: true,
@@ -79,6 +84,7 @@ export function normalizeMode(value) {
     const normalized = (value || 'archive').trim().toLowerCase();
     switch (normalized) {
         case 'archive':
+        case 'artifact':
         case 'docker':
         case 'buildkit':
         case 'bazel':
@@ -95,7 +101,7 @@ export function normalizeMode(value) {
         case 'xcode':
             return normalized;
         default:
-            throw new Error(`Unsupported mode "${value}". Expected archive, docker, buildkit, bazel, cargo, ccache, gha, go, gradle, maven, nix, nx, sccache, turbo, or xcode.`);
+            throw new Error(`Unsupported mode "${value}". Expected archive, artifact, docker, buildkit, bazel, cargo, ccache, gha, go, gradle, maven, nix, nx, sccache, turbo, or xcode.`);
     }
 }
 export function resolveModeSpec(mode) {

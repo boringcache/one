@@ -81,6 +81,9 @@ redirect later provider actions; they remain GitHub-backed. Use
 standard GitHub-hosted runner. BoringCache does not import objects already
 stored by GitHub.
 
+The pinned examples above do not include `mode: artifact`. See
+[Artifacts](https://boringcache.com/docs/artifacts) for the current CLI path.
+
 ## Guides and reference
 
 - [Set up BoringCache in GitHub Actions](https://boringcache.com/docs/github-actions)

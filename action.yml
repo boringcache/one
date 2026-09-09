@@ -4,13 +4,13 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.30.0'
+    default: 'v1.30.1'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
     required: false
   mode:
-    description: 'Primary cache behavior. Use archive for portable directory caches, gha to start the Actions-compatible service for direct or runner-integrated clients, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nix, nx, sccache, turbo, or xcode. A gha setup step does not redirect later provider actions on GitHub-hosted runners.'
+    description: 'Use artifact to push or pull immutable outputs, archive for portable directory caches, gha for direct Actions-compatible clients, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nix, nx, sccache, turbo, or xcode. A gha setup step does not redirect later provider actions on GitHub-hosted runners.'
     default: 'archive'
     required: false
   working-directory:
@@ -49,7 +49,35 @@ inputs:
     description: 'Check if a cache entry exists without downloading (CLI --lookup-only flag)'
     default: 'false'
     required: false
+  artifact-command:
+    description: 'Artifact CLI operation: push uploads now; pull downloads and verifies now. Requires mode: artifact.'
+    required: false
+  artifact-path:
+    description: 'Push: files, directories, or portable globs, one per line. Pull: one exact destination file or directory; omitted uses the CLI default. Relative to working-directory.'
+    required: false
+  artifact-name:
+    description: 'Push: optional artifact label. Pull: exact name in this workflow run and attempt; ambiguous names fail. Use either artifact-name or artifact-id for pull.'
+    required: false
+  artifact-id:
+    description: 'Immutable art_... ID to pull, including across jobs or runs with access to the workspace.'
+    required: false
+  artifact-workspace:
+    description: 'Artifact workspace (namespace/workspace). Omitted uses normal CLI workspace resolution.'
+    required: false
+  artifact-retention-days:
+    description: 'Push only: retention from 1 to 400 days, subject to workspace policy. Omitted uses the workspace default.'
+    required: false
+  artifact-include-hidden:
+    description: 'Push only: include dot-prefixed files and directories. Symlinks are not followed.'
+    default: 'false'
+    required: false
 outputs:
+  artifact-id:
+    description: 'Immutable BoringCache artifact ID returned after a successful push or pull.'
+  artifact-digest:
+    description: 'Content SHA-256 from the completed Artifact receipt.'
+  artifact-download-path:
+    description: 'Absolute destination after a successful artifact pull.'
   cache-hit:
     description: 'Whether an action-level restore or preflight found reusable cache. Empty means this setup step did not measure reuse; synchronous CLI modes and GHA report their outcome from the wrapped workload instead.'
   evidence-path:
