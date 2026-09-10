@@ -1,5 +1,5 @@
 name: 'BoringCache One'
-description: 'GitHub lifecycle for one CLI-owned BoringCache plan.'
+description: 'Shared build cache for GitHub Actions, Docker builds, and native build tools.'
 author: 'BoringCache'
 inputs:
   cli-version:
@@ -94,5 +94,5 @@ runs:
   post: 'dist/save/index.js'
   post-if: "success() || inputs.save-always == 'true' || inputs.save-always == 'True' || inputs.save-always == 'TRUE'"
 branding:
-  icon: 'archive'
+  icon: 'layers'
   color: 'blue'

@@ -1,6 +1,13 @@
-# boringcache/one
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/images/boringcache-dark.svg">
+  <img src=".github/images/boringcache-light.svg" width="240" alt="BoringCache">
+</picture>
 
-**One Action for every BoringCache mode.**
+# BoringCache for GitHub Actions
+
+One Action for shared build cache across Docker builds and native build tools.
+
+Uses the same BoringCache plan as your local builds.
 
 `boringcache/one` brings BoringCache into GitHub Actions. Pick archive, Docker,
 BuildKit, or a native tool adapter; the Action installs the CLI, prepares the
