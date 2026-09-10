@@ -20,7 +20,7 @@ permissions:
   id-token: write
 
 steps:
-  - uses: boringcache/one@a610ec5a564efd9b360925056dbade04deb5def6 # v1.30.0
+  - uses: boringcache/one@404b744a2053da4cf963f13f615f7fafe94f3cf7 # v1.30.1
     with:
       trust-policy: auto
       mode: archive
@@ -37,7 +37,7 @@ If workload identity is unavailable, use explicitly scoped credentials as a
 fallback:
 
 ```yaml
-- uses: boringcache/one@a610ec5a564efd9b360925056dbade04deb5def6 # v1.30.0
+- uses: boringcache/one@404b744a2053da4cf963f13f615f7fafe94f3cf7 # v1.30.1
   with:
     trust-policy: auto
     mode: archive
@@ -59,7 +59,7 @@ candidate jobs use `BORINGCACHE_STAGE_TOKEN` and expose their exact
 
 ## Supported modes
 
-The released modes are `archive`, `docker`, `buildkit`, `bazel`, `cargo`,
+The released modes are `archive`, `artifact`, `docker`, `buildkit`, `bazel`, `cargo`,
 `ccache`, `go`, `gradle`, `gha`, `maven`, `nix`, `nx`, `sccache`, `turbo`, and
 `xcode`. Each non-archive mode matches the CLI command with the same name.
 
@@ -81,8 +81,9 @@ redirect later provider actions; they remain GitHub-backed. Use
 standard GitHub-hosted runner. BoringCache does not import objects already
 stored by GitHub.
 
-The pinned examples above do not include `mode: artifact`. See
-[Artifacts](https://boringcache.com/docs/artifacts) for the current CLI path.
+Use `mode: artifact` with `artifact-command: push` or `pull` to transfer
+immutable build outputs. See [Artifacts](https://boringcache.com/docs/artifacts)
+for upload and download examples.
 
 ## Guides and reference
 
@@ -93,11 +94,11 @@ The pinned examples above do not include `mode: artifact`. See
 
 ## Updates
 
-The examples pin Action `v1.30.0` to its immutable distribution commit. A full commit SHA
-is immutable; `v1` and ordinary semver tags are update channels and may move.
+The examples pin Action `v1.30.1` to its immutable distribution commit. A full commit SHA
+is immutable; `v1` follows the latest verified release.
 Update the SHA deliberately after reviewing a newer release and keep the
 version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. Action
-`v1.30.0` installs CLI `v1.30.0` by default; `cli-version` is an explicit
+`v1.30.1` installs CLI `v1.30.1` by default; `cli-version` is an explicit
 override, not a value inferred from the Action version.
