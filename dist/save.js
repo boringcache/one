@@ -30,6 +30,23 @@ function readXcodeEvidence(filePath) {
         return null;
     }
 }
+function emitProxyLogTail(diagnostics) {
+    if (!diagnostics.includeLogs) {
+        return;
+    }
+    const proxyLogPath = getActionState('proxy-log-path') || getActionState('mode-proxy-log-path');
+    if (!proxyLogPath) {
+        return;
+    }
+    const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
+    core.info(`proxy-log-path: ${proxyLogPath}`);
+    if (logTail.length > 0) {
+        core.info(`proxy-log-tail (${logTail.length} lines):`);
+        for (const line of logTail) {
+            core.info(line);
+        }
+    }
+}
 async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, genericWorkspace, genericEntries, trustState, saveStatus) {
     const diagnostics = loadDiagnosticsConfig(inputs);
     const proxyLogPath = getActionState('proxy-log-path') || getActionState('mode-proxy-log-path');
@@ -62,18 +79,7 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         if (xcodeEvidence) {
             core.info(`xcode-evidence: ${JSON.stringify(xcodeEvidence)}`);
         }
-        if (diagnostics.includeLogs) {
-            if (proxyLogPath) {
-                const logTail = readLogTail(proxyLogPath, diagnostics.logLines);
-                core.info(`proxy-log-path: ${proxyLogPath}`);
-                if (logTail.length > 0) {
-                    core.info(`proxy-log-tail (${logTail.length} lines):`);
-                    for (const line of logTail) {
-                        core.info(line);
-                    }
-                }
-            }
-        }
+        emitProxyLogTail(diagnostics);
     });
 }
 export async function run() {
@@ -81,6 +87,7 @@ export async function run() {
     let postFailureContext = {};
     let strictPostFailure = false;
     let identityFailed = false;
+    let diagnostics;
     try {
         restoreWorkloadIdentity();
         await checkWorkloadIdentity();
@@ -95,6 +102,7 @@ export async function run() {
         }
         const inputs = getInputs();
         strictPostFailure = inputs.failOnCacheError;
+        diagnostics = loadDiagnosticsConfig(inputs);
         const cliVersion = getActionState('cli-version');
         let cliCapabilityVersion = getActionState('cli-capability-version');
         const cliPlatform = getActionState('cli-platform') || inputs.cliPlatform || undefined;
@@ -229,6 +237,12 @@ export async function run() {
         }
         else {
             core.warning(`${message}. The build remains successful because fail-on-cache-error is false.`);
+        }
+        if (diagnostics) {
+            const failureDiagnostics = diagnostics;
+            await runDiagnosticsGroup(failureDiagnostics, 'BoringCache Post-Step Failure Diagnostics', async () => {
+                emitProxyLogTail(failureDiagnostics);
+            });
         }
     }
     finally {
