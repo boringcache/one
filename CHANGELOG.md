@@ -7,10 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.30.3] - 2026-09-10
+
+### Fixed
+
+- Align the Action's BuildKit smoke and end-to-end test defaults with the
+  managed `v0.33.0-bc.2` image.
+
+## [1.30.2] - 2026-09-10
+
 ### Changed
 
+- Install BoringCache CLI `v1.30.2` by default, including archive download and
+  extraction repairs, Cargo target reuse, and the updated managed BuildKit.
 - Use the shared BoringCache logo in the README and a layers icon for the
   Action badge. Describe the Action's shared build cache in Marketplace metadata.
+
+### Fixed
+
+- Include bounded, redacted proxy logs when post-save fails and verbose
+  diagnostics are enabled.
 
 ## [1.30.1] - 2026-09-09
 
@@ -123,7 +140,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.30.1...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.30.3...HEAD
+[1.30.3]: https://github.com/boringcache/one/compare/v1.30.2...v1.30.3
+[1.30.2]: https://github.com/boringcache/one/compare/v1.30.1...v1.30.2
 [1.30.1]: https://github.com/boringcache/one/compare/v1.30.0...v1.30.1
 [1.30.0]: https://github.com/boringcache/one/compare/v1.21.0...v1.30.0
 [1.21.0]: https://github.com/boringcache/one/compare/v1.20.4...v1.21.0
