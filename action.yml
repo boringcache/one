@@ -3,8 +3,8 @@ description: 'Shared build cache for GitHub Actions, Docker builds, and native b
 author: 'BoringCache'
 inputs:
   cli-version:
-    description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.30.4'
+    description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "runner" to use whichever version the runner image preinstalled, which fails when it has none. Set to "skip" to disable automatic CLI setup.'
+    default: 'v1.31.0'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -32,8 +32,15 @@ inputs:
   cache-profiles:
     description: 'Repo cache profile names from .boringcache.toml or boringcache.toml (comma-separated or newline-separated). Required for archive mode.'
     required: false
+  gradle-home:
+    description: 'Gradle user home for mode: gradle, exported as GRADLE_USER_HOME for later steps. Relative paths use working-directory. Omitted uses the CLI plan, including repo configuration and GRADLE_USER_HOME.'
+    required: false
+  save:
+    description: 'Post-step publication policy: on-success publishes when the job is still passing, always publishes the state the job reached even after a failed step, and never restores without publishing. Defaults to on-success.'
+    default: 'on-success'
+    required: false
   save-always:
-    description: 'Run the post step to save the cache even if a later workflow step fails. It does not save after an embedded synchronous CLI command fails. Supports the same true spellings as GitHub boolean inputs.'
+    description: 'Compatibility alias for save: always. Run the post step to save the cache even if a later workflow step fails. It does not save after an embedded synchronous CLI command fails. Supports the same true spellings as GitHub boolean inputs.'
     default: 'false'
     required: false
   # CLI flags (passed directly to boringcache CLI)
@@ -86,13 +93,25 @@ outputs:
     description: 'Exact staged candidate IDs created by this Action invocation, newline-separated. Carry them to an explicit CLI restore or promotion.'
   cache-candidate-digests:
     description: 'Exact manifest-root digests for candidates staged by this Action invocation, newline-separated.'
+  restore-duration-seconds:
+    description: 'mode: cargo. Seconds the restore phase took, measured by the CLI.'
+  restore-transferred-bytes:
+    description: 'mode: cargo. Bytes the restore phase transferred for all cache entries.'
+  publish-duration-seconds:
+    description: 'mode: cargo. Seconds the post-step publish phase took, measured by the CLI.'
+  publish-transferred-bytes:
+    description: 'mode: cargo. Bytes the publish phase uploaded. Zero when nothing changed.'
+  publish-logical-bytes:
+    description: 'mode: cargo. Uncompressed size the publish phase captured.'
+  snapshot-duration-seconds:
+    description: 'mode: cargo. Seconds the publish phase spent snapshotting and indexing before transfer.'
   proxy-port:
     description: 'Resolved runner-local port for a proxy that remains available to later workflow steps'
 runs:
   using: 'node24'
   main: 'dist/restore/index.js'
   post: 'dist/save/index.js'
-  post-if: "success() || inputs.save-always == 'true' || inputs.save-always == 'True' || inputs.save-always == 'TRUE'"
+  post-if: "success() || env.BORINGCACHE_SAVE_ALWAYS == 'true'"
 branding:
   icon: 'layers'
   color: 'blue'

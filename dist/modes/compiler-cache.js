@@ -5,8 +5,8 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { hasSaveCredential, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from '../core';
-import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, exportEnvVars, getModeState, markModeVerifyTagSkipped, proxyPlanningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
+import { compilerCacheObservation, hasSaveCredential, missingSaveTokenMessage, recordCompilerCacheObservation, startRegistryProxy, stopRegistryProxy, } from '../core';
+import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, exportEnvVars, getModeState, markModeVerifyTagSkipped, planningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
 const SCCACHE_DEFAULT_SERVER_PORT = 4226;
 const SCCACHE_START_TIMEOUT_MS = 15_000;
 const SCCACHE_READY_TIMEOUT_MS = 5_000;
@@ -138,9 +138,69 @@ export async function startSccacheServer(options = {}) {
 }
 export const sccacheServerLifecycle = {
     start: startSccacheServer,
+    daemonReachable: () => probeSccacheServer(),
 };
-export async function stopSccacheServer() {
+export const SCCACHE_STATS_SOURCE = 'sccache --show-stats';
+export const CCACHE_STATS_SOURCE = 'ccache --print-log-stats --format=json';
+export function sccacheObservation(summary, unavailableReason) {
+    const base = compilerCacheObservationBase('sccache', SCCACHE_STATS_SOURCE);
+    if (unavailableReason || !summary) {
+        return {
+            ...base,
+            status: 'unavailable',
+            unavailable_reason: unavailableReason || 'stats_unreadable',
+        };
+    }
+    return {
+        ...base,
+        status: 'measured',
+        compile_requests: summary.compileRequests,
+        compile_requests_executed: summary.compileRequestsExecuted,
+        cacheable_requests: summary.cacheHits + summary.cacheMisses,
+        cache_hits: summary.cacheHits,
+        cache_misses: summary.cacheMisses,
+        hit_rate: sccacheHitRate(summary.cacheHits, summary.cacheMisses),
+        cache_read_errors: summary.cacheReadErrors,
+        cache_write_errors: summary.cacheWriteErrors,
+        cache_timeouts: summary.cacheTimeouts,
+        rust_hit_rate: summary.rustHitRate,
+    };
+}
+function sccacheHitRate(cacheHits, cacheMisses) {
+    const lookups = cacheHits + cacheMisses;
+    if (lookups === 0) {
+        return null;
+    }
+    return Math.round((cacheHits * 1000) / lookups) / 10;
+}
+function compilerCacheObservationBase(tool, statsSource) {
+    return {
+        schema_version: 'native_tool_evidence.v1',
+        tool,
+        stats_source: statsSource,
+        status: 'unavailable',
+        compile_requests: null,
+        compile_requests_executed: null,
+        cacheable_requests: null,
+        cache_hits: null,
+        cache_misses: null,
+        hit_rate: null,
+        cache_errors: null,
+        cache_read_errors: null,
+        cache_write_errors: null,
+        cache_timeouts: null,
+    };
+}
+export async function captureSccacheStats(daemonReachable = () => sccacheServerLifecycle.daemonReachable()) {
+    let reachable = true;
+    try {
+        reachable = await daemonReachable();
+    }
+    catch {
+        reachable = true;
+    }
     let output = '';
+    let commandFailed = false;
     try {
         await exec.exec('sccache', ['--show-stats'], {
             ignoreReturnCode: true,
@@ -159,6 +219,24 @@ export async function stopSccacheServer() {
         });
     }
     catch {
+        commandFailed = true;
+    }
+    const summary = summarizeSccacheStats(output);
+    const unavailableReason = !reachable
+        ? 'daemon_unreachable'
+        : commandFailed
+            ? 'stats_command_failed'
+            : summary
+                ? null
+                : 'stats_unreadable';
+    const observation = sccacheObservation(summary, unavailableReason);
+    recordCompilerCacheObservation(observation);
+    return { summary, observation };
+}
+export async function stopSccacheServer() {
+    let capture = null;
+    try {
+        capture = await captureSccacheStats();
     }
     finally {
         try {
@@ -167,7 +245,7 @@ export async function stopSccacheServer() {
         catch {
         }
     }
-    return summarizeSccacheStats(output);
+    return capture?.summary ?? null;
 }
 export function parseSccacheIntegerStat(output, label) {
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -191,9 +269,13 @@ export function summarizeSccacheStats(output) {
     }
     return {
         compileRequests,
+        compileRequestsExecuted: parseSccacheIntegerStat(output, 'Compile requests executed'),
         cacheHits,
         cacheMisses,
         rustHitRate: parseSccacheTextStat(output, 'Cache hits rate (Rust)'),
+        cacheReadErrors: parseSccacheIntegerStat(output, 'Cache read errors'),
+        cacheWriteErrors: parseSccacheIntegerStat(output, 'Cache write errors'),
+        cacheTimeouts: parseSccacheIntegerStat(output, 'Cache timeouts'),
     };
 }
 export const CCACHE_NON_CACHEABLE_COUNTERS = [
@@ -242,6 +324,8 @@ export function summarizeCcacheStats(output) {
             cacheMisses,
             remoteHits: counter('remote_storage_hit'),
             remoteMisses: counter('remote_storage_miss'),
+            cacheErrors: counter('remote_storage_error'),
+            cacheTimeouts: counter('remote_storage_timeout'),
         };
     }
     catch (error) {
@@ -249,8 +333,34 @@ export function summarizeCcacheStats(output) {
         return null;
     }
 }
+export function ccacheObservation(summary, unavailableReason) {
+    const base = compilerCacheObservationBase('ccache', CCACHE_STATS_SOURCE);
+    if (unavailableReason || !summary) {
+        return {
+            ...base,
+            status: 'unavailable',
+            unavailable_reason: unavailableReason || 'stats_unreadable',
+        };
+    }
+    return {
+        ...base,
+        status: 'measured',
+        compile_requests: summary.compileRequests,
+        cacheable_requests: summary.cacheHits + summary.cacheMisses,
+        cache_hits: summary.cacheHits,
+        cache_misses: summary.cacheMisses,
+        hit_rate: summary.cacheHits + summary.cacheMisses > 0
+            ? summary.cacheHits / (summary.cacheHits + summary.cacheMisses)
+            : null,
+        cache_errors: summary.cacheErrors,
+        cache_timeouts: summary.cacheTimeouts,
+        remote_storage_hits: summary.remoteHits,
+        remote_storage_misses: summary.remoteMisses,
+    };
+}
 export async function stopCcacheStorageHelpers(statsLog, statsDirectory) {
     let output = '';
+    let commandFailed = false;
     const env = { ...process.env, CCACHE_STATSLOG: statsLog };
     try {
         await exec.exec('ccache', ['--print-log-stats', '--format=json'], {
@@ -269,16 +379,19 @@ export async function stopCcacheStorageHelpers(statsLog, statsDirectory) {
         });
     }
     catch {
+        commandFailed = true;
+    }
+    const summary = summarizeCcacheStats(output);
+    recordCompilerCacheObservation(ccacheObservation(summary, commandFailed ? 'stats_command_failed' : summary ? null : 'stats_unreadable'));
+    try {
+        await exec.exec('ccache', ['--stop-storage-helpers'], { env, ignoreReturnCode: true });
+    }
+    catch {
     }
     finally {
-        try {
-            await exec.exec('ccache', ['--stop-storage-helpers'], { env, ignoreReturnCode: true });
-        }
-        catch {
-        }
         await fs.promises.rm(statsDirectory, { recursive: true, force: true });
     }
-    return summarizeCcacheStats(output);
+    return summary;
 }
 export function compilerCacheEnvForStartedProxy(plan, actualPort) {
     const envVars = {};
@@ -297,7 +410,7 @@ export function sccacheEnvForStartedProxy(plan, actualPort) {
 }
 export async function startCompilerCacheProxy(adapter, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
     const preflight = await checkDirectCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
@@ -338,7 +451,31 @@ export function compilerCacheModeState(tool) {
         kvChecked: getModeState(`${tool}-preflight-kv-checked`) === 'true',
     };
 }
+export function sccacheStatsDetail(stats) {
+    if (!stats || compilerCacheObservation()?.status === 'unavailable') {
+        return '';
+    }
+    return `compile_requests=${stats.compileRequests}, cache_hits=${stats.cacheHits}, `
+        + `cache_misses=${stats.cacheMisses}, rust_hit_rate=${stats.rustHitRate || 'unknown'}`;
+}
+export function ccacheStatsDetail(stats) {
+    if (!stats || compilerCacheObservation()?.status === 'unavailable') {
+        return '';
+    }
+    return `compile_requests=${stats.compileRequests}, cache_hits=${stats.cacheHits}, `
+        + `cache_misses=${stats.cacheMisses}, remote_hits=${stats.remoteHits}, remote_misses=${stats.remoteMisses}, `
+        + `cache_errors=${stats.cacheErrors}, cache_timeouts=${stats.cacheTimeouts}`;
+}
+function reportCompilerCacheStats(tool, tag, statsDetail) {
+    const label = tag || '(untagged)';
+    if (statsDetail) {
+        core.info(`${tool} proxy stats for ${label}: ${statsDetail}`);
+        return;
+    }
+    core.info(`${tool} proxy stats for ${label} were unavailable: the native tool reported no readable counters.`);
+}
 export async function finishCompilerCacheSave(tool, state, stats, statsDetail, options) {
+    reportCompilerCacheStats(tool, state.tag, statsDetail);
     if (!state.workspace || !state.tag || options.allowSaves === false) {
         return;
     }
@@ -363,7 +500,6 @@ export async function finishCompilerCacheSave(tool, state, stats, statsDetail, o
         noPlatform: state.noPlatform,
         noGit: state.noGit,
     });
-    core.info(`${tool} proxy stats for ${state.tag}: ${statsDetail}`);
     if (stats.cacheHits > 0) {
         return;
     }
@@ -419,10 +555,8 @@ export async function runCcacheSave(options = {}) {
     const stats = statsLog && statsDirectory
         ? await stopCcacheStorageHelpers(statsLog, statsDirectory)
         : null;
+    const statsDetail = ccacheStatsDetail(stats);
     await stopProxyFromState();
-    const statsDetail = stats
-        ? `compile_requests=${stats.compileRequests}, cache_hits=${stats.cacheHits}, cache_misses=${stats.cacheMisses}, remote_hits=${stats.remoteHits}, remote_misses=${stats.remoteMisses}`
-        : '';
     await finishCompilerCacheSave('ccache', state, stats, statsDetail, options);
 }
 export async function runSccacheRestore(plan, inputs) {
@@ -452,10 +586,7 @@ export async function runSccacheRestore(plan, inputs) {
 export async function runSccacheSave(options = {}) {
     const state = compilerCacheModeState('sccache');
     const sccacheStats = await stopSccacheServer();
+    const statsDetail = sccacheStatsDetail(sccacheStats);
     await stopProxyFromState();
-    const rustHitRate = sccacheStats?.rustHitRate || 'unknown';
-    const statsDetail = sccacheStats
-        ? `compile_requests=${sccacheStats.compileRequests}, cache_hits=${sccacheStats.cacheHits}, cache_misses=${sccacheStats.cacheMisses}, rust_hit_rate=${rustHitRate}`
-        : '';
     await finishCompilerCacheSave('sccache', state, sccacheStats, statsDetail, options);
 }

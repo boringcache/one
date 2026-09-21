@@ -6,3 +6,4 @@ export { resolveGitHubCacheIdentity, startGhaAdapter, } from './gha';
 export { applyTrustEnvPolicy, buildActionTrustState, isPullRequestEvent, normalizeTrustPolicy, resolveTrustDecision, } from './trust';
 export { addLocalBinPaths, currentHomeDir, isPathInside, localBinDir, safePathComponent, } from './paths';
 export { getActionState, lifecycleStateIdForTests, removeActionStateDocument, saveActionState, } from './lifecycle-state';
+export { compilerCacheHitRate, compilerCacheObservation, recordCompilerCacheObservation, renderCompilerCacheSummary, resetCompilerCacheObservation, writeCompilerCacheJobSummary, } from './native-tool-evidence';

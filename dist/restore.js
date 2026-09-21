@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import { transferArtifact } from './core/artifacts';
 import { startWorkloadIdentity, stopWorkloadIdentity } from './core/workload-identity';
-import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, ensureCiRunStartedAt, ensureXcodePlugin, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, SAVE_ALWAYS_ENVIRONMENT, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 function appendRestoreDiagnostic(current, data) {
@@ -166,9 +166,13 @@ export async function run() {
     let restoreFailureContext = {};
     let failureOperation = 'restore';
     try {
+        ensureCiRunStartedAt();
         if (core.getInput('mode').trim().toLowerCase() === 'artifact')
             failureOperation = 'artifact transfer';
         const inputs = getInputs();
+        if (inputs.savePolicy === 'always') {
+            core.exportVariable(SAVE_ALWAYS_ENVIRONMENT, 'true');
+        }
         if (inputs.artifact) {
             failureOperation = `artifact ${inputs.artifact.command}`;
             process.chdir(inputs.workingDirectory);
@@ -177,11 +181,13 @@ export async function run() {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
         };
         const cliPlatform = inputs.cliPlatform || undefined;
+        let installedCliVersion = inputs.cliVersion;
         if (inputs.cliVersion.toLowerCase() !== 'skip') {
-            await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform));
+            installedCliVersion = await ensureBoringCache(buildCliSetupOptions(inputs, cliPlatform))
+                || inputs.cliVersion;
         }
         if (inputs.mode.trim().toLowerCase() === 'xcode') {
-            await ensureXcodePlugin(inputs.cliVersion);
+            await ensureXcodePlugin(installedCliVersion);
         }
         await startWorkloadIdentity();
         const trustDecision = await resolveTrustDecision(inputs.artifact?.command === 'pull' ? 'restore' : inputs.trustPolicy);

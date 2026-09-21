@@ -4,10 +4,11 @@ export function resolveTrustDecision(requested) {
     return resolveCliTrustDecision(requested, execBoringCache);
 }
 export { ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, saveActionState, parseEntries, } from './core';
-export { buildFlagArgs, getInputs, DEFAULT_OCI_HYDRATION_POLICY, } from './core/action-inputs';
+export { buildFlagArgs, getInputs, DEFAULT_OCI_HYDRATION_POLICY, SAVE_ALWAYS_ENVIRONMENT, } from './core/action-inputs';
 export { applyCliPlanEnv, buildArchiveEntries, buildPlan, getCacheTagPrefix, resolveCliCapabilityVersion, validateOneInputs, } from './core/plan';
 export { requireCliVerificationTags, resolveVerificationTags, } from './core/tags';
-export { actionErrorMessage, actionEvidenceProductRefs, postPhaseSummary, restorePhaseSummary, writeActionEvidence, writeActionFailureEvidence, } from './core/evidence';
+export { actionErrorMessage, actionEvidenceProductRefs, ensureCiRunStartedAt, postPhaseSummary, restorePhaseSummary, writeActionEvidence, writeActionFailureEvidence, } from './core/evidence';
+export { compilerCacheObservation, renderCompilerCacheSummary, writeCompilerCacheJobSummary, } from './core/native-tool-evidence';
 export { loadDiagnosticsConfig, normalizeDiagnosticsLogLines, normalizeDiagnosticsMode, readLogTail, resolveDiagnosticsConfig, runDiagnosticsGroup, MAX_DIAGNOSTICS_LOG_BYTES, MAX_DIAGNOSTICS_LOG_LINES, } from './core/diagnostics';
 export { CANDIDATE_RECEIPT_FILE_ENV, prepareCandidateReceiptFile, publishCandidateOutputs, readCandidateReceipts, useCandidateReceiptFile, } from './core/candidates';
 export { applyTrustEnvPolicy, buildActionTrustState, isPullRequestEvent, normalizeTrustPolicy, parseSavedTrustDecision, } from './core/trust';

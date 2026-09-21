@@ -76,6 +76,9 @@ export async function resolvePreferredPort(value, inputName) {
 export function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
 }
+export function planningReadOnly(inputs) {
+    return proxyPlanningReadOnly(inputs.readOnly || inputs.savePolicy === 'never');
+}
 export function proxyPlanningReadOnly(requestedReadOnly) {
     return requestedReadOnly
         || (!hasBrokeredWorkloadIdentity() && !hasSaveToken() && hasRestoreToken());
@@ -270,6 +273,12 @@ export async function resolveAdapterCliPlan(adapter, workspace, workingDirectory
     }
     if (options.failOnCacheError) {
         args.push('--fail-on-cache-error');
+    }
+    if (options.gradleHome) {
+        args.push('--gradle-home', options.gradleHome);
+    }
+    if (options.phase) {
+        args.push('--phase', options.phase);
     }
     args.push('--dry-run', '--json');
     let stdout = '';

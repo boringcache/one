@@ -1,5 +1,5 @@
 import { cleanupNixRuntimeDirectory, drainNixUploads, runBazelRestore, runGoRestore, runGradleRestore, runMavenRestore, runNixRestore, runNxProxyRestore, runTurboProxyRestore, runXcodeRestore, shutdownBazelServer, } from './modes/adapters';
-import { runCargoRestore } from './modes/cargo';
+import { runCargoRestore, runCargoSave } from './modes/cargo';
 import { runCcacheRestore, runCcacheSave, runSccacheRestore, runSccacheSave, } from './modes/compiler-cache';
 import { runGhaRestore } from './modes/gha';
 import { runBuildkitRestore, runBuildkitSave, runDockerRestore, runDockerSave, } from './modes/oci';
@@ -55,6 +55,7 @@ export async function runModeSave(mode, options = {}) {
             await stopProxyFromState();
             return;
         case 'cargo':
+            await runCargoSave(options);
             return;
         case 'ccache':
             await runCcacheSave(options);

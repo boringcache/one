@@ -27,7 +27,7 @@ permissions:
   id-token: write
 
 steps:
-  - uses: boringcache/one@404b744a2053da4cf963f13f615f7fafe94f3cf7 # v1.30.1
+  - uses: boringcache/one@1039999c65011be670f5655e0e48ad556188ab12 # v1.30.4
     with:
       trust-policy: auto
       mode: archive
@@ -35,8 +35,8 @@ steps:
 ```
 
 The signed job identity and Workspace policy decide whether that job can
-publish. An approved same-repository collaborator job may publish; a fork or
-other untrusted job remains restore-only. On BoringBuild, the same Action step
+publish. Pull requests remain restore-only; trusted branch and tag jobs may
+publish when Workspace policy permits it. On BoringBuild, the same Action step
 uses the runner-provided Machine connection instead; that connection takes
 precedence and does not require a BoringCache token.
 
@@ -44,7 +44,7 @@ If workload identity is unavailable, use explicitly scoped credentials as a
 fallback:
 
 ```yaml
-- uses: boringcache/one@404b744a2053da4cf963f13f615f7fafe94f3cf7 # v1.30.1
+- uses: boringcache/one@1039999c65011be670f5655e0e48ad556188ab12 # v1.30.4
   with:
     trust-policy: auto
     mode: archive
@@ -70,8 +70,12 @@ The released modes are `archive`, `artifact`, `docker`, `buildkit`, `bazel`, `ca
 `ccache`, `go`, `gradle`, `gha`, `maven`, `nix`, `nx`, `sccache`, `turbo`, and
 `xcode`. Each non-archive mode matches the CLI command with the same name.
 
-Cargo publishes target state only after the configured command succeeds. A
-failed Cargo build never publishes incomplete target state.
+A Cargo plan that commits `[adapters.cargo].command` runs it in one Action step.
+A plan without one restores in the Action step and publishes in the post step,
+so one step covers every Cargo command in the job. A failed step skips the post step and
+publishes nothing. `save-always: true` publishes the state the job reached,
+including after a failed Cargo build; Cargo's own fingerprints decide what a
+later run rebuilds.
 
 Docker and BuildKit modes invoke the command committed under the matching
 adapter in `.boringcache.toml`. Buildx, buildctl, builder, image, and cache-ref
@@ -101,11 +105,11 @@ for upload and download examples.
 
 ## Updates
 
-The examples pin Action `v1.30.1` to its immutable distribution commit. A full commit SHA
-is immutable; `v1` follows the latest verified release.
-Update the SHA deliberately after reviewing a newer release and keep the
-version comment for Dependabot and human readers.
+The examples pin the current verified Action to its immutable distribution
+commit. A full commit SHA is immutable; `v1` follows the latest verified
+release. Update the SHA deliberately after reviewing a newer release and keep
+the version comment for Dependabot and human readers.
 
 The Action package version and installed CLI version are independent. Action
-`v1.30.1` installs CLI `v1.30.1` by default; `cli-version` is an explicit
-override, not a value inferred from the Action version.
+metadata declares the default CLI; `cli-version` is an explicit override, not
+a value inferred from the Action version.

@@ -6,6 +6,15 @@ import * as path from 'path';
 import { redactEvidenceText } from './redaction';
 import { getActionState, saveActionState } from './lifecycle-state';
 let processEvidenceId;
+export function ensureCiRunStartedAt(now = new Date()) {
+    const existing = (process.env.BORINGCACHE_CI_RUN_STARTED_AT || '').trim();
+    if (existing)
+        return existing;
+    const startedAt = now.toISOString();
+    process.env.BORINGCACHE_CI_RUN_STARTED_AT = startedAt;
+    core.exportVariable('BORINGCACHE_CI_RUN_STARTED_AT', startedAt);
+    return startedAt;
+}
 export function restorePhaseSummary(options) {
     if (options.cacheHit === undefined) {
         return {
@@ -105,6 +114,14 @@ export function postPhaseSummary(saveStatus, trustState) {
                 headline: 'Restore-only run completed',
                 detail: `BoringCache did not publish cache changes: ${trustState.detail}`,
                 next_step: trustState.next_step,
+            };
+        case 'save_never':
+        case 'mode_post_save_never':
+            return {
+                status: 'save_never',
+                headline: 'Publication disabled',
+                detail: 'BoringCache published nothing because save is never; the post step only released this job\'s cache resources.',
+                next_step: 'Set save to on-success or always when this workflow should publish caches.',
             };
         case 'skipped_missing_token':
         case 'mode_post_missing_token':

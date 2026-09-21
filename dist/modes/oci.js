@@ -1,4 +1,4 @@
-import { adapterVerificationSpecs, appendCliPublicationPolicy, execBoringCache, proxyPlanningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, runDockerBuildOperation, } from './shared';
+import { adapterVerificationSpecs, appendCliPublicationPolicy, execBoringCache, planningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, runDockerBuildOperation, } from './shared';
 /**
  * Docker and BuildKit are synchronous CLI lifecycles. The Action deliberately
  * does not model Buildx, buildctl, builders, image output, or cache refs. The
@@ -6,7 +6,7 @@ import { adapterVerificationSpecs, appendCliPublicationPolicy, execBoringCache, 
  */
 async function runOciCliLifecycle(mode, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const cliPlan = await resolveAdapterCliPlan(mode, plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
+    const cliPlan = await resolveAdapterCliPlan(mode, plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {
         failOnCacheError: inputs.failOnCacheError,
         stage: inputs.stage,
     });

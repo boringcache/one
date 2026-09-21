@@ -3,7 +3,8 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as path from 'path';
 import { startRegistryProxy, } from '../core';
-import { actionProxyOptions, adapterVerificationSpecs, applyAdapterSetupPlan, captureCommand, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, execBoringCache, exportEnvVars, getModeState, getModeStateBoolean, prependExistingNixConfig, proxyPlanningReadOnly, requireAdapterSetupPlan, requireSetupDirectory, requireSetupFilePath, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxy, waitForArchiveMaterialization, } from './shared';
+import { resolveWorkingPath } from '../core/input-values';
+import { actionProxyOptions, adapterVerificationSpecs, applyAdapterSetupPlan, captureCommand, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, execBoringCache, exportEnvVars, getModeState, getModeStateBoolean, prependExistingNixConfig, planningReadOnly, requireAdapterSetupPlan, requireSetupDirectory, requireSetupFilePath, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxy, waitForArchiveMaterialization, } from './shared';
 export async function shutdownBazelServer() {
     await exec.exec('bazel', ['shutdown'], {
         ignoreReturnCode: true,
@@ -35,7 +36,7 @@ export function nxEnvForStartedProxy(plan, actualPort) {
 }
 export async function runBazelRestore(plan, inputs, options) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('bazel', proxyPlan.setup);
@@ -81,7 +82,7 @@ export function goCacheProgForProxy(proxyPlan, port) {
 }
 export async function runGoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
@@ -114,10 +115,23 @@ export async function runGoRestore(plan, inputs) {
 }
 export async function runGradleRestore(plan, inputs, options) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const gradleHome = inputs.gradleHome.trim()
+        ? resolveWorkingPath(inputs.gradleHome.trim(), plan.workingDirectory)
+        : '';
+    if (gradleHome) {
+        exportEnvVars({ GRADLE_USER_HOME: gradleHome });
+    }
+    const proxyPlan = await resolveAdapterCliPlan('gradle', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {
+        gradleHome,
+    });
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('gradle', proxyPlan.setup);
+    const initScript = requireSetupFilePath(setup, path.join('init.d', 'boringcache-gradle-build-cache.init.gradle'), 'Gradle init script');
+    setup.env_vars = {
+        ...setup.env_vars,
+        GRADLE_USER_HOME: path.dirname(path.dirname(initScript)),
+    };
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
         noPlatform: proxyPlan.proxy.no_platform,
         noGit: proxyPlan.proxy.no_git,
@@ -148,7 +162,7 @@ export async function runGradleRestore(plan, inputs, options) {
 }
 export async function runMavenRestore(plan, inputs, options) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const proxyPlan = await resolveAdapterCliPlan('maven', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
@@ -228,7 +242,7 @@ export async function assertNixTrustedUser() {
 export async function runNixRestore(plan, inputs, options) {
     await assertNixTrustedUser();
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('nix', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {
+    const proxyPlan = await resolveAdapterCliPlan('nix', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {
         failOnCacheError: inputs.failOnCacheError,
     });
     const setup = requireAdapterSetupPlan('nix', proxyPlan.setup);
@@ -268,7 +282,7 @@ export async function runXcodeRestore(plan, inputs, options) {
         throw new Error('mode=xcode requires a macOS runner with Xcode installed.');
     }
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
     const setup = requireAdapterSetupPlan('xcode', proxyPlan.setup);
     const env = setup.env_vars || {};
     const socketPath = env.BORINGCACHE_XCODE_PROXY_SOCKET?.trim() || '';
@@ -317,7 +331,7 @@ export async function runXcodeRestore(plan, inputs, options) {
 }
 export async function runTurboProxyRestore(plan, inputs) {
     const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, planningReadOnly(inputs), {});
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
@@ -339,7 +353,7 @@ export async function runTurboProxyRestore(plan, inputs) {
 }
 export async function runNxProxyRestore(plan, inputs) {
     const preferredPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
-    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, proxyPlanningReadOnly(inputs.readOnly), {});
+    const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, planningReadOnly(inputs), {});
     const workspace = nxPlan.workspace;
     const cacheTag = nxPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {

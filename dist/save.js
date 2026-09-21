@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import { checkWorkloadIdentity, restoreWorkloadIdentity, stopWorkloadIdentity, WorkloadIdentityError, } from './core/workload-identity';
 import * as fs from 'fs';
 import { hasStageCredential, hasSaveCredential, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
-import { actionErrorMessage, buildActionTrustState, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, useCandidateReceiptFile, } from './utils';
+import { actionErrorMessage, buildActionTrustState, compilerCacheObservation, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, writeCompilerCacheJobSummary, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
 function buildCliSetupOptions(cliVersion, cliPlatform) {
     return {
@@ -54,9 +54,12 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
     const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
     const xcodeEvidencePath = getActionState('mode-xcode-evidence-json');
     const xcodeEvidence = readXcodeEvidence(xcodeEvidencePath);
+    const nativeToolEvidence = compilerCacheObservation();
+    const phaseSummary = postPhaseSummary(saveStatus, trustState);
     writeActionEvidence('post', {
         phase_status: 'completed',
-        phase_summary: postPhaseSummary(saveStatus, trustState),
+        phase_summary: phaseSummary,
+        native_tool_evidence: nativeToolEvidence || {},
         resolved_mode: resolvedMode || '',
         working_directory: workingDirectory || process.cwd(),
         workspace: genericWorkspace || '',
@@ -69,6 +72,7 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         xcode_evidence_path: xcodeEvidencePath || '',
         xcode_evidence: xcodeEvidence || {},
     });
+    await writeCompilerCacheJobSummary(nativeToolEvidence, phaseSummary);
     await runDiagnosticsGroup(diagnostics, 'BoringCache Post-Step Diagnostics', async () => {
         core.info(`resolved-mode: ${resolvedMode || '(none)'}`);
         core.info(`working-directory: ${workingDirectory || process.cwd()}`);
@@ -78,6 +82,9 @@ async function emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory, g
         core.info(`staged-candidates: ${stagedCandidates.map((candidate) => candidate.id).join(',') || '(none)'}`);
         if (xcodeEvidence) {
             core.info(`xcode-evidence: ${JSON.stringify(xcodeEvidence)}`);
+        }
+        if (nativeToolEvidence) {
+            core.info(`native-tool-evidence: ${JSON.stringify(nativeToolEvidence)}`);
         }
         emitProxyLogTail(diagnostics);
     });
@@ -119,7 +126,17 @@ export async function run() {
         const resolvedTrustPolicy = trustDecision.resolved;
         applyTrustEnvPolicy(trustDecision);
         const trustState = buildActionTrustState(trustDecision);
-        if (['cargo', 'docker', 'buildkit'].includes(resolvedMode)) {
+        if (inputs.savePolicy === 'never') {
+            if (resolvedMode && resolvedMode !== 'archive') {
+                await runModeSave(resolvedMode, { allowSaves: false });
+            }
+            core.info('Post step published nothing: save is never.');
+            await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_save_never' : 'save_never');
+            return;
+        }
+        const synchronousLifecycle = ['docker', 'buildkit'].includes(resolvedMode)
+            || (resolvedMode === 'cargo' && getActionState('mode-cargo-lifecycle') !== 'job');
+        if (synchronousLifecycle) {
             core.info(`Post step skipped: mode ${resolvedMode} completed its synchronous CLI lifecycle in the main Action step.`);
             return;
         }
@@ -137,11 +154,13 @@ export async function run() {
             diagnostics_level: loadDiagnosticsConfig(inputs).level,
             trust_state: trustState,
         };
+        let installedCliVersion = cliVersion;
         if (cliVersion.toLowerCase() !== 'skip') {
-            await ensureBoringCache(buildCliSetupOptions(cliVersion, cliPlatform));
+            installedCliVersion = await ensureBoringCache(buildCliSetupOptions(cliVersion, cliPlatform))
+                || cliVersion;
         }
         if (resolvedMode === 'xcode') {
-            await ensureXcodePlugin(cliVersion);
+            await ensureXcodePlugin(installedCliVersion);
         }
         if (!cliCapabilityVersion) {
             cliCapabilityVersion = await resolveCliCapabilityVersion(cliVersion);
@@ -153,8 +172,11 @@ export async function run() {
             workspace: genericWorkspace || '',
             generic_entries: genericEntries || '',
         };
-        if (workingDirectory) {
+        if (workingDirectory && fs.existsSync(workingDirectory)) {
             process.chdir(workingDirectory);
+        }
+        else if (workingDirectory) {
+            core.info(`Post step working directory ${workingDirectory} no longer exists; continuing from ${process.cwd()}.`);
         }
         if (resolvedTrustPolicy === 'restore') {
             if (resolvedMode && resolvedMode !== 'archive') {
@@ -230,8 +252,18 @@ export async function run() {
     }
     catch (error) {
         identityFailed = error instanceof WorkloadIdentityError;
-        writeActionFailureEvidence('post', error, postFailureContext);
+        const nativeToolEvidence = compilerCacheObservation();
+        writeActionFailureEvidence('post', error, {
+            ...postFailureContext,
+            native_tool_evidence: nativeToolEvidence || {},
+        });
         const message = `boringcache/one save failed: ${actionErrorMessage(error)}`;
+        await writeCompilerCacheJobSummary(nativeToolEvidence, {
+            status: 'failed',
+            headline: 'Post step failed',
+            detail: actionErrorMessage(error),
+            next_step: 'Open the action logs and fix the reported error; the evidence file keeps the redacted failure context.',
+        });
         if (strictPostFailure || error instanceof WorkloadIdentityError) {
             core.setFailed(message);
         }

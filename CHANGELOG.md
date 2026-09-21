@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-09-18
+
+### Added
+
+- `cli-version: runner` installs whichever BoringCache CLI the runner image
+  preinstalled and fails when it has none. It is for workflows that only run on
+  runners that carry the CLI.
+- `save` selects the post-step publication policy: `on-success` (default),
+  `always`, or `never`. `save-always: true` remains a supported alias for
+  `always`; when both are set the stricter one wins.
+- `mode: cargo` reports each phase separately through new outputs:
+  `restore-duration-seconds`, `restore-transferred-bytes`,
+  `publish-duration-seconds`,
+  `publish-transferred-bytes`, `publish-logical-bytes`, and
+  `snapshot-duration-seconds`. A slow step is now attributable without reading
+  timestamps. A CLI that predates the accounting leaves them unset.
+- Export one BoringCache run start timestamp during the main step so CLI
+  sessions and the post step share an explicit wall-clock origin. A timestamp
+  already supplied by the workflow remains unchanged.
+
+### Changed
+
+- Download stable CLI binaries, checksums, and the Xcode companion from
+  `artifacts.boringcache.com` first, with the exact GitHub release as a
+  same-version fallback.
+- Look in the runner's own tool cache before making any network call, and
+  verify a hit against the `boringcache.sha256` digest the image recorded
+  beside the binary instead of downloading `SHA256SUMS` again. An image with no
+  sidecar is verified against `SHA256SUMS` as before.
+- Do not save the CLI to the Actions cache after a restore that failed in the
+  same job. Reserving a key through a cache service that is already refusing
+  calls cannot succeed and hides the original fault.
+- Run `mode: cargo` as a job lifecycle when the repo plan commits no
+  `[adapters.cargo].command`: the main step restores the Cargo caches and
+  exports the CLI-planned environment, the job's own Cargo steps run, and the
+  post step publishes. One step then covers every Cargo command in the job. A
+  plan that commits a command keeps the released single-step behavior. Requires
+  a CLI with `boringcache cargo --phase`.
+- `save-always: true` now publishes the Cargo state a job lifecycle reached,
+  including after a failed Cargo build. The earlier wrapped-command lifecycle never
+  published after its own command failed. Without `save-always`, a failed step
+  still skips the post step and publishes nothing.
+- Report Cargo compiler-cache results from `sccache --show-stats` in the post
+  step, the same source `mode: sccache` uses, instead of a CLI native-tool
+  evidence file. `fail-on-cache-error` still fails the post step on sccache read
+  errors, timeouts, and writable-mode write errors. It does not cover the
+  proxy's own counters, which the post step cannot read.
+- Refuse a second `mode: cargo` step in one job. The lifecycle owns a single
+  sccache daemon and proxy, so a second step would take over the daemon and
+  strand the first step's proxy.
+- Install BoringCache CLI `v1.31.0` by default.
+
+### Fixed
+
+- Save the cache after a failed workflow step when `save: always` or
+  `save-always` is set. The post condition read an input value that is not
+  available to it, so it behaved as if the default `save: on-success` applied
+  and published nothing.
+- Restore `gradle-home` for Gradle mode and export the effective
+  `GRADLE_USER_HOME` so later Gradle steps use the generated init script.
+- Finish proxy cleanup in Linux container jobs when the exited proxy remains
+  as an unreaped zombie process.
+- Verify the installed macOS CLI code signature and apply a local ad hoc
+  signature when macOS rejects the release artifact's embedded signature.
 
 ## [1.30.4] - 2026-09-11
 
@@ -146,7 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.30.4...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.31.0...HEAD
+[1.31.0]: https://github.com/boringcache/one/compare/v1.30.4...v1.31.0
 [1.30.4]: https://github.com/boringcache/one/compare/v1.30.3...v1.30.4
 [1.30.3]: https://github.com/boringcache/one/compare/v1.30.2...v1.30.3
 [1.30.2]: https://github.com/boringcache/one/compare/v1.30.1...v1.30.2

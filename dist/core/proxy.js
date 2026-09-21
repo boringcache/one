@@ -55,7 +55,19 @@ export function normalizeProxyTags(tagInput) {
     }
     return tags.join(',');
 }
-function isProcessAlive(pid) {
+export function isProcessAlive(pid, platform = process.platform, procRoot = '/proc') {
+    if (platform === 'linux') {
+        try {
+            const stat = fs.readFileSync(path.join(procRoot, String(pid), 'stat'), 'utf8');
+            const commandEnd = stat.lastIndexOf(')');
+            const state = commandEnd >= 0 ? stat.slice(commandEnd + 1).trimStart()[0] : undefined;
+            if (state === 'Z' || state === 'X') {
+                return false;
+            }
+        }
+        catch {
+        }
+    }
     try {
         process.kill(pid, 0);
         return true;

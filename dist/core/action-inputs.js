@@ -5,11 +5,22 @@ import { normalizeTrustPolicy } from './trust';
 import { normalizeMode } from '../modes';
 import { getArtifactInputs } from './artifacts';
 export const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+export const SAVE_ALWAYS_ENVIRONMENT = 'BORINGCACHE_SAVE_ALWAYS';
+export function resolveSavePolicy() {
+    const requested = (core.getInput('save') || 'on-success').trim().toLowerCase();
+    if (requested !== 'on-success' && requested !== 'always' && requested !== 'never') {
+        throw new Error(`Unsupported save "${requested}". Expected on-success, always, or never.`);
+    }
+    if (requested === 'on-success' && core.getBooleanInput('save-always')) {
+        return 'always';
+    }
+    return requested;
+}
 export function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(core.getInput('diagnostics'));
     const mode = normalizeMode(core.getInput('mode'));
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.30.4',
+        cliVersion: core.getInput('cli-version') || 'v1.31.0',
         cliPlatform: core.getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -18,10 +29,12 @@ export function getInputs() {
         readOnly: false,
         stage: false,
         saveAlways: core.getBooleanInput('save-always'),
+        savePolicy: resolveSavePolicy(),
         diagnostics,
         diagnosticsLogLines: normalizeDiagnosticsLogLines('40'),
         proxyPort: core.getInput('proxy-port'),
         cacheProfiles: core.getInput('cache-profiles'),
+        gradleHome: core.getInput('gradle-home'),
         failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
         failOnCacheError: core.getBooleanInput('fail-on-cache-error'),
         lookupOnly: core.getBooleanInput('lookup-only'),
