@@ -105063,7 +105063,7 @@ function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     const mode = normalizeMode(getInput('mode'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.31.0',
+        cliVersion: getInput('cli-version') || 'v1.32.0',
         cliPlatform: getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -105105,6 +105105,7 @@ function buildFlagArgs(inputs) {
 }
 
 ;// CONCATENATED MODULE: ./dist/core/plan.js
+
 
 
 
@@ -105208,6 +105209,11 @@ async function runDryRunPlan(workingDirectory, options) {
     };
     return executePlan();
 }
+function plan_requireMachineConnectionWorkspace(plan) {
+    if (hasBrokeredWorkloadIdentity() && (!plan.workspace?.trim() || plan.workspace_source !== 'machine-connection')) {
+        throw new Error('The BoringCache CLI plan did not resolve the Machine connection workspace. Update the CLI and runner supervisor to versions that support the approved binding workspace.');
+    }
+}
 async function buildArchiveEntries(inputs) {
     const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
     if (cacheProfiles.length === 0) {
@@ -105222,6 +105228,7 @@ async function buildArchiveEntries(inputs) {
         readOnly: inputs.readOnly,
         noGit: inputs.stage,
     });
+    plan_requireMachineConnectionWorkspace(plan);
     const firstEntry = plan.archive_entries?.[0];
     const firstPair = plan.tag_path_pairs[0];
     const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
@@ -105650,6 +105657,7 @@ function utils_resolveTrustDecision(requested) {
 
 
 
+
 async function shared_waitForArchiveMaterialization(options) {
     await options.archiveMaterialized;
 }
@@ -105953,6 +105961,7 @@ async function shared_resolveAdapterCliPlan(adapter, workspace, workingDirectory
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     assertSupportedCliDryRunSchema(adapter, plan);
+    requireMachineConnectionWorkspace(plan);
     await preflightPlannedRequirements(adapter, plan, workingDirectory);
     return plan;
 }

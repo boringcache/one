@@ -1,3 +1,4 @@
+import { requireMachineConnectionWorkspace } from '../core/plan';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as fs from 'fs';
@@ -308,6 +309,7 @@ export async function resolveAdapterCliPlan(adapter, workspace, workingDirectory
         throw new Error(`Failed to parse boringcache ${adapter} dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     assertSupportedCliDryRunSchema(adapter, plan);
+    requireMachineConnectionWorkspace(plan);
     await preflightPlannedRequirements(adapter, plan, workingDirectory);
     return plan;
 }

@@ -20,7 +20,7 @@ export function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(core.getInput('diagnostics'));
     const mode = normalizeMode(core.getInput('mode'));
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.31.0',
+        cliVersion: core.getInput('cli-version') || 'v1.32.0',
         cliPlatform: core.getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
