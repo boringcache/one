@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
+import { hasBrokeredWorkloadIdentity } from './auth';
 import { execBoringCache } from './setup';
 import { parseEntries } from './inputs';
 import { requireCliVerificationTags } from './tags';
@@ -101,6 +102,11 @@ async function runDryRunPlan(workingDirectory, options) {
     };
     return executePlan();
 }
+export function requireMachineConnectionWorkspace(plan) {
+    if (hasBrokeredWorkloadIdentity() && (!plan.workspace?.trim() || plan.workspace_source !== 'machine-connection')) {
+        throw new Error('The BoringCache CLI plan did not resolve the Machine connection workspace. Update the CLI and runner supervisor to versions that support the approved binding workspace.');
+    }
+}
 export async function buildArchiveEntries(inputs) {
     const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
     if (cacheProfiles.length === 0) {
@@ -115,6 +121,7 @@ export async function buildArchiveEntries(inputs) {
         readOnly: inputs.readOnly,
         noGit: inputs.stage,
     });
+    requireMachineConnectionWorkspace(plan);
     const firstEntry = plan.archive_entries?.[0];
     const firstPair = plan.tag_path_pairs[0];
     const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag

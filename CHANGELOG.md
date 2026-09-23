@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.32.0] - 2026-09-22
+
+### Changed
+
+- Install BoringCache CLI `v1.32.0` by default.
+
+### Fixed
+
+- Use the approved Machine connection workspace through CLI plans for archive and adapter modes. Reject older brokered plans that still select a repository workspace; static credentials retain repository configuration.
+
 ## [1.31.0] - 2026-09-18
 
 ### Added
@@ -210,7 +221,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.31.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.32.0...HEAD
+[1.32.0]: https://github.com/boringcache/one/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/boringcache/one/compare/v1.30.4...v1.31.0
 [1.30.4]: https://github.com/boringcache/one/compare/v1.30.3...v1.30.4
 [1.30.3]: https://github.com/boringcache/one/compare/v1.30.2...v1.30.3
