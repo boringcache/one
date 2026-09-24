@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bundle the Sigstore provider used by customer-controlled cache publisher
+  trust. The new `trust-policy-sha256` input supplies an external policy pin.
+  During publication, the CI supervisor passes GitHub's OIDC request capability
+  only to the provider invocation. The provider requests and holds the identity
+  token; the cache CLI and build process receive no raw identity token. The
+  provider matches the certificate identity against the workflow that contains
+  the publishing job, so a policy can trust a reusable workflow. It reads the
+  repository, workflow, ref, event, and workflow digest from the authenticated
+  certificate's DER-encoded extensions.
+- Bundle a BoringBuild OIDC provider that signs an exact product subject with
+  the job issuer and checks it against a pinned issuer public key and publisher
+  policy. BoringBuild evidence does not include a Rekor transparency record.
 
 ## [1.32.0] - 2026-09-22
 

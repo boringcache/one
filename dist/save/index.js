@@ -98061,6 +98061,9 @@ async function setup_execBoringCache(args, options = {}) {
 
 
 const BROKER_FILE_ENV = 'BORINGCACHE_CI_BROKER_FILE';
+const TRUST_PROVIDER_ENV = 'BORINGCACHE_TRUST_PROVIDER_SIGSTORE';
+const BORINGBUILD_TRUST_PROVIDER_ENV = 'BORINGCACHE_TRUST_PROVIDER_BORINGBUILD_OIDC';
+const TRUST_POLICY_SHA256_ENV = 'BORINGCACHE_TRUST_POLICY_SHA256';
 const START_TIMEOUT_MS = 90_000;
 const STOP_TIMEOUT_MS = 60_000;
 const POLL_MS = 100;
@@ -98081,6 +98084,37 @@ const timer = setInterval(() => {
 `));
 class WorkloadIdentityError extends Error {
 }
+function configureTrustProvider() {
+    for (const [name, environment] of [
+        ['trust-provider', TRUST_PROVIDER_ENV],
+        ['boringbuild-trust-provider', BORINGBUILD_TRUST_PROVIDER_ENV],
+    ]) {
+        const candidates = [
+            path.resolve(__dirname, '..', name, 'index.js'),
+            path.resolve(__dirname, '..', '..', 'dist', name, 'index.js'),
+        ];
+        const provider = candidates.find((candidate) => fs.existsSync(candidate));
+        if (!provider) {
+            throw new WorkloadIdentityError(`The bundled ${name} is missing. Reinstall boringcache/one from an immutable release.`);
+        }
+        const command = JSON.stringify([process.execPath, provider]);
+        process.env[environment] = command;
+        core.exportVariable(environment, command);
+    }
+    const inputPolicyDigest = (core.getInput('trust-policy-sha256') || '').trim();
+    const environmentPolicyDigest = (process.env[TRUST_POLICY_SHA256_ENV] || '').trim();
+    if (inputPolicyDigest && environmentPolicyDigest && inputPolicyDigest !== environmentPolicyDigest) {
+        throw new WorkloadIdentityError('trust-policy-sha256 conflicts with BORINGCACHE_TRUST_POLICY_SHA256 from the runner environment.');
+    }
+    const policyDigest = inputPolicyDigest || environmentPolicyDigest;
+    if (!policyDigest)
+        return;
+    if (!/^sha256:[0-9a-f]{64}$/.test(policyDigest)) {
+        throw new WorkloadIdentityError('trust-policy-sha256 must use sha256 followed by 64 lowercase hexadecimal characters.');
+    }
+    process.env[TRUST_POLICY_SHA256_ENV] = policyDigest;
+    core.exportVariable(TRUST_POLICY_SHA256_ENV, policyDigest);
+}
 function useBroker(file) {
     process.env[BROKER_FILE_ENV] = file;
     // The supervisor retains the provider request credential for renewal.
@@ -98099,6 +98133,7 @@ function rememberBroker(file) {
     useBroker(file);
 }
 async function startWorkloadIdentity() {
+    configureTrustProvider();
     if (hasBrokeredWorkloadIdentity()) {
         rememberBroker(process.env[BROKER_FILE_ENV].trim());
         return;
