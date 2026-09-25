@@ -4,7 +4,7 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "runner" to use whichever version the runner image preinstalled, which fails when it has none. Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.32.0'
+    default: 'v1.33.0'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
@@ -20,6 +20,9 @@ inputs:
   trust-policy:
     description: 'Cache lifecycle: auto restores on pull requests and publishes on trusted events; restore never writes; stage creates an immutable candidate without moving the published tag; publish updates the published tag. Token capability remains authoritative.'
     default: 'auto'
+    required: false
+  trust-policy-sha256:
+    description: 'SHA-256 of the committed .boringcache.toml trust policy. Supply this from protected workflow or organization configuration so pull requests cannot weaken the policy.'
     required: false
   diagnostics:
     description: 'Action-level diagnostics: auto follows ACTIONS_STEP_DEBUG, off disables grouped diagnostics, summary emits grouped state, and verbose also tails proxy logs.'
