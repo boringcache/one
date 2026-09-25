@@ -21,6 +21,9 @@ inputs:
     description: 'Cache lifecycle: auto restores on pull requests and publishes on trusted events; restore never writes; stage creates an immutable candidate without moving the published tag; publish updates the published tag. Token capability remains authoritative.'
     default: 'auto'
     required: false
+  trust-policy-sha256:
+    description: 'SHA-256 of the committed .boringcache.toml trust policy. Supply this from protected workflow or organization configuration so pull requests cannot weaken the policy.'
+    required: false
   diagnostics:
     description: 'Action-level diagnostics: auto follows ACTIONS_STEP_DEBUG, off disables grouped diagnostics, summary emits grouped state, and verbose also tails proxy logs.'
     default: 'auto'
