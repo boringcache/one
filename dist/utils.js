@@ -11,4 +11,4 @@ export { actionErrorMessage, actionEvidenceProductRefs, ensureCiRunStartedAt, po
 export { compilerCacheObservation, renderCompilerCacheSummary, writeCompilerCacheJobSummary, } from './core/native-tool-evidence';
 export { loadDiagnosticsConfig, normalizeDiagnosticsLogLines, normalizeDiagnosticsMode, readLogTail, resolveDiagnosticsConfig, runDiagnosticsGroup, MAX_DIAGNOSTICS_LOG_BYTES, MAX_DIAGNOSTICS_LOG_LINES, } from './core/diagnostics';
 export { CANDIDATE_RECEIPT_FILE_ENV, prepareCandidateReceiptFile, publishCandidateOutputs, readCandidateReceipts, useCandidateReceiptFile, } from './core/candidates';
-export { applyTrustEnvPolicy, buildActionTrustState, isPullRequestEvent, normalizeTrustPolicy, parseSavedTrustDecision, } from './core/trust';
+export { applyTrustEnvPolicy, buildActionTrustState, normalizeTrustPolicy, parseSavedTrustDecision, } from './core/trust';
