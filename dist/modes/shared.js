@@ -6,9 +6,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { execBoringCache as execBoringCacheCore, getActionState, hasBrokeredWorkloadIdentity, hasRestoreToken, hasSaveCredential, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, saveActionState, } from '../core';
 import { DEFAULT_OCI_HYDRATION_POLICY, requireCliVerificationTags, } from '../utils';
-export async function waitForArchiveMaterialization(options) {
-    await options.archiveMaterialized;
-}
 export class DockerBuildFailure extends Error {
     constructor(message) {
         super(message);
@@ -39,7 +36,6 @@ export function actionProxyOptions(options, proxyPlan, failOnCacheError = false)
             : plannedStartupMode || options.startupMode,
         warmupStrategy: proxyPlan?.warmup_strategy,
         ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
-        ociRequiredReadableRefs: options.ociRequiredReadableRefs || [],
         ociHydration: proxyPlan?.oci_hydration || options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY,
         metadataHints: proxyPlan?.metadata_hints || options.metadataHints || {},
     };
