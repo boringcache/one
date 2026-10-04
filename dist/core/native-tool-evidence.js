@@ -92,7 +92,7 @@ export function renderCompilerCacheSummary(observation, publication) {
     return `${lines.join('\n')}\n`;
 }
 export async function writeCompilerCacheJobSummary(observation, publication) {
-    if (!observation) {
+    if (!observation && publication.status !== 'skipped_storage_full') {
         return;
     }
     if (!(process.env.GITHUB_STEP_SUMMARY || '').trim()) {

@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import { checkWorkloadIdentity, restoreWorkloadIdentity, stopWorkloadIdentity, WorkloadIdentityError, } from './core/workload-identity';
 import * as fs from 'fs';
 import { hasStageCredential, hasSaveCredential, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
-import { actionErrorMessage, buildActionTrustState, compilerCacheObservation, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, writeCompilerCacheJobSummary, useCandidateReceiptFile, } from './utils';
+import { actionErrorMessage, buildActionTrustState, cacheStorageFullSkip, compilerCacheObservation, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, writeCompilerCacheJobSummary, useCandidateReceiptFile, } from './utils';
 import { runModeSave } from './mode-handlers';
 function buildCliSetupOptions(cliVersion, cliPlatform) {
     return {
@@ -223,6 +223,7 @@ export async function run() {
             group.push(entry);
             saveGroups.set(selection, group);
         }
+        let storageFullSkip = '';
         for (const [selection, entries] of saveGroups) {
             const args = ['save', genericWorkspace];
             for (const entry of entries) {
@@ -240,15 +241,26 @@ export async function run() {
             if (inputs.failOnCacheError) {
                 args.push('--fail-on-cache-error');
             }
-            await execBoringCache(args);
+            await execBoringCache(args, {
+                listeners: {
+                    errline: (line) => {
+                        storageFullSkip ||= cacheStorageFullSkip(line);
+                    },
+                },
+            });
         }
-        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedTrustPolicy === 'stage'
-            ? resolvedMode && resolvedMode !== 'archive'
-                ? 'mode_post_and_generic_stage'
-                : 'staged'
-            : resolvedMode && resolvedMode !== 'archive'
-                ? 'mode_post_and_generic_save'
-                : 'saved');
+        if (storageFullSkip) {
+            core.warning(storageFullSkip);
+        }
+        await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, storageFullSkip
+            ? 'skipped_storage_full'
+            : resolvedTrustPolicy === 'stage'
+                ? resolvedMode && resolvedMode !== 'archive'
+                    ? 'mode_post_and_generic_stage'
+                    : 'staged'
+                : resolvedMode && resolvedMode !== 'archive'
+                    ? 'mode_post_and_generic_save'
+                    : 'saved');
     }
     catch (error) {
         identityFailed = error instanceof WorkloadIdentityError;
