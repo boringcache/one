@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- When the CLI skips a cache save because the cache storage allowance is full,
+  the post step adds one warning annotation, records the save as
+  `skipped_storage_full` in the evidence file and job summary, and leaves the
+  job successful with `fail-on-cache-error`.
+
+## [1.34.0] - 2026-09-30
+
+### Changed
+
+- Install BoringCache CLI `v1.34.0` by default.
+- Update bundled HTTP and glob dependencies to patched versions for denial-of-service advisories.
+- `mode: xcode` honors `BORINGCACHE_XCODE_PLUGIN_PATH` only with
+  `cli-version: skip`. With a released CLI version, the Action installs the
+  checksum-verified Xcode adapter and warns that the variable is ignored.
+- The Action stops with an error when the installed CLI does not provide
+  `boringcache ci trust`. Set `cli-version` to v1.19.4 or later. Earlier
+  versions decided restore or publish access with a copy of the CLI trust
+  policy for those older CLIs.
 
 ## [1.33.0] - 2026-09-25
 
@@ -242,7 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.33.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.34.0...HEAD
+[1.34.0]: https://github.com/boringcache/one/compare/v1.33.0...v1.34.0
 [1.33.0]: https://github.com/boringcache/one/compare/v1.32.0...v1.33.0
 [1.32.0]: https://github.com/boringcache/one/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/boringcache/one/compare/v1.30.4...v1.31.0

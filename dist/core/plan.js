@@ -4,7 +4,7 @@ import { hasBrokeredWorkloadIdentity } from './auth';
 import { execBoringCache } from './setup';
 import { parseEntries } from './inputs';
 import { requireCliVerificationTags } from './tags';
-import { assertImplementedMode, resolveModeSpec, } from '../modes';
+import { resolveModeSpec, } from '../modes';
 function splitEntriesInput(entries) {
     const values = [];
     let current = '';
@@ -151,7 +151,6 @@ export function validateOneInputs(modeSpec, archiveEntries) {
 }
 export async function buildPlan(inputs) {
     const modeSpec = resolveModeSpec(inputs.mode);
-    assertImplementedMode(modeSpec);
     const archiveEntries = await buildArchiveEntries(inputs);
     validateOneInputs(modeSpec, archiveEntries.entries);
     const workspace = archiveEntries.workspace || '';

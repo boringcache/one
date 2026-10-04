@@ -544,12 +544,14 @@ export async function ensureXcodePlugin(version, verify = true, stableBinDir = g
         throw new Error('The BoringCache Xcode plugin can only be installed on macOS.');
     }
     const configuredPath = (process.env.BORINGCACHE_XCODE_PLUGIN_PATH || '').trim();
-    if (configuredPath) {
-        // The CLI validates and hashes explicit source-tree or canary overrides.
-        // Avoid probing a repository-controlled path in the Action itself.
+    const pluginPath = path.join(stableBinDir, XCODE_PLUGIN_NAME);
+    if (configuredPath && version.toLowerCase() === 'skip') {
         return configuredPath;
     }
-    const pluginPath = path.join(stableBinDir, XCODE_PLUGIN_NAME);
+    if (configuredPath && path.resolve(configuredPath) !== path.resolve(pluginPath)) {
+        core.warning(`Ignoring BORINGCACHE_XCODE_PLUGIN_PATH because cli-version ${version} installs the verified Xcode adapter. `
+            + 'Set cli-version: skip to use a custom adapter.');
+    }
     if (fs.existsSync(pluginPath)) {
         if (version.toLowerCase() !== 'skip' && verify) {
             const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
