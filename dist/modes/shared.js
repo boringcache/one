@@ -6,9 +6,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { execBoringCache as execBoringCacheCore, getActionState, hasBrokeredWorkloadIdentity, hasRestoreToken, hasSaveCredential, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, saveActionState, } from '../core';
 import { DEFAULT_OCI_HYDRATION_POLICY, requireCliVerificationTags, } from '../utils';
-export async function waitForArchiveMaterialization(options) {
-    await options.archiveMaterialized;
-}
 export class DockerBuildFailure extends Error {
     constructor(message) {
         super(message);
@@ -32,6 +29,7 @@ export function actionProxyOptions(options, proxyPlan, failOnCacheError = false)
     const plannedStartupMode = proxyPlan?.startup_mode;
     return {
         ...options,
+        protocol: proxyPlan?.protocol,
         failOnCacheError,
         onDemand: plannedStartupMode === 'on-demand',
         startupMode: plannedStartupMode === 'warm'
@@ -39,7 +37,6 @@ export function actionProxyOptions(options, proxyPlan, failOnCacheError = false)
             : plannedStartupMode || options.startupMode,
         warmupStrategy: proxyPlan?.warmup_strategy,
         ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
-        ociRequiredReadableRefs: options.ociRequiredReadableRefs || [],
         ociHydration: proxyPlan?.oci_hydration || options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY,
         metadataHints: proxyPlan?.metadata_hints || options.metadataHints || {},
     };
@@ -109,6 +106,10 @@ export function applyAdapterSetupPlan(setup) {
     for (const directory of setup.directories || []) {
         ensureDir(directory);
     }
+    if (process.platform !== 'win32') {
+        for (const directory of setup.cleanup_directories || [])
+            fs.chmodSync(directory, 0o700);
+    }
     for (const file of setup.files || []) {
         ensureDir(path.dirname(file.path));
         if (file.mode === 'append') {
@@ -118,7 +119,8 @@ export function applyAdapterSetupPlan(setup) {
             fs.appendFileSync(file.path, file.content);
         }
         else if (file.mode === 'write') {
-            fs.writeFileSync(file.path, file.content);
+            const managed = (setup.cleanup_files || []).some((cleanup) => cleanup.path === file.path);
+            fs.writeFileSync(file.path, file.content, managed ? { flag: 'wx' } : undefined);
         }
         else {
             throw new Error(`Unsupported adapter setup file mode for ${file.path}`);
@@ -328,7 +330,7 @@ export async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {})
     }
     await execBoringCache(args);
 }
-export async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan) {
+export async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan, failOnCacheError = false) {
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
@@ -338,7 +340,7 @@ export async function startPortableCacheProxy(workspace, port, tag, readOnly = f
         noPlatform: proxyPlan.no_platform,
         noGit: proxyPlan.no_git,
         readOnly,
-    }, proxyPlan));
+    }, proxyPlan, failOnCacheError));
     return proxy;
 }
 export function emptyDirectCacheTagCheckStatus() {
@@ -447,7 +449,7 @@ export function readBoundedJsonObject(filePath) {
     try {
         const stat = fs.statSync(filePath);
         if (!stat.isFile() || stat.size > 1024 * 1024) {
-            core.warning(`Ignoring invalid Cargo native-tool evidence file: ${filePath}`);
+            core.warning(`Ignoring invalid native-tool evidence file: ${filePath}`);
             return null;
         }
         const value = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -456,7 +458,7 @@ export function readBoundedJsonObject(filePath) {
             : null;
     }
     catch (error) {
-        core.warning(`Unable to read Cargo native-tool evidence: ${error instanceof Error ? error.message : error}`);
+        core.warning(`Unable to read native-tool evidence: ${error instanceof Error ? error.message : error}`);
         return null;
     }
 }

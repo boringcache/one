@@ -1,12 +1,11 @@
-import { hasRestoreToken, hasSaveToken, hasStageToken } from './auth';
 const TRUST_POLICIES = ['auto', 'restore', 'stage', 'publish'];
+const MINIMUM_TRUST_CLI_VERSION = 'v1.19.4';
 const RESTORE_TOKEN_ENV = 'BORINGCACHE_RESTORE_TOKEN';
 const STAGE_TOKEN_ENV = 'BORINGCACHE_STAGE_TOKEN';
 const SAVE_TOKEN_ENV = 'BORINGCACHE_SAVE_TOKEN';
 const ADMIN_TOKEN_ENV = 'BORINGCACHE_ADMIN_TOKEN';
 const RETIRED_TOKEN_ENV = ['BORINGCACHE_API_TOKEN', 'BORINGCACHE_TOKEN'];
 const RETIRED_AMBIENT_ENV = ['BORINGCACHE_SAVE_ON_PULL_REQUEST', 'BORINGCACHE_RESTORE_PR_CACHE'];
-const PULL_REQUEST_EVENTS = new Set(['pull_request', 'pull_request_target']);
 const TRUST_STATUSES = [
     'publish',
     'stage',
@@ -50,12 +49,8 @@ export function normalizeTrustPolicy(value) {
     }
     return normalized;
 }
-export function isPullRequestEvent() {
-    return PULL_REQUEST_EVENTS.has((process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase());
-}
 export async function resolveTrustDecision(requested, runCli) {
-    const decision = await requestCliTrustDecision(requested, runCli);
-    return decision ?? compatibilityTrustDecision(requested);
+    return requestCliTrustDecision(requested, runCli);
 }
 export function applyTrustEnvPolicy(decision) {
     const { env_policy: policy } = decision;
@@ -118,7 +113,7 @@ async function requestCliTrustDecision(requested, runCli) {
         throw new Error(`Unable to execute the CLI trust resolver: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (unsupportedTrustCommand(exitCode, stderr)) {
-        return null;
+        throw new Error(`The installed BoringCache CLI does not provide \`boringcache ci trust\`. Set cli-version to ${MINIMUM_TRUST_CLI_VERSION} or later.`);
     }
     if (exitCode !== 0) {
         throw new Error(`The CLI trust resolver failed with exit code ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : '.'}`);
@@ -199,8 +194,8 @@ function validateTrustDecision(value, requested, forcedSource) {
         throw new Error(`Trust decision resolved=${resolved} without the required token capability`);
     }
     const sourceValue = forcedSource || decision.source;
-    if (sourceValue !== 'cli' && sourceValue !== 'action-compatibility') {
-        throw new Error('Trust decision source must be cli or action-compatibility');
+    if (sourceValue !== 'cli') {
+        throw new Error('Trust decision source must be cli');
     }
     return {
         schema_version: schemaVersion,
@@ -296,92 +291,4 @@ function optionalStringFields(value, names) {
         result[name] = field;
     }
     return result;
-}
-function compatibilityTrustDecision(requested) {
-    const untrustedSource = isPullRequestEvent();
-    const capabilities = {
-        restore: hasRestoreToken(),
-        stage: hasStageToken(),
-        save: hasSaveToken(),
-    };
-    const intended = requested === 'auto' ? (untrustedSource ? 'restore' : 'publish') : requested;
-    const [resolved, status, reason] = compatibilityOutcome(requested, intended, capabilities);
-    return {
-        schema_version: 1,
-        requested,
-        resolved,
-        status,
-        reason,
-        write_allowed: resolved !== 'restore',
-        detail: compatibilityDetail(status),
-        next_step: compatibilityNextStep(status),
-        context: {
-            provider: 'github-actions',
-            event: untrustedSource ? 'pull-request' : 'other',
-            untrusted_source: untrustedSource,
-            repository: process.env.GITHUB_REPOSITORY || undefined,
-            source_ref_name: process.env.GITHUB_REF_NAME || undefined,
-            base_ref_name: process.env.GITHUB_BASE_REF || undefined,
-            run_uid: process.env.GITHUB_RUN_ID || undefined,
-            run_attempt: process.env.GITHUB_RUN_ATTEMPT || undefined,
-        },
-        token_capabilities: capabilities,
-        env_policy: compatibilityEnvPolicy(resolved),
-        source: 'action-compatibility',
-    };
-}
-function compatibilityOutcome(requested, intended, capabilities) {
-    if (intended === 'stage' && !capabilities.stage) {
-        return ['restore', 'restore_only_missing_stage_token', 'missing_stage_token'];
-    }
-    if (intended === 'publish' && !capabilities.save) {
-        return ['restore', 'restore_only_missing_save_token', 'missing_save_token'];
-    }
-    if (intended === 'restore') {
-        return requested === 'auto'
-            ? ['restore', 'restore_only_by_event_policy', 'untrusted_change']
-            : ['restore', 'restore_only', 'explicit_request'];
-    }
-    return [intended, intended, requested === 'auto' ? 'trusted_event' : 'explicit_request'];
-}
-function compatibilityEnvPolicy(resolved) {
-    return {
-        restore_token_env: RESTORE_TOKEN_ENV,
-        promote_restore_token_from: [RESTORE_TOKEN_ENV, STAGE_TOKEN_ENV, SAVE_TOKEN_ENV],
-        revoke: resolved === 'restore'
-            ? [...RETIRED_AMBIENT_ENV, STAGE_TOKEN_ENV, SAVE_TOKEN_ENV, ADMIN_TOKEN_ENV, ...RETIRED_TOKEN_ENV]
-            : [...RETIRED_AMBIENT_ENV, ADMIN_TOKEN_ENV, ...RETIRED_TOKEN_ENV],
-    };
-}
-function compatibilityDetail(status) {
-    switch (status) {
-        case 'publish':
-            return 'Publication updates the published cache tag.';
-        case 'stage':
-            return 'Staging creates an immutable candidate without moving the published tag.';
-        case 'restore_only':
-            return 'trust-policy is restore.';
-        case 'restore_only_by_event_policy':
-            return 'trust-policy auto resolves untrusted pull-request changes to restore.';
-        case 'restore_only_missing_stage_token':
-            return `No stage-capable token is available. Set ${STAGE_TOKEN_ENV} or ${SAVE_TOKEN_ENV}.`;
-        case 'restore_only_missing_save_token':
-            return `No save-capable token is available. Set ${SAVE_TOKEN_ENV}.`;
-    }
-}
-function compatibilityNextStep(status) {
-    switch (status) {
-        case 'publish':
-            return 'Let the run finish; the next matching run restores what it publishes.';
-        case 'stage':
-            return 'Select the exact candidate in a trusted run, or promote it explicitly.';
-        case 'restore_only':
-            return 'Use trust-policy stage or publish only when this job is trusted for that operation.';
-        case 'restore_only_by_event_policy':
-            return 'Use trust-policy stage for an immutable candidate, or publish only when this pull-request job is explicitly trusted.';
-        case 'restore_only_missing_stage_token':
-            return `Set ${STAGE_TOKEN_ENV} for jobs that should stage immutable candidates.`;
-        case 'restore_only_missing_save_token':
-            return `Set ${SAVE_TOKEN_ENV} for trusted jobs that should write cache entries.`;
-    }
 }

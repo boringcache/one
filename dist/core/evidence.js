@@ -56,8 +56,18 @@ export function restorePhaseSummary(options) {
         next_step: options.trustState.next_step,
     };
 }
+export function cacheStorageFullSkip(output) {
+    return output.match(/Skipped cache save for [^\n]*/)?.[0].trim() || '';
+}
 export function postPhaseSummary(saveStatus, trustState) {
     switch (saveStatus) {
+        case 'skipped_storage_full':
+            return {
+                status: 'skipped_storage_full',
+                headline: 'Cache save skipped: storage full',
+                detail: 'The cache storage allowance has no room for this save, so BoringCache published no new cache version. Existing caches stay available, and the build result is unchanged.',
+                next_step: 'Delete cache you no longer need, shorten retention, or increase the allowance. Saving resumes automatically.',
+            };
         case 'staged':
             return {
                 status: 'staged',
