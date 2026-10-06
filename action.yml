@@ -4,13 +4,13 @@ author: 'BoringCache'
 inputs:
   cli-version:
     description: 'Version of BoringCache CLI to install (e.g., v1.0.1). Set to "runner" to use whichever version the runner image preinstalled, which fails when it has none. Set to "skip" to disable automatic CLI setup.'
-    default: 'v1.33.0'
+    default: 'v1.40.0'
     required: false
   cli-platform:
     description: 'Optional canonical CLI target override for advanced diagnostics: linux-amd64, linux-arm64, linux-musl-amd64, linux-musl-arm64, macos-universal, windows-amd64, or windows-arm64.'
     required: false
   mode:
-    description: 'Use artifact to push or pull immutable outputs, archive for portable directory caches, gha for direct Actions-compatible clients, or the adapter matching the CLI command: docker, buildkit, bazel, cargo, ccache, go, gradle, maven, nix, nx, sccache, turbo, or xcode. A gha setup step does not redirect later provider actions on GitHub-hosted runners.'
+    description: 'Use artifact to push or pull immutable outputs, archive for portable directory caches, gha for direct Actions-compatible clients, or the adapter matching the CLI command: docker, buildkit, bazel, bazel-reapi, moon, pants, buck2, sbt, cargo, ccache, go, gradle, maven, nix, nx, sccache, turbo, or xcode. A gha setup step does not redirect later provider actions on GitHub-hosted runners.'
     default: 'archive'
     required: false
   working-directory:

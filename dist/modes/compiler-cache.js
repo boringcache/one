@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import { spawn } from 'child_process';
+import { runNativeProcess } from '../core/native-process';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
@@ -68,44 +69,7 @@ async function waitForSccacheServer(probe, timeoutMs, pollIntervalMs) {
     throw new Error(`sccache did not accept connections within ${Math.ceil(timeoutMs / 1000)} seconds.`);
 }
 async function runSccacheProcess(args, timeoutMs, spawnProcess, stdio) {
-    return await new Promise((resolve, reject) => {
-        let settled = false;
-        const child = spawnProcess('sccache', args, {
-            env: process.env,
-            stdio,
-            windowsHide: true,
-        });
-        const timeout = setTimeout(() => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            try {
-                child.kill('SIGKILL');
-            }
-            catch {
-            }
-            reject(new Error(`sccache ${args.join(' ')} did not exit within ${Math.ceil(timeoutMs / 1000)} seconds; the launcher was terminated.`));
-        }, timeoutMs);
-        child.once('error', (error) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            clearTimeout(timeout);
-            reject(error);
-        });
-        // Resolve on launcher exit, not stdio close. A daemon inheriting a pipe can
-        // keep close pending after the launcher has completed successfully.
-        child.once('exit', (exitCode, signal) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            clearTimeout(timeout);
-            resolve({ exitCode, signal });
-        });
-    });
+    return await runNativeProcess('sccache', args, timeoutMs, spawnProcess, stdio);
 }
 async function stopSccacheAfterFailedStartup(spawnProcess) {
     try {

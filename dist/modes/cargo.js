@@ -55,6 +55,10 @@ export async function runCargoRestore(plan, inputs) {
     const cargoPlan = await resolveAdapterCliPlan('cargo', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
     const wrappedCommand = cargoPlan.command || [];
     const jobLifecycle = wrappedCommand.length === 0;
+    const compiler = cargoPlan.cargo_cache?.compiler_cache;
+    if (jobLifecycle && (compiler === 'kache' || compiler === 'mbx')) {
+        throw new Error(`${compiler} requires a wrapped Cargo command. Set command under [adapters.cargo] in .boringcache.toml.`);
+    }
     const targetEntry = (cargoPlan.archive_entries || []).find((entry) => entry.kind === 'cargo-target' || entry.requested === 'cargo-target');
     const compilerCacheEnabled = cargoCompilerCacheEnabled(cargoPlan);
     const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
