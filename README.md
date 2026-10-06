@@ -68,7 +68,14 @@ candidate jobs use `BORINGCACHE_STAGE_TOKEN` and expose their exact
 
 The released modes are `archive`, `artifact`, `docker`, `buildkit`, `bazel`, `cargo`,
 `ccache`, `go`, `gradle`, `gha`, `maven`, `nix`, `nx`, `sccache`, `turbo`, and
-`xcode`. Each non-archive mode matches the CLI command with the same name.
+`xcode`. Each non-archive mode matches the CLI command with the same name and
+reads its cache tag from `[adapters.<mode>]` in `.boringcache.toml`; the Action
+has no tag input.
+
+The unreleased adapter update adds `bazel-reapi`, `moon`, `pants`, `buck2`, and
+`sbt`. Use a CLI and Action release that both include the selected mode; the
+current pinned release does not include these native modes. Adapter settings
+belong in `.boringcache.toml`. See the [adapter guides](https://boringcache.com/docs/adapters).
 
 A Cargo plan that commits `[adapters.cargo].command` runs it in one Action step.
 A plan without one restores in the Action step and publishes in the post step,
