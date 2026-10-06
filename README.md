@@ -66,9 +66,12 @@ candidate jobs use `BORINGCACHE_STAGE_TOKEN` and expose their exact
 
 ## Supported modes
 
-The released modes are `archive`, `artifact`, `docker`, `buildkit`, `bazel`, `cargo`,
-`ccache`, `go`, `gradle`, `gha`, `maven`, `nix`, `nx`, `sccache`, `turbo`, and
-`xcode`. Each non-archive mode matches the CLI command with the same name.
+The `mode` input in [action.yml](action.yml) lists the modes supported by this
+version. Choose a CLI and Action release that both include your mode. Each
+adapter mode matches the CLI command with the same name and reads its cache
+tag from `[adapters.<mode>]` in `.boringcache.toml`; the Action has no tag input.
+See the [adapter guides](https://boringcache.com/docs/adapters) for tool setup
+and requirements.
 
 A Cargo plan that commits `[adapters.cargo].command` runs it in one Action step.
 A plan without one restores in the Action step and publishes in the post step,
