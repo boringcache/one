@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.40.1] - 2026-10-07
+
+### Changed
+
+- Install BoringCache CLI `v1.40.1` by default, including CI session retry fixes
+  and pnpm 11/12 store selection.
+
 ## [1.40.0] - 2026-10-06
 
 ### Added
@@ -267,7 +275,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.40.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.40.1...HEAD
+[1.40.1]: https://github.com/boringcache/one/compare/v1.40.0...v1.40.1
 [1.40.0]: https://github.com/boringcache/one/compare/v1.33.0...v1.40.0
 [1.33.0]: https://github.com/boringcache/one/compare/v1.32.0...v1.33.0
 [1.32.0]: https://github.com/boringcache/one/compare/v1.31.0...v1.32.0
