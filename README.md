@@ -5,13 +5,36 @@
 
 # BoringCache for GitHub Actions
 
-One Action for shared build cache across Docker builds and native build tools.
+Share build cache and immutable build outputs between GitHub Actions, local
+development, and other CI systems.
 
-Uses the same BoringCache plan as your local builds.
+`boringcache/one` connects your workflow to BoringCache so compatible builds can
+reuse dependency downloads, compiler results, task outputs, and Docker layers.
+The Action installs the CLI, restores available cache, and publishes from
+trusted jobs using the same `.boringcache.toml` configuration as local builds.
+Use it on GitHub-hosted or self-hosted runners after checkout and toolchain setup.
 
-`boringcache/one` brings BoringCache into GitHub Actions. Pick archive, Docker,
-BuildKit, or a native tool adapter; the Action installs the CLI, prepares the
-runner, restores available work, and publishes from trusted jobs.
+## What you can reuse and keep
+
+| Your build needs | What BoringCache provides |
+|---|---|
+| Dependency downloads and directory caches | Restore and save the directories selected by an archive profile. |
+| Compiler and task results | Connect supported tools such as Cargo, sccache, Bazel, Gradle, Nx, and Turborepo to shared cache. Your build tools decide which results can be reused. |
+| Docker builds | Reuse layers, with optional package and compiler caches for instructions that need to run again. |
+| Binaries, reports, and release packages | Upload immutable Artifacts, choose retention, and pass an exact Artifact ID to another job or download it with the CLI. |
+
+Matching cache content is stored once within a workspace. Related builds can
+reuse data already uploaded instead of transferring and storing another full
+copy. A replacement runner or another CI system can retrieve cache from the
+same workspace.
+
+See [recorded builds](https://boringcache.com/demo) for cache hits, misses, and
+transfers, and [benchmarks](https://boringcache.com/benchmarks) for measured build
+times and storage comparisons.
+
+BoringCache also includes a [private container Registry](https://boringcache.com/registry)
+for images you push and pull with Docker or an OCI client. Cache, Artifacts, and
+Registry include managed storage; see [plans and allowances](https://boringcache.com/pricing).
 
 ## First run
 
@@ -40,8 +63,7 @@ publish when Workspace policy permits it. On BoringBuild, the same Action step
 uses the runner-provided Machine connection instead; that connection takes
 precedence and does not require a BoringCache token.
 
-If workload identity is unavailable, use explicitly scoped credentials as a
-fallback:
+If workload identity is unavailable, configure explicitly scoped credentials:
 
 ```yaml
 - uses: boringcache/one@696d081c557c070471a175d72aa67d27709a3f31 # v1.40.0
