@@ -1,6 +1,7 @@
 import { createHash, createPublicKey, verify as verifySignature } from 'crypto';
 import { stdin, stdout } from 'process';
 import { parse as parseToml } from 'smol-toml';
+import { requestIdentityToken } from './trust-provider-oidc';
 const PROTOCOL_VERSION = 1;
 const MAX_REQUEST_BYTES = 512 * 1024;
 const MAX_BUNDLE_BYTES = 256 * 1024;
@@ -68,35 +69,13 @@ async function identityToken(subject) {
         || requestToken.length > 32 * 1024) {
         throw new Error('BoringBuild OIDC request credential is invalid');
     }
-    let response;
     try {
-        response = await fetch(url, {
-            headers: { authorization: `Bearer ${requestToken}` },
-            redirect: 'error',
-            signal: AbortSignal.timeout(15_000),
-        });
+        return await requestIdentityToken(url, requestToken, 'BoringBuild', MAX_TOKEN_BYTES);
     }
     finally {
         delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
         delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     }
-    if (!response.ok || !response.body)
-        throw new Error(`BoringBuild OIDC request failed with HTTP ${response.status}`);
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of response.body) {
-        const bytes = Buffer.from(chunk);
-        size += bytes.byteLength;
-        if (size > MAX_TOKEN_BYTES)
-            throw new Error('BoringBuild OIDC response is too large');
-        chunks.push(bytes);
-    }
-    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (!isObject(payload) || typeof payload.value !== 'string'
-        || payload.value.length > MAX_TOKEN_BYTES || /\s/.test(payload.value)) {
-        throw new Error('BoringBuild OIDC response is invalid');
-    }
-    return payload.value;
 }
 function parseToken(token) {
     if (Buffer.byteLength(token) > MAX_TOKEN_BYTES)

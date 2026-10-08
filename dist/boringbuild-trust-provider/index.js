@@ -1357,7 +1357,139 @@ function stringify(obj, { maxDepth = 1000, numbersAsFloat = false, strictTempora
 /** @deprecated use `import * as ... from 'smol-toml'` instead */
 /* harmony default export */ const dist = ({ parse: parse, stringify: stringify, TomlDate: TomlDate, TomlError: TomlError });
 
+;// CONCATENATED MODULE: external "timers/promises"
+const promises_namespaceObject = require("timers/promises");
+;// CONCATENATED MODULE: ./dist/trust-provider-oidc.js
+
+const MAX_OIDC_RESPONSE_BYTES = (/* unused pure expression or super */ null && (32 * 1024));
+const OIDC_REQUEST_TIMEOUT_MS = 10_000;
+const MAX_ATTEMPTS = 5;
+const BASE_DELAY_MS = 250;
+const MAX_BACKOFF_MS = 4_000;
+const MAX_RETRY_AFTER_MS = 15_000;
+class TransientOidcFailure extends Error {
+    retryAfterMs;
+    constructor(message, retryAfterMs) {
+        super(message);
+        this.retryAfterMs = retryAfterMs;
+    }
+}
+function isObject(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
+function retryableStatus(status) {
+    return status === 408 || status === 429 || (status >= 500 && status !== 507);
+}
+function retryAfterMs(headers) {
+    const value = headers.get('retry-after')?.trim();
+    if (!value)
+        return undefined;
+    if (/^\d+$/.test(value))
+        return Number(value) * 1000;
+    const deadline = Date.parse(value);
+    return Number.isNaN(deadline) ? undefined : Math.max(0, deadline - Date.now());
+}
+function oidcRetryDelayMs(attempt, retryAfter) {
+    if (attempt >= MAX_ATTEMPTS)
+        return undefined;
+    const backoff = Math.min(BASE_DELAY_MS * 2 ** Math.min(attempt - 1, 4), MAX_BACKOFF_MS);
+    return retryAfter === undefined ? backoff : Math.max(backoff, Math.min(retryAfter, MAX_RETRY_AFTER_MS));
+}
+async function requestIdentityTokenOnce(url, requestToken, provider, maxBytes) {
+    let response;
+    try {
+        response = await fetch(url, {
+            headers: { authorization: `Bearer ${requestToken}` },
+            redirect: 'error',
+            signal: AbortSignal.timeout(OIDC_REQUEST_TIMEOUT_MS),
+        });
+    }
+    catch (error) {
+        throw new TransientOidcFailure(`${provider} OIDC request failed: ${errorMessage(error)}`);
+    }
+    if (!response.ok || !response.body) {
+        const message = `${provider} OIDC request failed with HTTP ${response.status}`;
+        if (retryableStatus(response.status)) {
+            throw new TransientOidcFailure(message, retryAfterMs(response.headers));
+        }
+        throw new Error(message);
+    }
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && Number(contentLength) > maxBytes) {
+        throw new Error(`${provider} OIDC response is too large`);
+    }
+    const chunks = [];
+    let size = 0;
+    try {
+        for await (const chunk of response.body) {
+            const bytes = Buffer.from(chunk);
+            size += bytes.byteLength;
+            if (size > maxBytes)
+                break;
+            chunks.push(bytes);
+        }
+    }
+    catch (error) {
+        throw new TransientOidcFailure(`Failed to read the ${provider} OIDC response: ${errorMessage(error)}`);
+    }
+    if (size > maxBytes)
+        throw new Error(`${provider} OIDC response is too large`);
+    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (!isObject(payload) || typeof payload.value !== 'string'
+        || payload.value.length > maxBytes || /\s/.test(payload.value)) {
+        throw new Error(`${provider} OIDC response is invalid`);
+    }
+    return payload.value;
+}
+async function requestIdentityToken(url, requestToken, provider, maxBytes) {
+    for (let attempt = 1;; attempt += 1) {
+        try {
+            return await requestIdentityTokenOnce(url, requestToken, provider, maxBytes);
+        }
+        catch (error) {
+            if (!(error instanceof TransientOidcFailure))
+                throw error;
+            const wait = oidcRetryDelayMs(attempt, error.retryAfterMs);
+            if (wait === undefined) {
+                throw new Error(`${provider} OIDC request failed after ${attempt} attempts: ${error.message}`);
+            }
+            process.stderr.write(`${provider} OIDC request attempt ${attempt} of ${MAX_ATTEMPTS} failed: ${error.message}; retrying in ${(wait / 1000).toFixed(2)}s\n`);
+            await (0,promises_namespaceObject.setTimeout)(wait);
+        }
+    }
+}
+async function githubIdentityToken() {
+    const requestURL = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    if (!requestURL || !requestToken) {
+        throw new Error('GitHub OIDC request capability is required for attest');
+    }
+    const url = new URL(requestURL);
+    const trustedHost = url.hostname === 'actions.githubusercontent.com'
+        || url.hostname.endsWith('.actions.githubusercontent.com');
+    if (url.protocol !== 'https:' || (url.port !== '' && url.port !== '443') || !trustedHost
+        || url.username || url.password || url.hash || url.searchParams.getAll('audience').length !== 1
+        || url.searchParams.get('audience') !== 'sigstore') {
+        throw new Error('GitHub OIDC request URL is invalid');
+    }
+    if (requestToken.trim() !== requestToken || /[^\x21-\x7e]/.test(requestToken)
+        || requestToken.length > 32 * 1024) {
+        throw new Error('GitHub OIDC request credential is invalid');
+    }
+    try {
+        return await requestIdentityToken(url, requestToken, 'GitHub', MAX_OIDC_RESPONSE_BYTES);
+    }
+    finally {
+        delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+        delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    }
+}
+
 ;// CONCATENATED MODULE: ./dist/boringbuild-trust-provider.js
+
 
 
 
@@ -1366,7 +1498,7 @@ const MAX_REQUEST_BYTES = 512 * 1024;
 const MAX_BUNDLE_BYTES = 256 * 1024;
 const MAX_TOKEN_BYTES = 64 * 1024;
 const MEDIA_TYPE = 'application/vnd.boringbuild.publisher-oidc+jwt';
-function isObject(value) {
+function boringbuild_trust_provider_isObject(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 function subjectAudience(subject) {
@@ -1376,12 +1508,12 @@ function subjectDigest(subject) {
     return `sha256:${subject.digest.sha256}`;
 }
 function assertRequest(value) {
-    if (!isObject(value) || value.protocol_version !== PROTOCOL_VERSION
+    if (!boringbuild_trust_provider_isObject(value) || value.protocol_version !== PROTOCOL_VERSION
         || typeof value.request_id !== 'string' || !/^[0-9a-f-]{36}$/.test(value.request_id)
-        || !isObject(value.subject) || ![
+        || !boringbuild_trust_provider_isObject(value.subject) || ![
         'archive', 'archive-graph', 'oci', 'gha-cache', 'kv-batch', 'artifact', 'registry',
     ].includes(String(value.subject.kind))
-        || !isObject(value.subject.digest)
+        || !boringbuild_trust_provider_isObject(value.subject.digest)
         || !/^[0-9a-f]{64}$/.test(String(value.subject.digest.sha256))) {
         throw new Error('publisher request is invalid');
     }
@@ -1428,35 +1560,13 @@ async function identityToken(subject) {
         || requestToken.length > 32 * 1024) {
         throw new Error('BoringBuild OIDC request credential is invalid');
     }
-    let response;
     try {
-        response = await fetch(url, {
-            headers: { authorization: `Bearer ${requestToken}` },
-            redirect: 'error',
-            signal: AbortSignal.timeout(15_000),
-        });
+        return await requestIdentityToken(url, requestToken, 'BoringBuild', MAX_TOKEN_BYTES);
     }
     finally {
         delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
         delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     }
-    if (!response.ok || !response.body)
-        throw new Error(`BoringBuild OIDC request failed with HTTP ${response.status}`);
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of response.body) {
-        const bytes = Buffer.from(chunk);
-        size += bytes.byteLength;
-        if (size > MAX_TOKEN_BYTES)
-            throw new Error('BoringBuild OIDC response is too large');
-        chunks.push(bytes);
-    }
-    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (!isObject(payload) || typeof payload.value !== 'string'
-        || payload.value.length > MAX_TOKEN_BYTES || /\s/.test(payload.value)) {
-        throw new Error('BoringBuild OIDC response is invalid');
-    }
-    return payload.value;
 }
 function parseToken(token) {
     if (Buffer.byteLength(token) > MAX_TOKEN_BYTES)
@@ -1466,7 +1576,7 @@ function parseToken(token) {
         throw new Error('OIDC token is invalid');
     const header = JSON.parse(decodeBase64Url(parts[0], 'OIDC header', 2048).toString('utf8'));
     const claims = JSON.parse(decodeBase64Url(parts[1], 'OIDC claims', 32 * 1024).toString('utf8'));
-    if (!isObject(header) || !isObject(claims) || header.alg !== 'RS256' || header.typ !== 'JWT'
+    if (!boringbuild_trust_provider_isObject(header) || !boringbuild_trust_provider_isObject(claims) || header.alg !== 'RS256' || header.typ !== 'JWT'
         || typeof header.kid !== 'string') {
         throw new Error('OIDC token header or claims are invalid');
     }
@@ -1477,7 +1587,7 @@ function parseToken(token) {
 }
 function pinnedKey(publisher) {
     const key = publisher['public-key'];
-    if (!isObject(key) || typeof key.kid !== 'string'
+    if (!boringbuild_trust_provider_isObject(key) || typeof key.kid !== 'string'
         || typeof key.n !== 'string' || typeof key.e !== 'string') {
         throw new Error('BoringBuild publisher has no pinned public key');
     }
@@ -1529,7 +1639,7 @@ function assertIdentity(claims, publisher, subject) {
 }
 function publishersFromPolicy(request) {
     const policy = request.policy;
-    if (!isObject(policy) || policy.encoding !== 'base64')
+    if (!boringbuild_trust_provider_isObject(policy) || policy.encoding !== 'base64')
         throw new Error('policy is invalid');
     const bytes = decodeBase64(policy.data, 'policy', MAX_REQUEST_BYTES);
     const digest = `sha256:${(0,external_crypto_namespaceObject.createHash)('sha256').update(bytes).digest('hex')}`;
@@ -1537,11 +1647,11 @@ function publishersFromPolicy(request) {
         throw new Error('policy digest mismatch');
     const document = parse(bytes.toString('utf8'));
     const trust = document.trust;
-    if (!isObject(trust) || Number(trust.version) !== PROTOCOL_VERSION
+    if (!boringbuild_trust_provider_isObject(trust) || Number(trust.version) !== PROTOCOL_VERSION
         || trust.verifier !== 'boringbuild-oidc' || !Array.isArray(trust.publishers)) {
         throw new Error('policy does not configure BoringBuild OIDC verification');
     }
-    return trust.publishers.filter((publisher) => isObject(publisher) && publisher.type === 'boringbuild-oidc');
+    return trust.publishers.filter((publisher) => boringbuild_trust_provider_isObject(publisher) && publisher.type === 'boringbuild-oidc');
 }
 function deny(request, reasonCode) {
     return {
@@ -1573,7 +1683,7 @@ async function runBoringBuildProvider(request) {
         throw new Error('operation must be attest or verify');
     const publishers = publishersFromPolicy(request);
     const bundle = request.bundle;
-    if (!isObject(bundle) || bundle.media_type !== MEDIA_TYPE || bundle.encoding !== 'base64') {
+    if (!boringbuild_trust_provider_isObject(bundle) || bundle.media_type !== MEDIA_TYPE || bundle.encoding !== 'base64') {
         return deny(request, 'invalid_bundle');
     }
     let token;
