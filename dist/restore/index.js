@@ -107234,7 +107234,7 @@ function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     const mode = normalizeMode(getInput('mode'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.40.1',
+        cliVersion: getInput('cli-version') || 'v1.40.2',
         cliPlatform: getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -109148,6 +109148,24 @@ function readPhaseEvidence(file) {
     external_fs_namespaceObject.rmSync(file, { force: true });
     return document;
 }
+const CLI_TARGET_RESTORE_RESULTS = new Set(['restored', 'not-found', 'failed', 'skipped']);
+function cargoTargetRestore(evidence, targetEntry) {
+    if (!targetEntry) {
+        return 'not-configured';
+    }
+    const resolvedTag = targetEntry.resolved_tag;
+    if (!resolvedTag || !evidence || evidence.schema_version !== 'cache_phase_evidence.v1'
+        || evidence.phase !== 'restore' || !Array.isArray(evidence.entries)) {
+        return 'unknown';
+    }
+    const result = evidence.entries.find((entry) => entry.operation === 'restore' && entry.resolved_tag === resolvedTag)?.restore_result;
+    return typeof result === 'string' && CLI_TARGET_RESTORE_RESULTS.has(result)
+        ? result
+        : 'unknown';
+}
+function cargoCacheHit(restore) {
+    return restore === 'unknown' ? undefined : restore === 'restored';
+}
 function seconds(milliseconds) {
     return typeof milliseconds === 'number' ? Math.round(milliseconds / 100) / 10 : null;
 }
@@ -109232,8 +109250,8 @@ async function runCargoRestore(plan, inputs) {
             evidence: {
                 command_executed: false,
                 lookup_only: true,
-                target_cache_hit: targetPreflight.cacheEntryHit,
-                compiler_cache_hit: compilerPreflight.kvHit,
+                target_cache_available: targetPreflight.cacheEntryHit,
+                compiler_cache_available: compilerPreflight.kvHit,
                 cargo_cache: cargoPlan.cargo_cache,
                 archive_entries: cargoPlan.archive_entries || [],
             },
@@ -109246,7 +109264,7 @@ async function runCargoRestore(plan, inputs) {
             cargoPlan,
             command: wrappedCommand,
             compilerCacheEnabled,
-            cacheHit,
+            targetEntry,
             cacheTag,
             resolvedEntries,
             verificationSpecs,
@@ -109285,6 +109303,8 @@ async function runCargoRestore(plan, inputs) {
         throw new Error(`boringcache cargo restore phase exited with code ${restoreExitCode}`);
     }
     const restoreEvidence = readPhaseEvidence(restoreEvidenceFile);
+    const targetRestore = cargoTargetRestore(restoreEvidence, targetEntry);
+    setOutput('target-restore', targetRestore);
     setPhaseOutputs('restore', restoreEvidence);
     let proxyPort = cargoPlan.proxy.port;
     if (compilerCacheEnabled) {
@@ -109336,7 +109356,7 @@ async function runCargoRestore(plan, inputs) {
     saveModeState('sccache-preflight-kv-checked', String(compilerPreflight.kvChecked));
     return {
         workspace: cargoPlan.workspace,
-        cacheHit,
+        cacheHit: cargoCacheHit(targetRestore),
         cacheTag,
         resolvedEntries,
         verificationSpecs,
@@ -109346,8 +109366,10 @@ async function runCargoRestore(plan, inputs) {
             restore_elapsed_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
             restore_phase: restoreEvidence,
             proxy_port: proxyPort,
-            target_cache_hit: targetPreflight.cacheEntryHit,
-            compiler_cache_hit: compilerPreflight.kvHit,
+            target_cache_available: targetPreflight.cacheEntryHit,
+            compiler_cache_available: compilerPreflight.kvHit,
+            target_restore: targetRestore,
+            cargo_reuse: null,
             cargo_cache: cargoPlan.cargo_cache,
             archive_entries: cargoPlan.archive_entries || [],
         },
@@ -109462,8 +109484,15 @@ async function runWrappedCargoCommand(input) {
     if (nativeEvidencePath) {
         args.push('--native-tool-evidence-json', nativeEvidencePath);
     }
+    const restoreEvidencePath = cargoPlan.cargo_cache?.wrapped_restore_evidence === true
+        ? phaseEvidencePath('restore')
+        : '';
+    if (restoreEvidencePath) {
+        args.push('--phase-evidence-json', restoreEvidencePath);
+    }
     const startedAt = Date.now();
     let nativeToolEvidence = null;
+    let restoreEvidence = null;
     try {
         const exitCode = await shared_execBoringCache(args, {
             cwd: plan.workingDirectory,
@@ -109473,16 +109502,22 @@ async function runWrappedCargoCommand(input) {
             throw new Error(`boringcache cargo exited with code ${exitCode}`);
         }
         nativeToolEvidence = nativeEvidencePath ? readBoundedJsonObject(nativeEvidencePath) : null;
+        restoreEvidence = restoreEvidencePath ? readPhaseEvidence(restoreEvidencePath) : null;
     }
     finally {
         if (nativeEvidencePath) {
             external_fs_namespaceObject.rmSync(nativeEvidencePath, { force: true });
         }
+        if (restoreEvidencePath) {
+            external_fs_namespaceObject.rmSync(restoreEvidencePath, { force: true });
+        }
     }
+    const targetRestore = cargoTargetRestore(restoreEvidence, input.targetEntry);
+    setOutput('target-restore', targetRestore);
     saveModeState('cargo-lifecycle', 'command');
     return {
         workspace: cargoPlan.workspace,
-        cacheHit: input.cacheHit,
+        cacheHit: cargoCacheHit(targetRestore),
         cacheTag: input.cacheTag,
         resolvedEntries: input.resolvedEntries,
         verificationSpecs: input.verificationSpecs,
@@ -109492,8 +109527,11 @@ async function runWrappedCargoCommand(input) {
             native_tool: nativeToolEvidence,
             command_executed: true,
             lifecycle: 'command',
-            target_cache_hit: input.targetPreflight.cacheEntryHit,
-            compiler_cache_hit: input.compilerPreflight.kvHit,
+            target_cache_available: input.targetPreflight.cacheEntryHit,
+            compiler_cache_available: input.compilerPreflight.kvHit,
+            target_restore: targetRestore,
+            restore_phase: restoreEvidence,
+            cargo_reuse: null,
             cargo_cache: cargoPlan.cargo_cache,
             archive_entries: cargoPlan.archive_entries || [],
         },
