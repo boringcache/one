@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add the `target-restore` output for `mode: cargo`: `restored`, `not-found`,
+  `failed`, `skipped`, `not-configured` or `unknown`. It covers the job
+  lifecycle and wrapped Cargo commands; a restore from a fallback tag such as
+  the default branch counts as `restored`.
+
+### Changed
+
+- For `mode: cargo`, `cache-hit` is `true` only when `target-restore` is
+  `restored`, empty when it is `unknown`, and `false` otherwise. Wrapped Cargo
+  commands previously reported whether a target cache entry existed, and plans
+  without a target entry reported whether the compiler cache had entries.
+  Lookup-only runs still report availability.
+
+### Fixed
+
+- Report Cargo cache availability separately from completed target restoration.
+- Retry the Sigstore and BoringBuild publisher OIDC token requests when they
+  fail to connect, time out, or return HTTP 408, 429 or a retryable 5xx
+  response, up to five attempts with bounded backoff. Other responses still
+  fail on the first attempt.
 
 ## [1.40.1] - 2026-10-07
 

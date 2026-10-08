@@ -89,7 +89,9 @@ outputs:
   artifact-download-path:
     description: 'Absolute destination after a successful artifact pull.'
   cache-hit:
-    description: 'Whether an action-level restore or preflight found reusable cache. Empty means this setup step did not measure reuse; synchronous CLI modes and GHA report their outcome from the wrapped workload instead.'
+    description: 'Whether an action-level restore or preflight found reusable cache. Empty means this setup step did not measure reuse; synchronous CLI modes and GHA report their outcome from the wrapped workload instead. For mode: cargo, true only when target-restore is restored.'
+  target-restore:
+    description: 'mode: cargo. Whether the CLI restored the Cargo target: restored, not-found, failed, skipped, not-configured or unknown. Not set by lookup-only runs.'
   evidence-path:
     description: 'Path to the local boringcache/one JSON evidence file with restore and post-step state'
   cache-candidates:
