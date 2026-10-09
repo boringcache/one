@@ -107234,7 +107234,7 @@ function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     const mode = normalizeMode(getInput('mode'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.40.2',
+        cliVersion: getInput('cli-version') || 'v1.41.0',
         cliPlatform: getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -108256,6 +108256,9 @@ function goCacheProgForProxy(proxyPlan, port) {
 async function runGoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
+    if (proxyPlan.source_freshness) {
+        throw new Error('Go source-freshness requires a wrapped command. Run boringcache go -- go test ./... in a workflow step instead of mode: go.');
+    }
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const preflight = await shared_checkDirectCacheProxyTagStatus(workspace, cacheTag, {

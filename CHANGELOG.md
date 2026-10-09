@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.41.0] - 2026-10-09
+
+### Changed
+
+- Install BoringCache CLI `v1.41.0` by default.
+
+### Fixed
+
+- Reject Go source freshness in setup-only Go mode, with an instruction to run
+  the wrapped CLI command that owns source restore and publication.
+
 ## [1.40.2] - 2026-10-08
 
 ### Added
@@ -301,7 +312,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.40.2...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.41.0...HEAD
+[1.41.0]: https://github.com/boringcache/one/compare/v1.40.2...v1.41.0
 [1.40.2]: https://github.com/boringcache/one/compare/v1.40.1...v1.40.2
 [1.40.1]: https://github.com/boringcache/one/compare/v1.40.0...v1.40.1
 [1.40.0]: https://github.com/boringcache/one/compare/v1.33.0...v1.40.0
