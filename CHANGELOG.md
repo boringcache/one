@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject Go source freshness in setup-only Go mode, with an instruction to run
+  the wrapped CLI command that owns source restore and publication.
 
 ## [1.40.2] - 2026-10-08
 
