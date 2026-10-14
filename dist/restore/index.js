@@ -107234,7 +107234,7 @@ function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     const mode = normalizeMode(getInput('mode'));
     return {
-        cliVersion: getInput('cli-version') || 'v1.41.0',
+        cliVersion: getInput('cli-version') || 'v1.42.0',
         cliPlatform: getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -108456,6 +108456,9 @@ async function runXcodeRestore(plan, inputs) {
     }
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('xcode', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
+    if (proxyPlan.xcode?.available === false) {
+        throw new Error(`Xcode cache setup is unavailable: ${(proxyPlan.xcode.issues || []).join('; ')}`);
+    }
     const setup = requireAdapterSetupPlan('xcode', proxyPlan.setup);
     const env = setup.env_vars || {};
     const socketPath = env.BORINGCACHE_XCODE_PROXY_SOCKET?.trim() || '';
