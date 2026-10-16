@@ -46,18 +46,33 @@ export function resolveDiagnosticsConfig(mode, logLines) {
         logLines,
     };
 }
+let activeDiagnostics;
+export function verboseDiagnosticsEnabled() {
+    return activeDiagnostics?.includeLogs === true;
+}
+export function routineInfo(message) {
+    if (verboseDiagnosticsEnabled()) {
+        core.info(redactEvidenceText(message));
+    }
+}
 export function loadDiagnosticsConfig(inputs) {
+    if (inputs.diagnosticsConfig) {
+        activeDiagnostics = inputs.diagnosticsConfig;
+        return activeDiagnostics;
+    }
     const savedLevel = (getActionState('diagnostics-level') || '').trim().toLowerCase();
     if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
         const savedLogLines = normalizeDiagnosticsLogLines((getActionState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
-        return {
+        activeDiagnostics = {
             level: savedLevel,
             enabled: savedLevel !== 'off',
             includeLogs: savedLevel === 'verbose',
             logLines: savedLogLines,
         };
+        return activeDiagnostics;
     }
-    return resolveDiagnosticsConfig(inputs.diagnostics, inputs.diagnosticsLogLines);
+    activeDiagnostics = resolveDiagnosticsConfig(inputs.diagnostics, inputs.diagnosticsLogLines);
+    return activeDiagnostics;
 }
 export async function runDiagnosticsGroup(diagnostics, title, fn) {
     if (!diagnostics.enabled) {

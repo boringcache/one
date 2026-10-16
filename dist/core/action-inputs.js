@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import * as path from 'path';
-import { normalizeDiagnosticsLogLines, normalizeDiagnosticsMode } from './diagnostics';
+import { loadDiagnosticsConfig, normalizeDiagnosticsLogLines, normalizeDiagnosticsMode } from './diagnostics';
 import { normalizeTrustPolicy } from './trust';
 import { normalizeMode } from '../modes';
 import { getArtifactInputs } from './artifacts';
@@ -19,8 +19,10 @@ export function resolveSavePolicy() {
 export function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(core.getInput('diagnostics'));
     const mode = normalizeMode(core.getInput('mode'));
+    const diagnosticsLogLines = normalizeDiagnosticsLogLines('40');
+    const resolvedDiagnostics = loadDiagnosticsConfig({ diagnostics, diagnosticsLogLines });
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.42.0',
+        cliVersion: core.getInput('cli-version') || 'v1.42.1',
         cliPlatform: core.getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -31,14 +33,15 @@ export function getInputs() {
         saveAlways: core.getBooleanInput('save-always'),
         savePolicy: resolveSavePolicy(),
         diagnostics,
-        diagnosticsLogLines: normalizeDiagnosticsLogLines('40'),
+        diagnosticsLogLines,
+        diagnosticsConfig: resolvedDiagnostics,
         proxyPort: core.getInput('proxy-port'),
         cacheProfiles: core.getInput('cache-profiles'),
         gradleHome: core.getInput('gradle-home'),
         failOnCacheMiss: core.getBooleanInput('fail-on-cache-miss'),
         failOnCacheError: core.getBooleanInput('fail-on-cache-error'),
         lookupOnly: core.getBooleanInput('lookup-only'),
-        verbose: diagnostics === 'verbose',
+        verbose: resolvedDiagnostics.includeLogs,
     };
 }
 export function buildFlagArgs(inputs) {

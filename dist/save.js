@@ -1,3 +1,4 @@
+import { routineInfo } from './core/diagnostics';
 import * as core from '@actions/core';
 import { checkWorkloadIdentity, restoreWorkloadIdentity, stopWorkloadIdentity, WorkloadIdentityError, } from './core/workload-identity';
 import * as fs from 'fs';
@@ -100,11 +101,11 @@ export async function run() {
         await checkWorkloadIdentity();
         let resolvedMode = getActionState('resolved-mode');
         if (!resolvedMode) {
-            core.info('Post step skipped: the main step did not create a lifecycle plan.');
+            routineInfo('Post step skipped: the main step did not create a lifecycle plan.');
             return;
         }
         if (resolvedMode === 'artifact') {
-            core.info('Post step skipped: the artifact transfer ran in the main Action step.');
+            routineInfo('Post step skipped: the artifact transfer ran in the main Action step.');
             return;
         }
         const inputs = getInputs();
@@ -130,14 +131,14 @@ export async function run() {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }
-            core.info('Post step published nothing: save is never.');
+            routineInfo('Post step published nothing: save is never.');
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_save_never' : 'save_never');
             return;
         }
         const synchronousLifecycle = ['docker', 'buildkit'].includes(resolvedMode)
             || (resolvedMode === 'cargo' && getActionState('mode-cargo-lifecycle') !== 'job');
         if (synchronousLifecycle) {
-            core.info(`Post step skipped: mode ${resolvedMode} completed its synchronous CLI lifecycle in the main Action step.`);
+            routineInfo(`Post step skipped: mode ${resolvedMode} completed its synchronous CLI lifecycle in the main Action step.`);
             return;
         }
         let candidateReceiptFile = getActionState('candidate-receipt-file');
@@ -176,14 +177,14 @@ export async function run() {
             process.chdir(workingDirectory);
         }
         else if (workingDirectory) {
-            core.info(`Post step working directory ${workingDirectory} no longer exists; continuing from ${process.cwd()}.`);
+            routineInfo(`Post step working directory ${workingDirectory} no longer exists; continuing from ${process.cwd()}.`);
         }
         if (resolvedTrustPolicy === 'restore') {
             if (resolvedMode && resolvedMode !== 'archive') {
                 await runModeSave(resolvedMode, { allowSaves: false });
             }
             if (genericEntries || (resolvedMode && resolvedMode !== 'archive')) {
-                core.info(`Save skipped: trust-policy ${requestedTrustPolicy} resolved to restore.`);
+                routineInfo(`Save skipped: trust-policy ${requestedTrustPolicy} resolved to restore.`);
             }
             await emitPostStepDiagnostics(inputs, resolvedMode, workingDirectory || process.cwd(), genericWorkspace, genericEntries, trustState, resolvedMode && resolvedMode !== 'archive' ? 'mode_post_restore_only' : 'restore_only');
             return;

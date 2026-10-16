@@ -1,3 +1,4 @@
+import { routineInfo } from './diagnostics';
 import * as core from '@actions/core';
 import { context as githubContext } from '@actions/github';
 import * as fs from 'fs';
@@ -125,7 +126,7 @@ export async function startGhaAdapter(options) {
     let readOnly = options.readOnly === true;
     if (!brokeredWorkloadIdentity && !readOnly && !saveToken && restoreToken) {
         readOnly = true;
-        core.info('No save-capable token configured; starting the GitHub Actions cache adapter in restore-only mode.');
+        routineInfo('No save-capable token configured; starting the GitHub Actions cache adapter in restore-only mode.');
     }
     if (!brokeredWorkloadIdentity && readOnly && !restoreToken) {
         throw new Error(`${missingRestoreTokenMessage()} This is required for GitHub Actions cache mode.`);
@@ -189,7 +190,7 @@ export async function startGhaAdapter(options) {
         core.exportVariable('ACTIONS_CACHE_SERVICE_V2', ready.environment.ACTIONS_CACHE_SERVICE_V2);
         core.exportVariable('ACTIONS_RESULTS_URL', ready.environment.ACTIONS_RESULTS_URL);
         core.exportVariable('ACTIONS_RUNTIME_TOKEN', ready.environment.ACTIONS_RUNTIME_TOKEN);
-        core.info(`BoringCache GitHub Actions compatibility service is ready at ${ready.environment.ACTIONS_RESULTS_URL}`);
+        routineInfo(`BoringCache GitHub Actions compatibility service is ready at ${ready.environment.ACTIONS_RESULTS_URL}`);
         return {
             workspace: ready.environment.BORINGCACHE_WORKSPACE,
             pid: child.pid,

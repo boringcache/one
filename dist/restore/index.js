@@ -42293,7 +42293,7 @@ function core_error(message, properties = {}) {
  * @param message warning issue message. Errors will be converted to string via toString()
  * @param properties optional properties to add to the annotation.
  */
-function warning(message, properties = {}) {
+function core_warning(message, properties = {}) {
     issueCommand('warning', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 /**
@@ -42396,6 +42396,316 @@ function getIDToken(aud) {
  */
 
 //# sourceMappingURL=core.js.map
+;// CONCATENATED MODULE: ./dist/core/input-values.js
+
+
+function parsePositiveIntegerInput(value, inputName) {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) {
+        throw new Error(`Unsupported ${inputName} "${value}". Expected a positive integer.`);
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        throw new Error(`Unsupported ${inputName} "${value}". Expected a positive integer.`);
+    }
+    return parsed;
+}
+function expandUserPath(value) {
+    if (value.startsWith('~/')) {
+        return external_path_namespaceObject.join(process.env.HOME || external_os_.homedir(), value.slice(2));
+    }
+    return value;
+}
+function resolveWorkingPath(value, workingDirectory) {
+    const expanded = expandUserPath(value);
+    return external_path_namespaceObject.isAbsolute(expanded) ? expanded : external_path_namespaceObject.resolve(workingDirectory, expanded);
+}
+
+;// CONCATENATED MODULE: ./dist/core/lifecycle-state.js
+
+
+
+
+
+const STATE_ID_KEY = 'lifecycle-id';
+const STATE_SCHEMA = 'boringcache_one_lifecycle.v1';
+const MAX_STATE_BYTES = 256 * 1024;
+let processStateId;
+function currentStateId() {
+    const saved = (getState(STATE_ID_KEY) || '').trim();
+    if (saved) {
+        return saved;
+    }
+    processStateId ||= external_crypto_namespaceObject.randomUUID();
+    return processStateId;
+}
+function statePath(id = currentStateId()) {
+    const digest = external_crypto_namespaceObject.createHash('sha256').update(id).digest('hex');
+    return external_path_namespaceObject.join(external_os_.tmpdir(), `boringcache-one-lifecycle-${digest}.json`);
+}
+function removeStateDocument(id) {
+    fs.rmSync(statePath(id), { force: true });
+}
+function emptyDocument() {
+    return { schema_version: STATE_SCHEMA, values: {} };
+}
+function readDocument() {
+    const filePath = statePath();
+    if (!external_fs_namespaceObject.existsSync(filePath)) {
+        return emptyDocument();
+    }
+    const stat = external_fs_namespaceObject.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_STATE_BYTES) {
+        throw new Error('The BoringCache lifecycle state document is invalid.');
+    }
+    const parsed = JSON.parse(external_fs_namespaceObject.readFileSync(filePath, 'utf8'));
+    if (!parsed
+        || typeof parsed !== 'object'
+        || Array.isArray(parsed)
+        || parsed.schema_version !== STATE_SCHEMA
+        || typeof parsed.values !== 'object'
+        || Array.isArray(parsed.values)) {
+        throw new Error(`Unsupported BoringCache lifecycle state; expected ${STATE_SCHEMA}.`);
+    }
+    const values = parsed.values;
+    if (Object.values(values).some((value) => typeof value !== 'string')) {
+        throw new Error('The BoringCache lifecycle state document contains a non-string value.');
+    }
+    return { schema_version: STATE_SCHEMA, values };
+}
+function writeDocument(document) {
+    const filePath = statePath();
+    const body = `${JSON.stringify(document)}\n`;
+    if (Buffer.byteLength(body) > MAX_STATE_BYTES) {
+        throw new Error('The BoringCache lifecycle state document exceeds its 256 KiB limit.');
+    }
+    const temporaryPath = `${filePath}.${process.pid}.${external_crypto_namespaceObject.randomUUID()}.tmp`;
+    external_fs_namespaceObject.writeFileSync(temporaryPath, body, { mode: 0o600 });
+    try {
+        external_fs_namespaceObject.renameSync(temporaryPath, filePath);
+    }
+    finally {
+        external_fs_namespaceObject.rmSync(temporaryPath, { force: true });
+    }
+    saveState(STATE_ID_KEY, currentStateId());
+}
+function lifecycle_state_getActionState(key) {
+    return readDocument().values[key] || '';
+}
+function saveActionState(key, value) {
+    const document = readDocument();
+    document.values[key] = value;
+    writeDocument(document);
+}
+function removeActionStateDocument() {
+    const id = ((core.getState(STATE_ID_KEY) || processStateId) ?? '').trim();
+    if (id) {
+        removeStateDocument(id);
+    }
+    processStateId = undefined;
+}
+function lifecycleStateIdForTests(values, id = crypto.randomUUID()) {
+    const previous = processStateId;
+    processStateId = id;
+    writeDocument({ schema_version: STATE_SCHEMA, values });
+    processStateId = previous;
+    return id;
+}
+function lifecycleStateForTests(id) {
+    const previous = processStateId;
+    processStateId = id;
+    try {
+        return { ...readDocument().values };
+    }
+    finally {
+        processStateId = previous;
+    }
+}
+function resetLifecycleStateForTests() {
+    if (processStateId) {
+        removeStateDocument(processStateId);
+    }
+    processStateId = undefined;
+}
+
+;// CONCATENATED MODULE: ./dist/core/redaction.js
+function redactEvidenceText(value) {
+    const secretQueryFieldPattern = 'token|secret|password|credential|authorization|signature|sig|api[-_]?key|x-amz-security-token|x-amz-signature|x-goog-signature';
+    const secretHeaderFieldPattern = 'token|secret|password|credential|signature|api[-_]?key|x-amz-security-token|x-amz-signature|x-goog-signature';
+    let redacted = value
+        .replace(/(authorization):\s*Bearer\s+[^\s,;]+/gi, '$1: Bearer ***')
+        .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer ***')
+        .replace(new RegExp(`(${secretQueryFieldPattern})=([^&\\s]+)`, 'gi'), '$1=***')
+        .replace(new RegExp(`(${secretHeaderFieldPattern}):\\s*([^\\s]+)`, 'gi'), '$1: ***')
+        .replace(/(authorization):\s+(?!Bearer\s+\*\*\*)[^\r\n,;]+/gi, '$1: ***');
+    for (const secret of evidenceSecretValues()) {
+        redacted = redacted.split(secret).join('***');
+    }
+    return redacted;
+}
+function evidenceSecretValues() {
+    const secretNamePattern = /(TOKEN|SECRET|PASSWORD|PASS|PRIVATE|CREDENTIAL|AUTH|KEY)/i;
+    const values = new Set();
+    for (const [name, value] of Object.entries(process.env)) {
+        if (!value || value.length < 4 || !secretNamePattern.test(name) || isLocalProxyPlaceholder(name, value)) {
+            continue;
+        }
+        values.add(value);
+    }
+    return Array.from(values).sort((a, b) => b.length - a.length);
+}
+function isLocalProxyPlaceholder(name, value) {
+    if (value !== 'boringcache') {
+        return false;
+    }
+    const endpointName = name === 'TURBO_TOKEN'
+        ? 'TURBO_API'
+        : name === 'NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN'
+            ? 'NX_SELF_HOSTED_REMOTE_CACHE_SERVER'
+            : '';
+    const endpoint = endpointName ? process.env[endpointName] : '';
+    if (!endpoint) {
+        return false;
+    }
+    try {
+        const url = new URL(endpoint);
+        return url.protocol === 'http:'
+            && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    }
+    catch {
+        return false;
+    }
+}
+
+;// CONCATENATED MODULE: ./dist/core/diagnostics.js
+
+
+
+
+
+const MAX_DIAGNOSTICS_LOG_LINES = 500;
+const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
+function normalizeDiagnosticsMode(value) {
+    switch ((value || 'auto').trim().toLowerCase()) {
+        case 'auto':
+        case 'off':
+        case 'summary':
+        case 'verbose':
+            return (value || 'auto').trim().toLowerCase();
+        default:
+            throw new Error(`Unsupported diagnostics mode "${value}". Expected auto, off, summary, or verbose.`);
+    }
+}
+function normalizeDiagnosticsLogLines(value) {
+    if (!value || !value.trim()) {
+        return 40;
+    }
+    const parsed = parsePositiveIntegerInput(value, 'diagnostics-log-lines');
+    if (parsed > MAX_DIAGNOSTICS_LOG_LINES) {
+        core_warning(`diagnostics-log-lines "${value}" is too high; tailing ${MAX_DIAGNOSTICS_LOG_LINES} lines to keep diagnostics bounded.`);
+        return MAX_DIAGNOSTICS_LOG_LINES;
+    }
+    return parsed;
+}
+function resolveDiagnosticsConfig(mode, logLines) {
+    let level;
+    switch (mode) {
+        case 'auto':
+            level = isDebug() ? 'verbose' : 'off';
+            break;
+        case 'off':
+        case 'summary':
+        case 'verbose':
+            level = mode;
+            break;
+    }
+    return {
+        level,
+        enabled: level !== 'off',
+        includeLogs: level === 'verbose',
+        logLines,
+    };
+}
+let activeDiagnostics;
+function verboseDiagnosticsEnabled() {
+    return activeDiagnostics?.includeLogs === true;
+}
+function diagnostics_routineInfo(message) {
+    if (verboseDiagnosticsEnabled()) {
+        info(redactEvidenceText(message));
+    }
+}
+function loadDiagnosticsConfig(inputs) {
+    if (inputs.diagnosticsConfig) {
+        activeDiagnostics = inputs.diagnosticsConfig;
+        return activeDiagnostics;
+    }
+    const savedLevel = (lifecycle_state_getActionState('diagnostics-level') || '').trim().toLowerCase();
+    if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
+        const savedLogLines = normalizeDiagnosticsLogLines((lifecycle_state_getActionState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
+        activeDiagnostics = {
+            level: savedLevel,
+            enabled: savedLevel !== 'off',
+            includeLogs: savedLevel === 'verbose',
+            logLines: savedLogLines,
+        };
+        return activeDiagnostics;
+    }
+    activeDiagnostics = resolveDiagnosticsConfig(inputs.diagnostics, inputs.diagnosticsLogLines);
+    return activeDiagnostics;
+}
+async function runDiagnosticsGroup(diagnostics, title, fn) {
+    if (!diagnostics.enabled) {
+        return;
+    }
+    await group(title, fn);
+}
+function readLogTail(filePath, maxLines) {
+    const lineLimit = Math.min(Math.floor(maxLines), MAX_DIAGNOSTICS_LOG_LINES);
+    if (!filePath || lineLimit < 1) {
+        return [];
+    }
+    let fileDescriptor = null;
+    try {
+        fileDescriptor = external_fs_namespaceObject.openSync(filePath, 'r');
+        const fileSize = external_fs_namespaceObject.fstatSync(fileDescriptor).size;
+        const chunkSize = 64 * 1024;
+        const byteLimit = Math.min(fileSize, MAX_DIAGNOSTICS_LOG_BYTES);
+        const chunks = [];
+        let position = fileSize;
+        let bytesCollected = 0;
+        let lines = [];
+        while (position > 0 && bytesCollected < byteLimit && lines.length <= lineLimit) {
+            const bytesToRead = Math.min(chunkSize, position, byteLimit - bytesCollected);
+            position -= bytesToRead;
+            const buffer = Buffer.allocUnsafe(bytesToRead);
+            const bytesRead = external_fs_namespaceObject.readSync(fileDescriptor, buffer, 0, bytesToRead, position);
+            if (bytesRead <= 0) {
+                break;
+            }
+            bytesCollected += bytesRead;
+            chunks.unshift(buffer.subarray(0, bytesRead));
+            lines = Buffer.concat(chunks)
+                .toString('utf8')
+                .split(/\r?\n/)
+                .filter((line) => line.trim().length > 0);
+        }
+        const tailLines = lines.slice(-lineLimit);
+        if (tailLines.length > 0 && position > 0 && bytesCollected >= byteLimit && lines.length <= lineLimit) {
+            tailLines[0] = `[truncated to last ${MAX_DIAGNOSTICS_LOG_BYTES} bytes] ${tailLines[0]}`;
+        }
+        return tailLines.map((line) => redactEvidenceText(line));
+    }
+    catch {
+        return [];
+    }
+    finally {
+        if (fileDescriptor !== null) {
+            external_fs_namespaceObject.closeSync(fileDescriptor);
+        }
+    }
+}
+
 // EXTERNAL MODULE: ./node_modules/semver/index.js
 var node_modules_semver = __nccwpck_require__(2088);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/lib/manifest.js
@@ -96859,7 +97169,7 @@ function uploadCacheArchiveSDK(signedUploadURL, archivePath, options) {
             return response;
         }
         catch (error) {
-            warning(`uploadCacheArchiveSDK: internal error uploading cache archive: ${error.message}`);
+            core_warning(`uploadCacheArchiveSDK: internal error uploading cache archive: ${error.message}`);
             throw error;
         }
         finally {
@@ -98466,7 +98776,7 @@ class CacheServiceClient {
                         if (retryAfterHeader) {
                             const parsedSeconds = parseInt(retryAfterHeader, 10);
                             if (!isNaN(parsedSeconds) && parsedSeconds > 0) {
-                                warning(`You've hit a rate limit, your rate limit will reset in ${parsedSeconds} seconds`);
+                                core_warning(`You've hit a rate limit, your rate limit will reset in ${parsedSeconds} seconds`);
                             }
                         }
                         throw new RateLimitError(`Rate limited: ${errorMessage}`);
@@ -99038,7 +99348,7 @@ function restoreCacheV1(paths_1, primaryKey_1, restoreKeys_1, options_1) {
                     core_error(`Failed to restore: ${error.message}`);
                 }
                 else {
-                    warning(`Failed to restore: ${error.message}`);
+                    core_warning(`Failed to restore: ${error.message}`);
                 }
             }
         }
@@ -99146,7 +99456,7 @@ function restoreCacheV2(paths_1, primaryKey_1, restoreKeys_1, options_1) {
                     core_error(`Failed to restore: ${error.message}`);
                 }
                 else {
-                    warning(`Failed to restore: ${error.message}`);
+                    core_warning(`Failed to restore: ${error.message}`);
                 }
             }
         }
@@ -99275,7 +99585,7 @@ function saveCacheV1(paths_1, key_1, options_1) {
                     core_error(`Failed to save: ${typedError.message}`);
                 }
                 else {
-                    warning(`Failed to save: ${typedError.message}`);
+                    core_warning(`Failed to save: ${typedError.message}`);
                 }
             }
         }
@@ -99343,7 +99653,7 @@ function saveCacheV2(paths_1, key_1, options_1) {
                     // customer-facing warning.
                     if (response.message &&
                         !response.message.startsWith(CACHE_WRITE_DENIED_PREFIX)) {
-                        warning(`Cache reservation failed: ${response.message}`);
+                        core_warning(`Cache reservation failed: ${response.message}`);
                     }
                     throw new Error(response.message || 'Response was not ok');
                 }
@@ -99383,7 +99693,7 @@ function saveCacheV2(paths_1, key_1, options_1) {
                 info(`Failed to save: ${typedError.message}`);
             }
             else if (typedError.name === FinalizeCacheError.name) {
-                warning(typedError.message);
+                core_warning(typedError.message);
             }
             else {
                 // Log server errors (5xx) as errors, all other errors as warnings.
@@ -99396,7 +99706,7 @@ function saveCacheV2(paths_1, key_1, options_1) {
                     core_error(`Failed to save: ${typedError.message}`);
                 }
                 else {
-                    warning(`Failed to save: ${typedError.message}`);
+                    core_warning(`Failed to save: ${typedError.message}`);
                 }
             }
         }
@@ -99416,11 +99726,45 @@ function saveCacheV2(paths_1, key_1, options_1) {
 ;// CONCATENATED MODULE: ./dist/core/action-cache.js
 
 
+
+// The toolkit has no quiet option. This scope covers only internal CLI setup,
+// before wrapped programs start; their streams never pass through this filter.
+async function withToolCacheOutput(operation, observe) {
+    const verbose = verboseDiagnosticsEnabled();
+    const filter = (stream) => {
+        const originalWrite = stream.write;
+        stream.write = (function (chunk, ...rest) {
+            const text = typeof chunk === 'string'
+                ? chunk
+                : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : '';
+            observe?.(text);
+            // Workflow commands include secret masks and runner state, not just logs.
+            if (verbose || text.startsWith('::')) {
+                return originalWrite.call(stream, chunk, ...rest);
+            }
+            const callback = rest.find(value => typeof value === 'function');
+            if (callback) {
+                process.nextTick(callback);
+            }
+            return true;
+        });
+        return () => { stream.write = originalWrite; };
+    };
+    const restoreStdout = filter(process.stdout);
+    const restoreStderr = filter(process.stderr);
+    try {
+        return await operation();
+    }
+    finally {
+        restoreStderr();
+        restoreStdout();
+    }
+}
 async function saveImmutableToolCache(paths, key, label) {
     try {
-        const cacheId = await cache_saveCache(paths, key);
+        const cacheId = await withToolCacheOutput(() => cache_saveCache(paths, key));
         if (cacheId >= 0) {
-            info(`Saved ${label} to cache (key: ${key})`);
+            diagnostics_routineInfo(`Saved ${label} to cache (key: ${key})`);
         }
         else {
             core_debug(`${label} cache was not saved because another job already reserved key ${key}`);
@@ -99432,6 +99776,7 @@ async function saveImmutableToolCache(paths, key, label) {
 }
 
 ;// CONCATENATED MODULE: ./dist/core/setup.js
+
 
 
 
@@ -99557,7 +99902,7 @@ async function ensureMacosCodeSignature(binaryPath, platform = process.platform)
     if (await exec_exec('/usr/bin/codesign', verificationArgs, verificationOptions) === 0) {
         return;
     }
-    info('The installed macOS CLI has an invalid code signature; applying a local ad hoc signature.');
+    diagnostics_routineInfo('The installed macOS CLI has an invalid code signature; applying a local ad hoc signature.');
     const signExitCode = await exec_exec('/usr/bin/codesign', ['--force', '--sign', '-', binaryPath], verificationOptions);
     if (signExitCode !== 0) {
         throw new Error(`Failed to apply a local code signature to ${binaryPath}.`);
@@ -99676,7 +100021,7 @@ async function downloadReleaseAsset(version, assetName) {
         catch (error) {
             failures.push(`${url}: ${error instanceof Error ? error.message : String(error)}`);
             if (index + 1 < urls.length) {
-                warning(`Canonical ${assetName} download failed; using the GitHub mirror for ${version}.`);
+                core_warning(`Canonical ${assetName} download failed; using the GitHub mirror for ${version}.`);
             }
         }
     }
@@ -99742,11 +100087,11 @@ async function verifyChecksum(filePath, expectedChecksum, assetName) {
             `  Expected: ${expectedChecksum}\n` +
             `  Actual:   ${actualChecksum}`);
     }
-    info(`Checksum verified for ${assetName}`);
+    diagnostics_routineInfo(`Checksum verified for ${assetName}`);
 }
 async function downloadAndInstall(version, platform, verify) {
     const resolvedAssetName = platform.assetName;
-    info(`Downloading BoringCache CLI ${version} (${resolvedAssetName})...`);
+    diagnostics_routineInfo(`Downloading BoringCache CLI ${version} (${resolvedAssetName})...`);
     let downloadedPath;
     try {
         downloadedPath = await downloadReleaseAsset(version, resolvedAssetName);
@@ -99767,7 +100112,7 @@ async function downloadAndInstall(version, platform, verify) {
         await verifyChecksum(downloadedPath, expectedChecksum, resolvedAssetName);
     }
     else {
-        warning('Checksum verification disabled - this is not recommended for production use');
+        core_warning('Checksum verification disabled - this is not recommended for production use');
     }
     const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
     const installDir = external_path_namespaceObject.join(external_os_.tmpdir(), 'boringcache-install', version);
@@ -99830,7 +100175,7 @@ async function ensureBoringCache(options) {
     const shouldRequireServerSignature = options.requireServerSignature !== false;
     if (shouldRequireServerSignature && !process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE) {
         exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
-        info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
+        diagnostics_routineInfo('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
     }
     const runnerProvided = options.version.trim().toLowerCase() === RUNNER_PROVIDED_VERSION;
     const installedVersion = await availableCliVersion();
@@ -99866,21 +100211,21 @@ async function ensureBoringCache(options) {
         version = provided;
     }
     const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-    info(`Installing BoringCache CLI ${normalizedVersion}...`);
+    diagnostics_routineInfo(`Installing BoringCache CLI ${normalizedVersion}...`);
     const cacheInfo = getToolCacheInfo(normalizedVersion, options.platform);
     const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
     const cachePaths = [`${toolCacheRoot}/${TOOL_NAME}`];
     const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
     let toolPath = await verifiedToolCachePath(normalizedVersion, platform, cacheInfo.platformKey, enableVerify, binaryName);
     if (toolPath) {
-        info('Using the BoringCache CLI the runner image provides');
+        diagnostics_routineInfo('Using the BoringCache CLI the runner image provides');
     }
     let restoreFailed = false;
     if (!toolPath && !runnerProvided && enableCache) {
         const outcome = await restoreCacheWithOutcome(cachePaths, cacheInfo.cacheKey);
         restoreFailed = outcome.serviceFailed;
         if (outcome.matchedKey) {
-            info(`Restored CLI from cache (key: ${outcome.matchedKey})`);
+            diagnostics_routineInfo(`Restored CLI from cache (key: ${outcome.matchedKey})`);
             toolPath = await verifiedToolCachePath(normalizedVersion, platform, cacheInfo.platformKey, enableVerify, binaryName);
         }
     }
@@ -99899,7 +100244,7 @@ async function ensureBoringCache(options) {
     }
     const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName, options.stableBinDir || getStableCliBinDir());
     addPath(stableToolPath);
-    info(`BoringCache CLI ${normalizedVersion} ready`);
+    diagnostics_routineInfo(`BoringCache CLI ${normalizedVersion} ready`);
     return normalizedVersion;
 }
 /**
@@ -99914,27 +100259,13 @@ async function ensureBoringCache(options) {
 const SUPPRESSED_RESTORE_FAILURE = /::(?:error|warning)::[^\n]*Failed to restore/;
 async function restoreCacheWithOutcome(paths, key) {
     let serviceFailed = false;
-    const originalWrite = process.stdout.write;
-    const watch = (function (chunk, ...rest) {
-        const text = typeof chunk === 'string'
-            ? chunk
-            : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : '';
-        if (text && SUPPRESSED_RESTORE_FAILURE.test(text)) {
-            serviceFailed = true;
-        }
-        return originalWrite.call(process.stdout, chunk, ...rest);
-    });
-    process.stdout.write = watch;
     try {
-        const matchedKey = await restoreCache(paths, key);
+        const matchedKey = await withToolCacheOutput(() => restoreCache(paths, key), text => { serviceFailed ||= SUPPRESSED_RESTORE_FAILURE.test(text); });
         return { matchedKey: matchedKey ?? undefined, serviceFailed };
     }
     catch (error) {
         core_debug(`Cache restore failed: ${error instanceof Error ? error.message : error}`);
         return { matchedKey: undefined, serviceFailed: true };
-    }
-    finally {
-        process.stdout.write = originalWrite;
     }
 }
 /**
@@ -99959,7 +100290,7 @@ async function verifiedToolCachePath(normalizedVersion, platform, platformKey, v
         const expectedChecksum = sidecarChecksum ?? await getExpectedChecksum(normalizedVersion, platform.assetName);
         const actualChecksum = await computeFileHash(binary);
         if (actualChecksum !== expectedChecksum) {
-            warning('Cached CLI binary is stale (checksum mismatch), re-downloading');
+            core_warning('Cached CLI binary is stale (checksum mismatch), re-downloading');
             return '';
         }
         if (sidecarChecksum) {
@@ -99968,7 +100299,7 @@ async function verifiedToolCachePath(normalizedVersion, platform, platformKey, v
         return toolPath;
     }
     catch (error) {
-        warning(`Could not verify the cached CLI binary; ignoring it and downloading a verified copy: ${error instanceof Error ? error.message : error}`);
+        core_warning(`Could not verify the cached CLI binary; ignoring it and downloading a verified copy: ${error instanceof Error ? error.message : error}`);
         return '';
     }
 }
@@ -99983,7 +100314,7 @@ async function ensureXcodePlugin(version, verify = true, stableBinDir = getStabl
         return configuredPath;
     }
     if (configuredPath && external_path_namespaceObject.resolve(configuredPath) !== external_path_namespaceObject.resolve(pluginPath)) {
-        warning(`Ignoring BORINGCACHE_XCODE_PLUGIN_PATH because cli-version ${version} installs the verified Xcode adapter. `
+        core_warning(`Ignoring BORINGCACHE_XCODE_PLUGIN_PATH because cli-version ${version} installs the verified Xcode adapter. `
             + 'Set cli-version: skip to use a custom adapter.');
     }
     if (external_fs_namespaceObject.existsSync(pluginPath)) {
@@ -99996,10 +100327,10 @@ async function ensureXcodePlugin(version, verify = true, stableBinDir = getStabl
                     exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
                     return pluginPath;
                 }
-                warning('Installed Xcode adapter is stale (checksum mismatch), re-downloading');
+                core_warning('Installed Xcode adapter is stale (checksum mismatch), re-downloading');
             }
             catch (error) {
-                warning(`Could not verify the installed Xcode adapter; downloading a verified copy: ${error instanceof Error ? error.message : error}`);
+                core_warning(`Could not verify the installed Xcode adapter; downloading a verified copy: ${error instanceof Error ? error.message : error}`);
             }
         }
         else {
@@ -100012,7 +100343,7 @@ async function ensureXcodePlugin(version, verify = true, stableBinDir = getStabl
             + 'or BORINGCACHE_XCODE_PLUGIN_PATH when cli-version is skip.');
     }
     const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-    info(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
+    diagnostics_routineInfo(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
     let downloadedPath;
     try {
         downloadedPath = await downloadReleaseAsset(normalizedVersion, XCODE_PLUGIN_ASSET);
@@ -100029,18 +100360,37 @@ async function ensureXcodePlugin(version, verify = true, stableBinDir = getStabl
     await external_fs_namespaceObject.promises.copyFile(downloadedPath, pluginPath);
     await external_fs_namespaceObject.promises.chmod(pluginPath, 0o755);
     exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
-    info('BoringCache Xcode adapter ready');
+    diagnostics_routineInfo('BoringCache Xcode adapter ready');
     return pluginPath;
 }
 async function setup_execBoringCache(args, options = {}) {
     const isWindows = external_os_.platform() === 'win32';
+    // Toolkit silence also disables child streams; forward them separately so
+    // only its command echo is suppressed. Explicit capture calls stay silent.
+    const executionOptions = options.silent
+        ? { ...options, silent: true }
+        : {
+            ...options,
+            silent: true,
+            listeners: {
+                ...options.listeners,
+                stdout: (data) => {
+                    options.listeners?.stdout?.(data);
+                    (options.outStream ?? process.stdout).write(data);
+                },
+                stderr: (data) => {
+                    options.listeners?.stderr?.(data);
+                    (options.errStream ?? process.stderr).write(data);
+                },
+            },
+        };
     try {
-        return await exec_exec('boringcache', args, options);
+        return await exec_exec('boringcache', args, executionOptions);
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         if (isWindows && msg.includes('Unable to locate executable file')) {
-            return await exec_exec('bash', ['-lc', 'exec "$0" "$@"', 'boringcache', ...args], options);
+            return await exec_exec('bash', ['-lc', 'exec "$0" "$@"', 'boringcache', ...args], executionOptions);
         }
         throw error;
     }
@@ -100258,114 +100608,8 @@ function missingStageTokenMessage() {
     return 'A stage-capable token is required. Set BORINGCACHE_STAGE_TOKEN or BORINGCACHE_SAVE_TOKEN.';
 }
 
-;// CONCATENATED MODULE: ./dist/core/lifecycle-state.js
-
-
-
-
-
-const STATE_ID_KEY = 'lifecycle-id';
-const STATE_SCHEMA = 'boringcache_one_lifecycle.v1';
-const MAX_STATE_BYTES = 256 * 1024;
-let processStateId;
-function currentStateId() {
-    const saved = (getState(STATE_ID_KEY) || '').trim();
-    if (saved) {
-        return saved;
-    }
-    processStateId ||= external_crypto_namespaceObject.randomUUID();
-    return processStateId;
-}
-function statePath(id = currentStateId()) {
-    const digest = external_crypto_namespaceObject.createHash('sha256').update(id).digest('hex');
-    return external_path_namespaceObject.join(external_os_.tmpdir(), `boringcache-one-lifecycle-${digest}.json`);
-}
-function removeStateDocument(id) {
-    fs.rmSync(statePath(id), { force: true });
-}
-function emptyDocument() {
-    return { schema_version: STATE_SCHEMA, values: {} };
-}
-function readDocument() {
-    const filePath = statePath();
-    if (!external_fs_namespaceObject.existsSync(filePath)) {
-        return emptyDocument();
-    }
-    const stat = external_fs_namespaceObject.lstatSync(filePath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_STATE_BYTES) {
-        throw new Error('The BoringCache lifecycle state document is invalid.');
-    }
-    const parsed = JSON.parse(external_fs_namespaceObject.readFileSync(filePath, 'utf8'));
-    if (!parsed
-        || typeof parsed !== 'object'
-        || Array.isArray(parsed)
-        || parsed.schema_version !== STATE_SCHEMA
-        || typeof parsed.values !== 'object'
-        || Array.isArray(parsed.values)) {
-        throw new Error(`Unsupported BoringCache lifecycle state; expected ${STATE_SCHEMA}.`);
-    }
-    const values = parsed.values;
-    if (Object.values(values).some((value) => typeof value !== 'string')) {
-        throw new Error('The BoringCache lifecycle state document contains a non-string value.');
-    }
-    return { schema_version: STATE_SCHEMA, values };
-}
-function writeDocument(document) {
-    const filePath = statePath();
-    const body = `${JSON.stringify(document)}\n`;
-    if (Buffer.byteLength(body) > MAX_STATE_BYTES) {
-        throw new Error('The BoringCache lifecycle state document exceeds its 256 KiB limit.');
-    }
-    const temporaryPath = `${filePath}.${process.pid}.${external_crypto_namespaceObject.randomUUID()}.tmp`;
-    external_fs_namespaceObject.writeFileSync(temporaryPath, body, { mode: 0o600 });
-    try {
-        external_fs_namespaceObject.renameSync(temporaryPath, filePath);
-    }
-    finally {
-        external_fs_namespaceObject.rmSync(temporaryPath, { force: true });
-    }
-    saveState(STATE_ID_KEY, currentStateId());
-}
-function lifecycle_state_getActionState(key) {
-    return readDocument().values[key] || '';
-}
-function saveActionState(key, value) {
-    const document = readDocument();
-    document.values[key] = value;
-    writeDocument(document);
-}
-function removeActionStateDocument() {
-    const id = ((core.getState(STATE_ID_KEY) || processStateId) ?? '').trim();
-    if (id) {
-        removeStateDocument(id);
-    }
-    processStateId = undefined;
-}
-function lifecycleStateIdForTests(values, id = crypto.randomUUID()) {
-    const previous = processStateId;
-    processStateId = id;
-    writeDocument({ schema_version: STATE_SCHEMA, values });
-    processStateId = previous;
-    return id;
-}
-function lifecycleStateForTests(id) {
-    const previous = processStateId;
-    processStateId = id;
-    try {
-        return { ...readDocument().values };
-    }
-    finally {
-        processStateId = previous;
-    }
-}
-function resetLifecycleStateForTests() {
-    if (processStateId) {
-        removeStateDocument(processStateId);
-    }
-    processStateId = undefined;
-}
-
 ;// CONCATENATED MODULE: ./dist/core/workload-identity.js
+
 
 
 
@@ -100508,7 +100752,7 @@ async function startWorkloadIdentity() {
         rememberBroker(file);
         await checkWorkloadIdentity();
         exportVariable(BROKER_FILE_ENV, file);
-        info('Machine connection ready. The CLI will renew it through post-save.');
+        diagnostics_routineInfo('Machine connection ready. The CLI will renew it through post-save.');
     }
     catch (error) {
         external_fs_namespaceObject.rmSync(external_path_namespaceObject.join(directory, 'keepalive'), { force: true });
@@ -100623,55 +100867,6 @@ function parseEntries(entriesInput, _action, options = {}) {
 
 // EXTERNAL MODULE: external "net"
 var external_net_ = __nccwpck_require__(9278);
-;// CONCATENATED MODULE: ./dist/core/redaction.js
-function redactEvidenceText(value) {
-    const secretQueryFieldPattern = 'token|secret|password|credential|authorization|signature|sig|api[-_]?key|x-amz-security-token|x-amz-signature|x-goog-signature';
-    const secretHeaderFieldPattern = 'token|secret|password|credential|signature|api[-_]?key|x-amz-security-token|x-amz-signature|x-goog-signature';
-    let redacted = value
-        .replace(/(authorization):\s*Bearer\s+[^\s,;]+/gi, '$1: Bearer ***')
-        .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer ***')
-        .replace(new RegExp(`(${secretQueryFieldPattern})=([^&\\s]+)`, 'gi'), '$1=***')
-        .replace(new RegExp(`(${secretHeaderFieldPattern}):\\s*([^\\s]+)`, 'gi'), '$1: ***')
-        .replace(/(authorization):\s+(?!Bearer\s+\*\*\*)[^\r\n,;]+/gi, '$1: ***');
-    for (const secret of evidenceSecretValues()) {
-        redacted = redacted.split(secret).join('***');
-    }
-    return redacted;
-}
-function evidenceSecretValues() {
-    const secretNamePattern = /(TOKEN|SECRET|PASSWORD|PASS|PRIVATE|CREDENTIAL|AUTH|KEY)/i;
-    const values = new Set();
-    for (const [name, value] of Object.entries(process.env)) {
-        if (!value || value.length < 4 || !secretNamePattern.test(name) || isLocalProxyPlaceholder(name, value)) {
-            continue;
-        }
-        values.add(value);
-    }
-    return Array.from(values).sort((a, b) => b.length - a.length);
-}
-function isLocalProxyPlaceholder(name, value) {
-    if (value !== 'boringcache') {
-        return false;
-    }
-    const endpointName = name === 'TURBO_TOKEN'
-        ? 'TURBO_API'
-        : name === 'NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN'
-            ? 'NX_SELF_HOSTED_REMOTE_CACHE_SERVER'
-            : '';
-    const endpoint = endpointName ? process.env[endpointName] : '';
-    if (!endpoint) {
-        return false;
-    }
-    try {
-        const url = new URL(endpoint);
-        return url.protocol === 'http:'
-            && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
-    }
-    catch {
-        return false;
-    }
-}
-
 ;// CONCATENATED MODULE: ./dist/core/evidence.js
 
 
@@ -100872,7 +101067,7 @@ function writeActionEvidence(phase, payload, productRefs) {
         return evidencePath;
     }
     catch (error) {
-        warning(`Could not write BoringCache evidence file at ${evidencePath}: ${errorMessage(error)}`);
+        core_warning(`Could not write BoringCache evidence file at ${evidencePath}: ${errorMessage(error)}`);
         return '';
     }
 }
@@ -100967,7 +101162,84 @@ function sanitizeEvidenceValue(value) {
     return value;
 }
 
+;// CONCATENATED MODULE: ./dist/core/proxy-log.js
+
+
+
+
+// Failure delivery must survive verbose activity after a warning. Scan the
+// completed log once with bounded lines and retained records; display uses tails.
+function readProxyFailures(filePath) {
+    const result = { warnings: [] };
+    const seen = new Set();
+    const maxLineLength = 8192;
+    let pending = '';
+    const accept = (line) => {
+        const skip = cacheStorageFullSkip(line);
+        if (!/^warning: |^error:\s+/i.test(line)
+            && !/Shutdown: (flush|checkpoint promotion) timeout reached/i.test(line) && !skip) {
+            return;
+        }
+        const text = redactEvidenceText(line.replace(/\r$/, ''));
+        if (!result.failure && (/^error:\s+/i.test(text)
+            || /Shutdown: (flush|checkpoint promotion) timeout reached/i.test(text))) {
+            result.failure = text;
+        }
+        if (text.startsWith('warning: ') && seen.size < 32 && !seen.has(text)) {
+            seen.add(text);
+            result.warnings.push(text.slice('warning: '.length));
+        }
+        if (!result.storageFullSkip && skip) {
+            result.storageFullSkip = redactEvidenceText(skip);
+        }
+    };
+    const consume = (text) => {
+        let start = 0;
+        for (;;) {
+            const newline = text.indexOf('\n', start);
+            const end = newline < 0 ? text.length : newline;
+            pending += text.slice(start, end).slice(0, maxLineLength - pending.length);
+            if (newline < 0) {
+                break;
+            }
+            accept(pending);
+            pending = '';
+            start = newline + 1;
+        }
+    };
+    let descriptor;
+    try {
+        descriptor = external_fs_namespaceObject.openSync(filePath, 'r');
+        const size = external_fs_namespaceObject.fstatSync(descriptor).size;
+        const buffer = Buffer.allocUnsafe(64 * 1024);
+        const decoder = new external_string_decoder_.StringDecoder('utf8');
+        let position = 0;
+        while (position < size) {
+            const read = external_fs_namespaceObject.readSync(descriptor, buffer, 0, Math.min(buffer.length, size - position), position);
+            if (read === 0) {
+                break;
+            }
+            position += read;
+            consume(decoder.write(buffer.subarray(0, read)));
+        }
+        consume(decoder.end());
+        if (pending) {
+            accept(pending);
+        }
+    }
+    catch {
+        // Missing logs cannot establish a cache failure.
+    }
+    finally {
+        if (descriptor !== undefined) {
+            external_fs_namespaceObject.closeSync(descriptor);
+        }
+    }
+    return result;
+}
+
 ;// CONCATENATED MODULE: ./dist/core/proxy.js
+
 
 
 
@@ -101049,10 +101321,25 @@ function proxyLogPath(port) {
 }
 function readProxyLogs(port) {
     try {
-        return external_fs_namespaceObject.readFileSync(proxyLogPath(port), 'utf-8').trim();
+        return readLogTail(proxyLogPath(port), MAX_DIAGNOSTICS_LOG_LINES).join('\n');
     }
     catch {
         return '';
+    }
+}
+function reportProxyExit(port) {
+    if (!port) {
+        return;
+    }
+    const { failure, warnings, storageFullSkip } = readProxyFailures(proxyLogPath(port));
+    if (failure) {
+        throw new Error(`BoringCache proxy shutdown failed: ${failure}`);
+    }
+    for (const warning of warnings) {
+        core_warning(warning);
+    }
+    if (storageFullSkip && !warnings.some(line => line.includes(storageFullSkip))) {
+        core_warning(storageFullSkip);
     }
 }
 function proxyProbeHost(host) {
@@ -101105,7 +101392,7 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
     while (Date.now() - start < timeoutMs) {
         if (external_fs_namespaceObject.existsSync(readyFile)) {
             const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-            info(`BoringCache proxy is ready (${elapsed}s)`);
+            diagnostics_routineInfo(`BoringCache proxy is ready (${elapsed}s)`);
             let reportedBudgetSecs = null;
             try {
                 reportedBudgetSecs = parseProxyReadyMarker(external_fs_namespaceObject.readFileSync(readyFile, 'utf8').trim());
@@ -101122,7 +101409,7 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
         }
         const elapsed = Date.now() - start;
         if (elapsed - lastLogAt >= PROXY_READY_WARN_INTERVAL_MS) {
-            info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
+            diagnostics_routineInfo(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
             lastLogAt = elapsed;
         }
         await new Promise((resolve) => setTimeout(resolve, PROXY_READY_POLL_INTERVAL_MS));
@@ -101206,7 +101493,7 @@ async function startRegistryProxy(options) {
         effectiveReadOnly = true;
         effectiveStage = false;
         authToken = restoreToken;
-        info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
+        diagnostics_routineInfo(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
     if (!brokeredWorkloadIdentity && !authToken) {
         if (effectiveReadOnly) {
@@ -101297,7 +101584,7 @@ async function startRegistryProxy(options) {
     if (options.verbose) {
         args.push('--verbose');
     }
-    info(`Starting BoringCache proxy on ${host}:${options.port}...`);
+    diagnostics_routineInfo(`Starting BoringCache proxy on ${host}:${options.port}...`);
     const logFile = proxyLogPath(options.port);
     const logFd = external_fs_namespaceObject.openSync(logFile, 'w');
     const child = (0,external_child_process_namespaceObject.spawn)('boringcache', args, {
@@ -101312,7 +101599,7 @@ async function startRegistryProxy(options) {
     if (!child.pid) {
         throw new Error('Failed to start BoringCache proxy');
     }
-    info(`BoringCache proxy started (PID: ${child.pid})`);
+    diagnostics_routineInfo(`BoringCache proxy started (PID: ${child.pid})`);
     const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
     try {
         const reportedBudgetSecs = await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
@@ -101338,20 +101625,21 @@ async function startRegistryProxy(options) {
  */
 async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTimeoutMs()) {
     if (pid <= 0) {
-        info('No proxy PID to stop (was reused from another invocation)');
+        diagnostics_routineInfo('No proxy PID to stop (was reused from another invocation)');
         return;
     }
-    info(`Stopping BoringCache proxy (PID: ${pid})...`);
+    diagnostics_routineInfo(`Stopping BoringCache proxy (PID: ${pid})...`);
     try {
         process.kill(pid, 'SIGTERM');
     }
     catch (err) {
         const code = err.code;
         if (code === 'ESRCH') {
-            info(`BoringCache proxy (PID: ${pid}) already exited`);
+            reportProxyExit(port);
+            diagnostics_routineInfo(`BoringCache proxy (PID: ${pid}) already exited`);
             return;
         }
-        warning(`Failed to send SIGTERM to BoringCache proxy: ${err.message}`);
+        core_warning(`Failed to send SIGTERM to BoringCache proxy: ${err.message}`);
         return;
     }
     const start = Date.now();
@@ -101361,36 +101649,23 @@ async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTimeoutMs()
     let warnedSlow = false;
     while (Date.now() - start < stopTimeoutMs) {
         if (!isProcessAlive(pid)) {
-            if (port) {
-                const logs = readProxyLogs(port);
-                const shutdownTimeout = logs.match(/Shutdown: flush timeout reached[^\n]*/i);
-                const checkpointTimeout = logs.match(/Shutdown: checkpoint promotion timeout reached[^\n]*/i);
-                const shutdownError = logs.match(/Error:\s+[^\n]*(pending entries|checkpoint|cache publish)[^\n]*/i);
-                const failure = shutdownTimeout || checkpointTimeout || shutdownError;
-                if (failure) {
-                    throw new Error(`BoringCache proxy shutdown failed: ${failure[0]}`);
-                }
-                const storageFullSkip = cacheStorageFullSkip(logs);
-                if (storageFullSkip) {
-                    warning(storageFullSkip);
-                }
-            }
-            info(`BoringCache proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
+            reportProxyExit(port);
+            diagnostics_routineInfo(`BoringCache proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
             return;
         }
         const now = Date.now();
         if (!warnedSlow && now - start >= stopTimeoutMs / 2) {
             warnedSlow = true;
-            warning(`BoringCache proxy (PID: ${pid}) is still flushing after ${Math.round((now - start) / 1000)}s; it will be force-stopped at the ${Math.round(stopTimeoutMs / 1000)}s shutdown budget`);
+            core_warning(`BoringCache proxy (PID: ${pid}) is still flushing after ${Math.round((now - start) / 1000)}s; it will be force-stopped at the ${Math.round(stopTimeoutMs / 1000)}s shutdown budget`);
         }
         if (now - lastLog >= logInterval) {
-            info(`Waiting for BoringCache proxy to flush and exit... (${Math.round((now - start) / 1000)}s of ${Math.round(stopTimeoutMs / 1000)}s shutdown budget)`);
+            diagnostics_routineInfo(`Waiting for BoringCache proxy to flush and exit... (${Math.round((now - start) / 1000)}s of ${Math.round(stopTimeoutMs / 1000)}s shutdown budget)`);
             lastLog = now;
         }
         await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
     const waitedSeconds = Math.round((Date.now() - start) / 1000);
-    warning(`BoringCache proxy (PID: ${pid}) did not exit within the ${Math.round(stopTimeoutMs / 1000)}s shutdown budget; sending SIGKILL`);
+    core_warning(`BoringCache proxy (PID: ${pid}) did not exit within the ${Math.round(stopTimeoutMs / 1000)}s shutdown budget; sending SIGKILL`);
     try {
         process.kill(pid, 'SIGKILL');
     }
@@ -106416,6 +106691,7 @@ function getOctokit(token, options, ...additionalPlugins) {
 
 
 
+
 const GHA_READY_TIMEOUT_MS = 300_000;
 const GHA_READY_POLL_MS = 200;
 function createServiceDirectory() {
@@ -106536,7 +106812,7 @@ async function startGhaAdapter(options) {
     let readOnly = options.readOnly === true;
     if (!brokeredWorkloadIdentity && !readOnly && !saveToken && restoreToken) {
         readOnly = true;
-        info('No save-capable token configured; starting the GitHub Actions cache adapter in restore-only mode.');
+        diagnostics_routineInfo('No save-capable token configured; starting the GitHub Actions cache adapter in restore-only mode.');
     }
     if (!brokeredWorkloadIdentity && readOnly && !restoreToken) {
         throw new Error(`${missingRestoreTokenMessage()} This is required for GitHub Actions cache mode.`);
@@ -106600,7 +106876,7 @@ async function startGhaAdapter(options) {
         exportVariable('ACTIONS_CACHE_SERVICE_V2', ready.environment.ACTIONS_CACHE_SERVICE_V2);
         exportVariable('ACTIONS_RESULTS_URL', ready.environment.ACTIONS_RESULTS_URL);
         exportVariable('ACTIONS_RUNTIME_TOKEN', ready.environment.ACTIONS_RUNTIME_TOKEN);
-        info(`BoringCache GitHub Actions compatibility service is ready at ${ready.environment.ACTIONS_RESULTS_URL}`);
+        diagnostics_routineInfo(`BoringCache GitHub Actions compatibility service is ready at ${ready.environment.ACTIONS_RESULTS_URL}`);
         return {
             workspace: ready.environment.BORINGCACHE_WORKSPACE,
             pid: child.pid,
@@ -107038,145 +107314,6 @@ async function writeCompilerCacheJobSummary(observation, publication) {
 
 
 
-;// CONCATENATED MODULE: ./dist/core/input-values.js
-
-
-function parsePositiveIntegerInput(value, inputName) {
-    const trimmed = value.trim();
-    if (!/^\d+$/.test(trimmed)) {
-        throw new Error(`Unsupported ${inputName} "${value}". Expected a positive integer.`);
-    }
-    const parsed = Number.parseInt(trimmed, 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-        throw new Error(`Unsupported ${inputName} "${value}". Expected a positive integer.`);
-    }
-    return parsed;
-}
-function expandUserPath(value) {
-    if (value.startsWith('~/')) {
-        return external_path_namespaceObject.join(process.env.HOME || external_os_.homedir(), value.slice(2));
-    }
-    return value;
-}
-function resolveWorkingPath(value, workingDirectory) {
-    const expanded = expandUserPath(value);
-    return external_path_namespaceObject.isAbsolute(expanded) ? expanded : external_path_namespaceObject.resolve(workingDirectory, expanded);
-}
-
-;// CONCATENATED MODULE: ./dist/core/diagnostics.js
-
-
-
-
-
-const MAX_DIAGNOSTICS_LOG_LINES = 500;
-const MAX_DIAGNOSTICS_LOG_BYTES = 512 * 1024;
-function normalizeDiagnosticsMode(value) {
-    switch ((value || 'auto').trim().toLowerCase()) {
-        case 'auto':
-        case 'off':
-        case 'summary':
-        case 'verbose':
-            return (value || 'auto').trim().toLowerCase();
-        default:
-            throw new Error(`Unsupported diagnostics mode "${value}". Expected auto, off, summary, or verbose.`);
-    }
-}
-function normalizeDiagnosticsLogLines(value) {
-    if (!value || !value.trim()) {
-        return 40;
-    }
-    const parsed = parsePositiveIntegerInput(value, 'diagnostics-log-lines');
-    if (parsed > MAX_DIAGNOSTICS_LOG_LINES) {
-        warning(`diagnostics-log-lines "${value}" is too high; tailing ${MAX_DIAGNOSTICS_LOG_LINES} lines to keep diagnostics bounded.`);
-        return MAX_DIAGNOSTICS_LOG_LINES;
-    }
-    return parsed;
-}
-function resolveDiagnosticsConfig(mode, logLines) {
-    let level;
-    switch (mode) {
-        case 'auto':
-            level = isDebug() ? 'verbose' : 'off';
-            break;
-        case 'off':
-        case 'summary':
-        case 'verbose':
-            level = mode;
-            break;
-    }
-    return {
-        level,
-        enabled: level !== 'off',
-        includeLogs: level === 'verbose',
-        logLines,
-    };
-}
-function loadDiagnosticsConfig(inputs) {
-    const savedLevel = (lifecycle_state_getActionState('diagnostics-level') || '').trim().toLowerCase();
-    if (savedLevel === 'off' || savedLevel === 'summary' || savedLevel === 'verbose') {
-        const savedLogLines = normalizeDiagnosticsLogLines((lifecycle_state_getActionState('diagnostics-log-lines') || '').trim() || String(inputs.diagnosticsLogLines));
-        return {
-            level: savedLevel,
-            enabled: savedLevel !== 'off',
-            includeLogs: savedLevel === 'verbose',
-            logLines: savedLogLines,
-        };
-    }
-    return resolveDiagnosticsConfig(inputs.diagnostics, inputs.diagnosticsLogLines);
-}
-async function runDiagnosticsGroup(diagnostics, title, fn) {
-    if (!diagnostics.enabled) {
-        return;
-    }
-    await group(title, fn);
-}
-function readLogTail(filePath, maxLines) {
-    const lineLimit = Math.min(Math.floor(maxLines), MAX_DIAGNOSTICS_LOG_LINES);
-    if (!filePath || lineLimit < 1) {
-        return [];
-    }
-    let fileDescriptor = null;
-    try {
-        fileDescriptor = external_fs_namespaceObject.openSync(filePath, 'r');
-        const fileSize = external_fs_namespaceObject.fstatSync(fileDescriptor).size;
-        const chunkSize = 64 * 1024;
-        const byteLimit = Math.min(fileSize, MAX_DIAGNOSTICS_LOG_BYTES);
-        const chunks = [];
-        let position = fileSize;
-        let bytesCollected = 0;
-        let lines = [];
-        while (position > 0 && bytesCollected < byteLimit && lines.length <= lineLimit) {
-            const bytesToRead = Math.min(chunkSize, position, byteLimit - bytesCollected);
-            position -= bytesToRead;
-            const buffer = Buffer.allocUnsafe(bytesToRead);
-            const bytesRead = external_fs_namespaceObject.readSync(fileDescriptor, buffer, 0, bytesToRead, position);
-            if (bytesRead <= 0) {
-                break;
-            }
-            bytesCollected += bytesRead;
-            chunks.unshift(buffer.subarray(0, bytesRead));
-            lines = Buffer.concat(chunks)
-                .toString('utf8')
-                .split(/\r?\n/)
-                .filter((line) => line.trim().length > 0);
-        }
-        const tailLines = lines.slice(-lineLimit);
-        if (tailLines.length > 0 && position > 0 && bytesCollected >= byteLimit && lines.length <= lineLimit) {
-            tailLines[0] = `[truncated to last ${MAX_DIAGNOSTICS_LOG_BYTES} bytes] ${tailLines[0]}`;
-        }
-        return tailLines.map((line) => redactEvidenceText(line));
-    }
-    catch {
-        return [];
-    }
-    finally {
-        if (fileDescriptor !== null) {
-            external_fs_namespaceObject.closeSync(fileDescriptor);
-        }
-    }
-}
-
 ;// CONCATENATED MODULE: ./dist/modes.js
 function normalizeMode(value) {
     const normalized = (value || 'archive').trim().toLowerCase();
@@ -107233,8 +107370,10 @@ function resolveSavePolicy() {
 function getInputs() {
     const diagnostics = normalizeDiagnosticsMode(getInput('diagnostics'));
     const mode = normalizeMode(getInput('mode'));
+    const diagnosticsLogLines = normalizeDiagnosticsLogLines('40');
+    const resolvedDiagnostics = loadDiagnosticsConfig({ diagnostics, diagnosticsLogLines });
     return {
-        cliVersion: getInput('cli-version') || 'v1.42.0',
+        cliVersion: getInput('cli-version') || 'v1.42.1',
         cliPlatform: getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -107245,14 +107384,15 @@ function getInputs() {
         saveAlways: getBooleanInput('save-always'),
         savePolicy: resolveSavePolicy(),
         diagnostics,
-        diagnosticsLogLines: normalizeDiagnosticsLogLines('40'),
+        diagnosticsLogLines,
+        diagnosticsConfig: resolvedDiagnostics,
         proxyPort: getInput('proxy-port'),
         cacheProfiles: getInput('cache-profiles'),
         gradleHome: getInput('gradle-home'),
         failOnCacheMiss: getBooleanInput('fail-on-cache-miss'),
         failOnCacheError: getBooleanInput('fail-on-cache-error'),
         lookupOnly: getBooleanInput('lookup-only'),
-        verbose: diagnostics === 'verbose',
+        verbose: resolvedDiagnostics.includeLogs,
     };
 }
 function buildFlagArgs(inputs) {
@@ -107504,7 +107644,7 @@ function readCandidateReceipts(receiptFile) {
             const id = parsed.id?.trim() || '';
             const digest = parsed.manifest_root_digest?.trim().toLowerCase() || '';
             if (!id || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
-                warning('Ignoring malformed BoringCache candidate receipt.');
+                core_warning('Ignoring malformed BoringCache candidate receipt.');
                 continue;
             }
             receipts.set(id, {
@@ -107515,7 +107655,7 @@ function readCandidateReceipts(receiptFile) {
             });
         }
         catch {
-            warning('Ignoring invalid JSON in the BoringCache candidate receipt file.');
+            core_warning('Ignoring invalid JSON in the BoringCache candidate receipt file.');
         }
     }
     return [...receipts.values()];
@@ -107580,6 +107720,7 @@ async function runNativeProcess(command, args, timeoutMs, spawnProcess = externa
 }
 
 ;// CONCATENATED MODULE: ./dist/modes/shared.js
+
 
 
 
@@ -107807,7 +107948,7 @@ async function shared_execBoringCache(args, options) {
 function emitCliPlannerWarnings(stderr) {
     for (const line of stderr.split('\n').map((value) => value.trim()).filter(Boolean)) {
         if (line.startsWith('warning:')) {
-            warning(line.replace(/^warning:\s*/, ''));
+            core_warning(line.replace(/^warning:\s*/, ''));
         }
     }
 }
@@ -107903,7 +108044,7 @@ async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
         return;
     }
     if (!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0) {
-        core.notice('No cache files to save');
+        routineInfo('No cache files to save');
         return;
     }
     const args = ['save', workspace, `${cacheKey}:${cacheDir}`, '--force'];
@@ -107989,7 +108130,7 @@ async function checkDirectCacheTagStatus(workspace, tag, { noPlatform = false, n
         };
     }
     catch (error) {
-        warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
+        core_warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
         return emptyDirectCacheTagCheckStatus();
     }
 }
@@ -108031,7 +108172,7 @@ function readBoundedJsonObject(filePath) {
     try {
         const stat = external_fs_namespaceObject.statSync(filePath);
         if (!stat.isFile() || stat.size > 1024 * 1024) {
-            warning(`Ignoring invalid native-tool evidence file: ${filePath}`);
+            core_warning(`Ignoring invalid native-tool evidence file: ${filePath}`);
             return null;
         }
         const value = JSON.parse(external_fs_namespaceObject.readFileSync(filePath, 'utf8'));
@@ -108040,7 +108181,7 @@ function readBoundedJsonObject(filePath) {
             : null;
     }
     catch (error) {
-        warning(`Unable to read native-tool evidence: ${error instanceof Error ? error.message : error}`);
+        core_warning(`Unable to read native-tool evidence: ${error instanceof Error ? error.message : error}`);
         return null;
     }
 }
@@ -108589,6 +108730,7 @@ function adapters_cleanupNixRuntimeDirectory() {
 
 
 
+
 const SCCACHE_DEFAULT_SERVER_PORT = 4226;
 const SCCACHE_START_TIMEOUT_MS = 15_000;
 const SCCACHE_READY_TIMEOUT_MS = 5_000;
@@ -108671,7 +108813,7 @@ async function startSccacheServer(options = {}) {
             throw new Error(`sccache --start-server failed with ${outcome}.`);
         }
         await waitForSccacheServer(options.readinessProbe || (() => probeSccacheServer(address)), options.readyTimeoutMs ?? SCCACHE_READY_TIMEOUT_MS, options.readyPollIntervalMs ?? SCCACHE_READY_POLL_INTERVAL_MS);
-        info(`sccache server is ready on ${address.label}`);
+        diagnostics_routineInfo(`sccache server is ready on ${address.label}`);
     }
     catch (error) {
         await stopSccacheAfterFailedStartup(spawnProcess);
@@ -109014,10 +109156,10 @@ function ccacheStatsDetail(stats) {
 function reportCompilerCacheStats(tool, tag, statsDetail) {
     const label = tag || '(untagged)';
     if (statsDetail) {
-        core.info(`${tool} proxy stats for ${label}: ${statsDetail}`);
+        routineInfo(`${tool} proxy stats for ${label}: ${statsDetail}`);
         return;
     }
-    core.info(`${tool} proxy stats for ${label} were unavailable: the native tool reported no readable counters.`);
+    routineInfo(`${tool} proxy stats for ${label} were unavailable: the native tool reported no readable counters.`);
 }
 async function compiler_cache_finishCompilerCacheSave(tool, state, stats, statsDetail, options) {
     reportCompilerCacheStats(tool, state.tag, statsDetail);
@@ -109031,13 +109173,13 @@ async function compiler_cache_finishCompilerCacheSave(tool, state, stats, statsD
     if (!stats || stats.compileRequests === 0) {
         markModeVerifyTagSkipped(state.tag);
         if (state.kvHit) {
-            core.info(`Skipping ${tool} post-save verification for ${state.tag}: no compile requests were observed.`);
+            routineInfo(`Skipping ${tool} post-save verification for ${state.tag}: no compile requests were observed.`);
         }
         else if (state.cacheEntryHit) {
-            core.info(`Skipping ${tool} post-save verification for ${state.tag}: signed cache entry existed, but no compile requests were observed.`);
+            routineInfo(`Skipping ${tool} post-save verification for ${state.tag}: signed cache entry existed, but no compile requests were observed.`);
         }
         else {
-            core.info(`Skipping ${tool} save for ${state.tag}: no compile requests were observed.`);
+            routineInfo(`Skipping ${tool} save for ${state.tag}: no compile requests were observed.`);
         }
         return;
     }
@@ -109052,7 +109194,7 @@ async function compiler_cache_finishCompilerCacheSave(tool, state, stats, statsD
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests even though direct KV rows existed for '${state.tag}' before startup. Check ${tool} key churn, emitted tag semantics, and proxy read logs.`);
     }
     else if (state.cacheEntryHit && postShutdownStatus.kvHit) {
-        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
+        routineInfo(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
     }
     else if (state.cacheEntryHit && state.kvChecked && postShutdownStatus.kvChecked) {
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`);
@@ -109061,13 +109203,13 @@ async function compiler_cache_finishCompilerCacheSave(tool, state, stats, statsD
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`);
     }
     else if (postShutdownStatus.kvHit) {
-        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests, but '${state.tag}' published successfully. This looks like a cold fill.`);
+        routineInfo(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests, but '${state.tag}' published successfully. This looks like a cold fill.`);
     }
     else if (postShutdownStatus.cacheEntryHit) {
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' had a signed cache entry after shutdown, but direct KV rows were not visible. Check boringcache/one cli-version alignment and proxy KV publish logs.`);
     }
     else {
-        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
+        routineInfo(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
     }
 }
 async function runCcacheRestore(plan, inputs) {
@@ -109116,7 +109258,7 @@ async function runSccacheRestore(plan, inputs) {
         }
         catch (cleanupError) {
             const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-            warning(`sccache startup failed and the BoringCache proxy could not be stopped cleanly: ${detail}`);
+            core_warning(`sccache startup failed and the BoringCache proxy could not be stopped cleanly: ${detail}`);
         }
         throw error;
     }
@@ -109137,6 +109279,7 @@ async function compiler_cache_runSccacheSave(options = {}) {
 }
 
 ;// CONCATENATED MODULE: ./dist/modes/cargo.js
+
 
 
 
@@ -109336,7 +109479,7 @@ async function runCargoRestore(plan, inputs) {
             }
             catch (cleanupError) {
                 const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-                warning(`sccache startup failed and the BoringCache proxy could not be stopped cleanly: ${detail}`);
+                core_warning(`sccache startup failed and the BoringCache proxy could not be stopped cleanly: ${detail}`);
             }
             throw error;
         }
@@ -109440,7 +109583,7 @@ async function cargo_runCargoSave(options = {}) {
         const changed = publishEvidence.unchanged
             ? 'unchanged, nothing republished'
             : `${publishEvidence.transferred_bytes ?? 0} changed bytes`;
-        core.info(`Cargo publish phase: ${seconds(publishEvidence.phase_duration_ms) ?? '?'}s, `
+        routineInfo(`Cargo publish phase: ${seconds(publishEvidence.phase_duration_ms) ?? '?'}s, `
             + `${publishEvidence.entry_count ?? 0} entries, ${changed}.`);
     }
     await stopProxyFromState();
@@ -109776,6 +109919,7 @@ async function runModeSave(mode, options = {}) {
 
 
 
+
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 function appendRestoreDiagnostic(current, data) {
     return `${current}${data.toString()}`.slice(-MAX_RESTORE_DIAGNOSTIC_CHARS);
@@ -109872,14 +110016,14 @@ async function restoreEntries(workspace, entriesString, flagArgs) {
         }
         const detail = restoreFailureDetail(stdout, stderr, attempt.entries);
         failedAttempts.push(detail);
-        warning(`Cache entry was found but could not be restored: ${detail}`);
+        core_warning(`Cache entry was found but could not be restored: ${detail}`);
     }
     if (failedAttempts.length > 0) {
         const detail = failedAttempts[failedAttempts.length - 1];
         if (restoreErrorsShouldFail || restoreMissShouldFail) {
             throw new Error(detail);
         }
-        warning('No available cache candidate could be materialized; treating the restore as a miss.');
+        core_warning('No available cache candidate could be materialized; treating the restore as a miss.');
     }
     else if (restoreMissShouldFail) {
         throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
@@ -109904,10 +110048,10 @@ async function checkEntries(workspace, tags, restoreFlagArgs) {
     });
     if (!stdout.trim()) {
         if (exitCode !== 0) {
-            warning(`Cache check failed for ${checkTags.join(',')}; treating as a miss.`);
+            core_warning(`Cache check failed for ${checkTags.join(',')}; treating as a miss.`);
         }
         else {
-            warning(`boringcache check --json produced no output for ${checkTags.join(',')}; treating as a miss.`);
+            core_warning(`boringcache check --json produced no output for ${checkTags.join(',')}; treating as a miss.`);
         }
         return false;
     }
@@ -109916,7 +110060,7 @@ async function checkEntries(workspace, tags, restoreFlagArgs) {
         summary = JSON.parse(stdout);
     }
     catch (error) {
-        warning(`Failed to parse boringcache check JSON for ${checkTags.join(',')}: ${error instanceof Error ? error.message : String(error)}; treating as a miss.`);
+        core_warning(`Failed to parse boringcache check JSON for ${checkTags.join(',')}: ${error instanceof Error ? error.message : String(error)}; treating as a miss.`);
         return false;
     }
     return (summary.results || []).some((result) => result.status === 'hit');
@@ -110085,7 +110229,7 @@ async function run() {
         saveActionState('generic-cache-workspace', completedPlan.workspace);
         await emitRestoreDiagnostics(completedPlan, inputs, resolvedTags, overallHit, trustState);
         if (!trustDecision.write_allowed) {
-            info(`Post step is restore-only (trust-policy: ${inputs.trustPolicy}).`);
+            diagnostics_routineInfo(`Post step is restore-only (trust-policy: ${inputs.trustPolicy}).`);
         }
     }
     catch (error) {
@@ -110093,7 +110237,7 @@ async function run() {
             await stopWorkloadIdentity();
         }
         catch {
-            warning('Unable to finish Machine connection cleanup after startup failed.');
+            core_warning('Unable to finish Machine connection cleanup after startup failed.');
         }
         writeActionFailureEvidence('restore', error, restoreFailureContext);
         if (error instanceof DockerBuildFailure)

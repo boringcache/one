@@ -1,3 +1,4 @@
+import { routineInfo } from './diagnostics';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as tc from '@actions/tool-cache';
@@ -6,7 +7,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { saveImmutableToolCache } from './action-cache';
+import { saveImmutableToolCache, withToolCacheOutput } from './action-cache';
 const TOOL_NAME = 'boringcache';
 const CANONICAL_RELEASES_BASE = 'https://artifacts.boringcache.com/releases/cli';
 const GITHUB_RELEASES_BASE = 'https://github.com/boringcache/cli/releases/download';
@@ -123,7 +124,7 @@ export async function ensureMacosCodeSignature(binaryPath, platform = process.pl
     if (await exec.exec('/usr/bin/codesign', verificationArgs, verificationOptions) === 0) {
         return;
     }
-    core.info('The installed macOS CLI has an invalid code signature; applying a local ad hoc signature.');
+    routineInfo('The installed macOS CLI has an invalid code signature; applying a local ad hoc signature.');
     const signExitCode = await exec.exec('/usr/bin/codesign', ['--force', '--sign', '-', binaryPath], verificationOptions);
     if (signExitCode !== 0) {
         throw new Error(`Failed to apply a local code signature to ${binaryPath}.`);
@@ -308,11 +309,11 @@ async function verifyChecksum(filePath, expectedChecksum, assetName) {
             `  Expected: ${expectedChecksum}\n` +
             `  Actual:   ${actualChecksum}`);
     }
-    core.info(`Checksum verified for ${assetName}`);
+    routineInfo(`Checksum verified for ${assetName}`);
 }
 async function downloadAndInstall(version, platform, verify) {
     const resolvedAssetName = platform.assetName;
-    core.info(`Downloading BoringCache CLI ${version} (${resolvedAssetName})...`);
+    routineInfo(`Downloading BoringCache CLI ${version} (${resolvedAssetName})...`);
     let downloadedPath;
     try {
         downloadedPath = await downloadReleaseAsset(version, resolvedAssetName);
@@ -396,7 +397,7 @@ export async function ensureBoringCache(options) {
     const shouldRequireServerSignature = options.requireServerSignature !== false;
     if (shouldRequireServerSignature && !process.env.BORINGCACHE_REQUIRE_SERVER_SIGNATURE) {
         core.exportVariable('BORINGCACHE_REQUIRE_SERVER_SIGNATURE', '1');
-        core.info('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
+        routineInfo('BORINGCACHE_REQUIRE_SERVER_SIGNATURE=1 (strict server signature verification enabled)');
     }
     const runnerProvided = options.version.trim().toLowerCase() === RUNNER_PROVIDED_VERSION;
     const installedVersion = await availableCliVersion();
@@ -432,21 +433,21 @@ export async function ensureBoringCache(options) {
         version = provided;
     }
     const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-    core.info(`Installing BoringCache CLI ${normalizedVersion}...`);
+    routineInfo(`Installing BoringCache CLI ${normalizedVersion}...`);
     const cacheInfo = getToolCacheInfo(normalizedVersion, options.platform);
     const toolCacheRoot = process.env.RUNNER_TOOL_CACHE || '/opt/hostedtoolcache';
     const cachePaths = [`${toolCacheRoot}/${TOOL_NAME}`];
     const binaryName = platform.isWindows ? 'boringcache.exe' : 'boringcache';
     let toolPath = await verifiedToolCachePath(normalizedVersion, platform, cacheInfo.platformKey, enableVerify, binaryName);
     if (toolPath) {
-        core.info('Using the BoringCache CLI the runner image provides');
+        routineInfo('Using the BoringCache CLI the runner image provides');
     }
     let restoreFailed = false;
     if (!toolPath && !runnerProvided && enableCache) {
         const outcome = await restoreCacheWithOutcome(cachePaths, cacheInfo.cacheKey);
         restoreFailed = outcome.serviceFailed;
         if (outcome.matchedKey) {
-            core.info(`Restored CLI from cache (key: ${outcome.matchedKey})`);
+            routineInfo(`Restored CLI from cache (key: ${outcome.matchedKey})`);
             toolPath = await verifiedToolCachePath(normalizedVersion, platform, cacheInfo.platformKey, enableVerify, binaryName);
         }
     }
@@ -465,7 +466,7 @@ export async function ensureBoringCache(options) {
     }
     const stableToolPath = await exposeBoringCacheCli(toolPath, binaryName, options.stableBinDir || getStableCliBinDir());
     core.addPath(stableToolPath);
-    core.info(`BoringCache CLI ${normalizedVersion} ready`);
+    routineInfo(`BoringCache CLI ${normalizedVersion} ready`);
     return normalizedVersion;
 }
 /**
@@ -480,27 +481,13 @@ export async function ensureBoringCache(options) {
 const SUPPRESSED_RESTORE_FAILURE = /::(?:error|warning)::[^\n]*Failed to restore/;
 async function restoreCacheWithOutcome(paths, key) {
     let serviceFailed = false;
-    const originalWrite = process.stdout.write;
-    const watch = (function (chunk, ...rest) {
-        const text = typeof chunk === 'string'
-            ? chunk
-            : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : '';
-        if (text && SUPPRESSED_RESTORE_FAILURE.test(text)) {
-            serviceFailed = true;
-        }
-        return originalWrite.call(process.stdout, chunk, ...rest);
-    });
-    process.stdout.write = watch;
     try {
-        const matchedKey = await cache.restoreCache(paths, key);
+        const matchedKey = await withToolCacheOutput(() => cache.restoreCache(paths, key), text => { serviceFailed ||= SUPPRESSED_RESTORE_FAILURE.test(text); });
         return { matchedKey: matchedKey ?? undefined, serviceFailed };
     }
     catch (error) {
         core.debug(`Cache restore failed: ${error instanceof Error ? error.message : error}`);
         return { matchedKey: undefined, serviceFailed: true };
-    }
-    finally {
-        process.stdout.write = originalWrite;
     }
 }
 /**
@@ -578,7 +565,7 @@ export async function ensureXcodePlugin(version, verify = true, stableBinDir = g
             + 'or BORINGCACHE_XCODE_PLUGIN_PATH when cli-version is skip.');
     }
     const normalizedVersion = version.startsWith('v') ? version : `v${version}`;
-    core.info(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
+    routineInfo(`Installing the BoringCache Xcode adapter for ${normalizedVersion}...`);
     let downloadedPath;
     try {
         downloadedPath = await downloadReleaseAsset(normalizedVersion, XCODE_PLUGIN_ASSET);
@@ -595,18 +582,37 @@ export async function ensureXcodePlugin(version, verify = true, stableBinDir = g
     await fs.promises.copyFile(downloadedPath, pluginPath);
     await fs.promises.chmod(pluginPath, 0o755);
     core.exportVariable('BORINGCACHE_XCODE_PLUGIN_PATH', pluginPath);
-    core.info('BoringCache Xcode adapter ready');
+    routineInfo('BoringCache Xcode adapter ready');
     return pluginPath;
 }
 export async function execBoringCache(args, options = {}) {
     const isWindows = os.platform() === 'win32';
+    // Toolkit silence also disables child streams; forward them separately so
+    // only its command echo is suppressed. Explicit capture calls stay silent.
+    const executionOptions = options.silent
+        ? { ...options, silent: true }
+        : {
+            ...options,
+            silent: true,
+            listeners: {
+                ...options.listeners,
+                stdout: (data) => {
+                    options.listeners?.stdout?.(data);
+                    (options.outStream ?? process.stdout).write(data);
+                },
+                stderr: (data) => {
+                    options.listeners?.stderr?.(data);
+                    (options.errStream ?? process.stderr).write(data);
+                },
+            },
+        };
     try {
-        return await exec.exec('boringcache', args, options);
+        return await exec.exec('boringcache', args, executionOptions);
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         if (isWindows && msg.includes('Unable to locate executable file')) {
-            return await exec.exec('bash', ['-lc', 'exec "$0" "$@"', 'boringcache', ...args], options);
+            return await exec.exec('bash', ['-lc', 'exec "$0" "$@"', 'boringcache', ...args], executionOptions);
         }
         throw error;
     }

@@ -1,3 +1,4 @@
+import { routineInfo } from './diagnostics';
 import * as core from '@actions/core';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -140,7 +141,7 @@ export async function startWorkloadIdentity() {
         rememberBroker(file);
         await checkWorkloadIdentity();
         core.exportVariable(BROKER_FILE_ENV, file);
-        core.info('Machine connection ready. The CLI will renew it through post-save.');
+        routineInfo('Machine connection ready. The CLI will renew it through post-save.');
     }
     catch (error) {
         fs.rmSync(path.join(directory, 'keepalive'), { force: true });
