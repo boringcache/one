@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.42.1] - 2026-10-15
+
+### Changed
+
+- Install BoringCache CLI `v1.42.1` by default.
+
+- Routine setup, readiness, and skip messages require verbose diagnostics. `diagnostics: auto` forwards CLI verbosity when GitHub step debugging is enabled; post-save keeps the main step's resolved setting.
+- Proxy cache warnings remain visible when routine diagnostics are off. Requested summaries, evidence, outputs, and failure annotations remain available.
+
 ## [1.42.0] - 2026-10-14
 
 ### Changed
@@ -322,7 +331,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.42.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.42.1...HEAD
+[1.42.1]: https://github.com/boringcache/one/compare/v1.42.0...v1.42.1
 [1.42.0]: https://github.com/boringcache/one/compare/v1.41.0...v1.42.0
 [1.41.0]: https://github.com/boringcache/one/compare/v1.40.2...v1.41.0
 [1.40.2]: https://github.com/boringcache/one/compare/v1.40.1...v1.40.2

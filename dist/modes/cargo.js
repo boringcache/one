@@ -1,3 +1,4 @@
+import { routineInfo } from '../core/diagnostics';
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -301,7 +302,7 @@ export async function runCargoSave(options = {}) {
         const changed = publishEvidence.unchanged
             ? 'unchanged, nothing republished'
             : `${publishEvidence.transferred_bytes ?? 0} changed bytes`;
-        core.info(`Cargo publish phase: ${seconds(publishEvidence.phase_duration_ms) ?? '?'}s, `
+        routineInfo(`Cargo publish phase: ${seconds(publishEvidence.phase_duration_ms) ?? '?'}s, `
             + `${publishEvidence.entry_count ?? 0} entries, ${changed}.`);
     }
     await stopProxyFromState();

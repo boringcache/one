@@ -1,3 +1,4 @@
+import { routineInfo } from '../core/diagnostics';
 import { requireMachineConnectionWorkspace } from '../core/plan';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
@@ -321,7 +322,7 @@ export async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {})
         return;
     }
     if (!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0) {
-        core.notice('No cache files to save');
+        routineInfo('No cache files to save');
         return;
     }
     const args = ['save', workspace, `${cacheKey}:${cacheDir}`, '--force'];

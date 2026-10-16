@@ -1,3 +1,4 @@
+import { routineInfo } from './core/diagnostics';
 import * as core from '@actions/core';
 import { transferArtifact } from './core/artifacts';
 import { startWorkloadIdentity, stopWorkloadIdentity } from './core/workload-identity';
@@ -312,7 +313,7 @@ export async function run() {
         saveActionState('generic-cache-workspace', completedPlan.workspace);
         await emitRestoreDiagnostics(completedPlan, inputs, resolvedTags, overallHit, trustState);
         if (!trustDecision.write_allowed) {
-            core.info(`Post step is restore-only (trust-policy: ${inputs.trustPolicy}).`);
+            routineInfo(`Post step is restore-only (trust-policy: ${inputs.trustPolicy}).`);
         }
     }
     catch (error) {

@@ -1,3 +1,4 @@
+import { routineInfo } from '../core/diagnostics';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import { spawn } from 'child_process';
@@ -90,7 +91,7 @@ export async function startSccacheServer(options = {}) {
             throw new Error(`sccache --start-server failed with ${outcome}.`);
         }
         await waitForSccacheServer(options.readinessProbe || (() => probeSccacheServer(address)), options.readyTimeoutMs ?? SCCACHE_READY_TIMEOUT_MS, options.readyPollIntervalMs ?? SCCACHE_READY_POLL_INTERVAL_MS);
-        core.info(`sccache server is ready on ${address.label}`);
+        routineInfo(`sccache server is ready on ${address.label}`);
     }
     catch (error) {
         await stopSccacheAfterFailedStartup(spawnProcess);
@@ -433,10 +434,10 @@ export function ccacheStatsDetail(stats) {
 function reportCompilerCacheStats(tool, tag, statsDetail) {
     const label = tag || '(untagged)';
     if (statsDetail) {
-        core.info(`${tool} proxy stats for ${label}: ${statsDetail}`);
+        routineInfo(`${tool} proxy stats for ${label}: ${statsDetail}`);
         return;
     }
-    core.info(`${tool} proxy stats for ${label} were unavailable: the native tool reported no readable counters.`);
+    routineInfo(`${tool} proxy stats for ${label} were unavailable: the native tool reported no readable counters.`);
 }
 export async function finishCompilerCacheSave(tool, state, stats, statsDetail, options) {
     reportCompilerCacheStats(tool, state.tag, statsDetail);
@@ -450,13 +451,13 @@ export async function finishCompilerCacheSave(tool, state, stats, statsDetail, o
     if (!stats || stats.compileRequests === 0) {
         markModeVerifyTagSkipped(state.tag);
         if (state.kvHit) {
-            core.info(`Skipping ${tool} post-save verification for ${state.tag}: no compile requests were observed.`);
+            routineInfo(`Skipping ${tool} post-save verification for ${state.tag}: no compile requests were observed.`);
         }
         else if (state.cacheEntryHit) {
-            core.info(`Skipping ${tool} post-save verification for ${state.tag}: signed cache entry existed, but no compile requests were observed.`);
+            routineInfo(`Skipping ${tool} post-save verification for ${state.tag}: signed cache entry existed, but no compile requests were observed.`);
         }
         else {
-            core.info(`Skipping ${tool} save for ${state.tag}: no compile requests were observed.`);
+            routineInfo(`Skipping ${tool} save for ${state.tag}: no compile requests were observed.`);
         }
         return;
     }
@@ -471,7 +472,7 @@ export async function finishCompilerCacheSave(tool, state, stats, statsDetail, o
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests even though direct KV rows existed for '${state.tag}' before startup. Check ${tool} key churn, emitted tag semantics, and proxy read logs.`);
     }
     else if (state.cacheEntryHit && postShutdownStatus.kvHit) {
-        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
+        routineInfo(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent; the run populated the proxy KV cache for future runs.`);
     }
     else if (state.cacheEntryHit && state.kvChecked && postShutdownStatus.kvChecked) {
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but direct KV rows were absent and still were not visible after shutdown. Check proxy KV publish logs and save token scope.`);
@@ -480,13 +481,13 @@ export async function finishCompilerCacheSave(tool, state, stats, statsDetail, o
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests for '${state.tag}'. A signed cache entry existed before startup, but this CLI/API did not report direct KV row visibility. Check boringcache/one cli-version alignment and proxy read/write logs.`);
     }
     else if (postShutdownStatus.kvHit) {
-        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests, but '${state.tag}' published successfully. This looks like a cold fill.`);
+        routineInfo(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests, but '${state.tag}' published successfully. This looks like a cold fill.`);
     }
     else if (postShutdownStatus.cacheEntryHit) {
         core.warning(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' had a signed cache entry after shutdown, but direct KV rows were not visible. Check boringcache/one cli-version alignment and proxy KV publish logs.`);
     }
     else {
-        core.notice(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
+        routineInfo(`${tool} proxy saw 0 cache hits across ${stats.compileRequests} compile requests and '${state.tag}' was not reported as direct KV rows during post-shutdown verification. This usually means a cold fill; check proxy publish logs if the next run also misses.`);
     }
 }
 export async function runCcacheRestore(plan, inputs) {

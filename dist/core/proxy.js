@@ -1,3 +1,4 @@
+import { readLogTail, routineInfo, MAX_DIAGNOSTICS_LOG_LINES } from './diagnostics';
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -6,7 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { getAuthTokens, hasBrokeredWorkloadIdentity, missingRestoreTokenMessage, missingSaveTokenMessage, missingStageTokenMessage, } from './auth';
-import { cacheStorageFullSkip } from './evidence';
+import { readProxyFailures } from './proxy-log';
 export const DEFAULT_PROXY_PORT = 22243;
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS = 7455;
@@ -79,10 +80,25 @@ function proxyLogPath(port) {
 }
 function readProxyLogs(port) {
     try {
-        return fs.readFileSync(proxyLogPath(port), 'utf-8').trim();
+        return readLogTail(proxyLogPath(port), MAX_DIAGNOSTICS_LOG_LINES).join('\n');
     }
     catch {
         return '';
+    }
+}
+function reportProxyExit(port) {
+    if (!port) {
+        return;
+    }
+    const { failure, warnings, storageFullSkip } = readProxyFailures(proxyLogPath(port));
+    if (failure) {
+        throw new Error(`BoringCache proxy shutdown failed: ${failure}`);
+    }
+    for (const warning of warnings) {
+        core.warning(warning);
+    }
+    if (storageFullSkip && !warnings.some(line => line.includes(storageFullSkip))) {
+        core.warning(storageFullSkip);
     }
 }
 function proxyProbeHost(host) {
@@ -135,7 +151,7 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
     while (Date.now() - start < timeoutMs) {
         if (fs.existsSync(readyFile)) {
             const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-            core.info(`BoringCache proxy is ready (${elapsed}s)`);
+            routineInfo(`BoringCache proxy is ready (${elapsed}s)`);
             let reportedBudgetSecs = null;
             try {
                 reportedBudgetSecs = parseProxyReadyMarker(fs.readFileSync(readyFile, 'utf8').trim());
@@ -152,7 +168,7 @@ async function waitForProxyReadyFile(readyFile, timeoutMs = PROXY_READY_TIMEOUT_
         }
         const elapsed = Date.now() - start;
         if (elapsed - lastLogAt >= PROXY_READY_WARN_INTERVAL_MS) {
-            core.info(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
+            routineInfo(`Waiting for proxy readiness... (${(elapsed / 1000).toFixed(0)}s)`);
             lastLogAt = elapsed;
         }
         await new Promise((resolve) => setTimeout(resolve, PROXY_READY_POLL_INTERVAL_MS));
@@ -236,7 +252,7 @@ export async function startRegistryProxy(options) {
         effectiveReadOnly = true;
         effectiveStage = false;
         authToken = restoreToken;
-        core.info(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
+        routineInfo(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
     }
     if (!brokeredWorkloadIdentity && !authToken) {
         if (effectiveReadOnly) {
@@ -327,7 +343,7 @@ export async function startRegistryProxy(options) {
     if (options.verbose) {
         args.push('--verbose');
     }
-    core.info(`Starting BoringCache proxy on ${host}:${options.port}...`);
+    routineInfo(`Starting BoringCache proxy on ${host}:${options.port}...`);
     const logFile = proxyLogPath(options.port);
     const logFd = fs.openSync(logFile, 'w');
     const child = spawn('boringcache', args, {
@@ -342,7 +358,7 @@ export async function startRegistryProxy(options) {
     if (!child.pid) {
         throw new Error('Failed to start BoringCache proxy');
     }
-    core.info(`BoringCache proxy started (PID: ${child.pid})`);
+    routineInfo(`BoringCache proxy started (PID: ${child.pid})`);
     const handle = { pid: child.pid, port: options.port, readOnly: effectiveReadOnly };
     try {
         const reportedBudgetSecs = await waitForProxyReadyFile(readyFile, PROXY_READY_TIMEOUT_MS, options.port, child.pid);
@@ -368,17 +384,18 @@ export async function startRegistryProxy(options) {
  */
 export async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTimeoutMs()) {
     if (pid <= 0) {
-        core.info('No proxy PID to stop (was reused from another invocation)');
+        routineInfo('No proxy PID to stop (was reused from another invocation)');
         return;
     }
-    core.info(`Stopping BoringCache proxy (PID: ${pid})...`);
+    routineInfo(`Stopping BoringCache proxy (PID: ${pid})...`);
     try {
         process.kill(pid, 'SIGTERM');
     }
     catch (err) {
         const code = err.code;
         if (code === 'ESRCH') {
-            core.info(`BoringCache proxy (PID: ${pid}) already exited`);
+            reportProxyExit(port);
+            routineInfo(`BoringCache proxy (PID: ${pid}) already exited`);
             return;
         }
         core.warning(`Failed to send SIGTERM to BoringCache proxy: ${err.message}`);
@@ -391,21 +408,8 @@ export async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTime
     let warnedSlow = false;
     while (Date.now() - start < stopTimeoutMs) {
         if (!isProcessAlive(pid)) {
-            if (port) {
-                const logs = readProxyLogs(port);
-                const shutdownTimeout = logs.match(/Shutdown: flush timeout reached[^\n]*/i);
-                const checkpointTimeout = logs.match(/Shutdown: checkpoint promotion timeout reached[^\n]*/i);
-                const shutdownError = logs.match(/Error:\s+[^\n]*(pending entries|checkpoint|cache publish)[^\n]*/i);
-                const failure = shutdownTimeout || checkpointTimeout || shutdownError;
-                if (failure) {
-                    throw new Error(`BoringCache proxy shutdown failed: ${failure[0]}`);
-                }
-                const storageFullSkip = cacheStorageFullSkip(logs);
-                if (storageFullSkip) {
-                    core.warning(storageFullSkip);
-                }
-            }
-            core.info(`BoringCache proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
+            reportProxyExit(port);
+            routineInfo(`BoringCache proxy exited gracefully after ${Math.round((Date.now() - start) / 1000)}s`);
             return;
         }
         const now = Date.now();
@@ -414,7 +418,7 @@ export async function stopRegistryProxy(pid, port, stopTimeoutMs = proxyStopTime
             core.warning(`BoringCache proxy (PID: ${pid}) is still flushing after ${Math.round((now - start) / 1000)}s; it will be force-stopped at the ${Math.round(stopTimeoutMs / 1000)}s shutdown budget`);
         }
         if (now - lastLog >= logInterval) {
-            core.info(`Waiting for BoringCache proxy to flush and exit... (${Math.round((now - start) / 1000)}s of ${Math.round(stopTimeoutMs / 1000)}s shutdown budget)`);
+            routineInfo(`Waiting for BoringCache proxy to flush and exit... (${Math.round((now - start) / 1000)}s of ${Math.round(stopTimeoutMs / 1000)}s shutdown budget)`);
             lastLog = now;
         }
         await new Promise(resolve => setTimeout(resolve, pollInterval));
