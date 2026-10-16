@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.42.2] - 2026-10-16
+
+### Changed
+
+- Install BoringCache CLI `v1.42.2` by default, fixing Docker cache blob reuse and alias publication when producer tracking is enabled.
+
 ## [1.42.1] - 2026-10-15
 
 ### Changed
@@ -331,7 +337,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.42.1...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.42.2...HEAD
+[1.42.2]: https://github.com/boringcache/one/compare/v1.42.1...v1.42.2
 [1.42.1]: https://github.com/boringcache/one/compare/v1.42.0...v1.42.1
 [1.42.0]: https://github.com/boringcache/one/compare/v1.41.0...v1.42.0
 [1.41.0]: https://github.com/boringcache/one/compare/v1.40.2...v1.41.0

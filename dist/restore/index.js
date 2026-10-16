@@ -107373,7 +107373,7 @@ function getInputs() {
     const diagnosticsLogLines = normalizeDiagnosticsLogLines('40');
     const resolvedDiagnostics = loadDiagnosticsConfig({ diagnostics, diagnosticsLogLines });
     return {
-        cliVersion: getInput('cli-version') || 'v1.42.1',
+        cliVersion: getInput('cli-version') || 'v1.42.2',
         cliPlatform: getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
