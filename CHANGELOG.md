@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.43.0] - 2026-10-18
+
+### Changed
+
+- Install BoringCache CLI `v1.43.0` by default, with parallel archive extraction, verified reuse of unchanged restored archives, and compiler-cache warming for new keys.
+
 ## [1.42.2] - 2026-10-16
 
 ### Changed
@@ -337,7 +343,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.42.2...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.43.0...HEAD
+[1.43.0]: https://github.com/boringcache/one/compare/v1.42.2...v1.43.0
 [1.42.2]: https://github.com/boringcache/one/compare/v1.42.1...v1.42.2
 [1.42.1]: https://github.com/boringcache/one/compare/v1.42.0...v1.42.1
 [1.42.0]: https://github.com/boringcache/one/compare/v1.41.0...v1.42.0
