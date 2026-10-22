@@ -22,7 +22,7 @@ export function getInputs() {
     const diagnosticsLogLines = normalizeDiagnosticsLogLines('40');
     const resolvedDiagnostics = loadDiagnosticsConfig({ diagnostics, diagnosticsLogLines });
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.43.2',
+        cliVersion: core.getInput('cli-version') || 'v1.43.3',
         cliPlatform: core.getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),

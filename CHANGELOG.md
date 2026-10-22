@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.43.3] - 2026-10-22
+
+### Changed
+
+- Install BoringCache CLI `v1.43.3` by default, with compromised eMudhra certificate paths rejected, archive reuse and staging fixes, and corrected Windows missing-path diagnostics.
+
 ## [1.43.2] - 2026-10-19
 
 ### Changed
@@ -355,7 +361,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.43.2...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.43.3...HEAD
+[1.43.3]: https://github.com/boringcache/one/compare/v1.43.2...v1.43.3
 [1.43.2]: https://github.com/boringcache/one/compare/v1.43.1...v1.43.2
 [1.43.1]: https://github.com/boringcache/one/compare/v1.43.0...v1.43.1
 [1.43.0]: https://github.com/boringcache/one/compare/v1.42.2...v1.43.0
