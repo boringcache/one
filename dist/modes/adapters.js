@@ -5,35 +5,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { startRegistryProxy, } from '../core';
 import { resolveWorkingPath } from '../core/input-values';
-import { actionProxyOptions, adapterVerificationSpecs, applyAdapterSetupPlan, captureCommand, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, execBoringCache, exportEnvVars, getModeState, getModeStateBoolean, prependExistingNixConfig, planningReadOnly, requireAdapterSetupPlan, requireSetupDirectory, requireSetupFilePath, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxy, } from './shared';
+import { actionProxyOptions, adapterVerificationSpecs, applyAdapterSetupPlan, captureCommand, checkDirectCacheProxyTagStatus, plannedCacheCheck, directCachePreflightEvidence, execBoringCache, exportEnvVars, getModeState, getModeStateBoolean, planningReadOnly, requireAdapterSetupPlan, requireSetupDirectory, requireSetupFilePath, resolveAdapterCliPlan, resolvePreferredPort, plannedProxyEnv, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxy, } from './shared';
 export async function shutdownBazelServer() {
     await exec.exec('bazel', ['shutdown'], {
         ignoreReturnCode: true,
         silent: true,
     });
-}
-export function turboEnvForStartedProxy(plan, actualPort) {
-    const envVars = {};
-    for (const [key, value] of Object.entries(plan.env_vars || {})) {
-        envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
-    }
-    const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
-    envVars.TURBO_API = `http://${endpointHost}:${actualPort}`;
-    envVars.TURBO_TOKEN = envVars.TURBO_TOKEN || 'boringcache';
-    envVars.TURBO_TEAM = envVars.TURBO_TEAM || 'boringcache';
-    envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
-    return envVars;
-}
-export function nxEnvForStartedProxy(plan, actualPort) {
-    const envVars = {};
-    for (const [key, value] of Object.entries(plan.env_vars || {})) {
-        envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
-    }
-    const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
-    envVars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER = `http://${endpointHost}:${actualPort}`;
-    envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN = envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || 'boringcache';
-    envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
-    return envVars;
 }
 export async function runBazelRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
@@ -48,8 +25,6 @@ export async function runBazelRestore(plan, inputs) {
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
@@ -63,23 +38,6 @@ export async function runBazelRestore(plan, inputs) {
         verificationSpecs: adapterVerificationSpecs(proxyPlan),
     };
 }
-export function configureGoProxyEnv(gocacheprog) {
-    core.exportVariable('GOCACHEPROG', gocacheprog);
-}
-export function goCacheProgForProxy(proxyPlan, port) {
-    const endpoint = `http://${proxyPlan.proxy.endpoint_host}:${port}`;
-    const planned = proxyPlan.env_vars?.GOCACHEPROG?.trim();
-    if (!planned) {
-        return `boringcache go-cacheprog --endpoint ${endpoint}`;
-    }
-    if (planned.includes('--endpoint=')) {
-        return planned.replace(/--endpoint=\S+/, `--endpoint=${endpoint}`);
-    }
-    if (planned.includes('--endpoint')) {
-        return planned.replace(/--endpoint\s+\S+/, `--endpoint ${endpoint}`);
-    }
-    return `${planned} --endpoint ${endpoint}`;
-}
 export async function runGoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
@@ -88,10 +46,7 @@ export async function runGoRestore(plan, inputs) {
     }
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
-    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     saveModeState('proxy-pid', '');
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
@@ -99,14 +54,12 @@ export async function runGoRestore(plan, inputs) {
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(proxyPlan, proxy.port));
     setProxyOutputs(proxy.port);
     return {
         workspace,
@@ -135,18 +88,13 @@ export async function runGradleRestore(plan, inputs) {
         ...setup.env_vars,
         GRADLE_USER_HOME: path.dirname(path.dirname(initScript)),
     };
-    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
@@ -168,18 +116,13 @@ export async function runMavenRestore(plan, inputs) {
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
-    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
@@ -247,7 +190,6 @@ export async function runNixRestore(plan, inputs) {
         failOnCacheError: inputs.failOnCacheError,
     });
     const setup = requireAdapterSetupPlan('nix', proxyPlan.setup);
-    prependExistingNixConfig(setup);
     const socketPath = proxyPlan.proxy.nix_hook_socket?.trim() || '';
     if (!proxyPlan.proxy.read_only && !socketPath) {
         throw new Error('boringcache nix setup plan did not include its upload socket');
@@ -258,11 +200,8 @@ export async function runNixRestore(plan, inputs) {
         tag: proxyPlan.tag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-        nixHookSocket: socketPath || undefined,
     }, proxyPlan.proxy, inputs.failOnCacheError));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
@@ -302,14 +241,8 @@ export async function runXcodeRestore(plan, inputs) {
         tag: proxyPlan.tag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-        xcodeSocket: socketPath,
-        xcodeUpstreamPlugin: upstreamPlugin,
-        xcodeCasPath: casPath,
-        xcodeEvidenceJson: evidencePath,
     }, proxyPlan.proxy, inputs.failOnCacheError));
     saveModeState('proxy-pid', String(proxy.pid));
     saveModeState('xcode-evidence-json', evidencePath);
@@ -336,14 +269,11 @@ export async function runTurboProxyRestore(plan, inputs) {
     const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, planningReadOnly(inputs), {});
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
-    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: turboPlan.proxy.no_platform,
-        noGit: turboPlan.proxy.no_git,
-    });
+    const preflight = await checkDirectCacheProxyTagStatus(plannedCacheCheck(turboPlan));
     const proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(turboPlan, proxy.port));
     setProxyOutputs(proxy.port);
     return {
         workspace,
@@ -358,14 +288,11 @@ export async function runNxProxyRestore(plan, inputs) {
     const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, planningReadOnly(inputs), {});
     const workspace = nxPlan.workspace;
     const cacheTag = nxPlan.tag;
-    const preflight = await checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: nxPlan.proxy.no_platform,
-        noGit: nxPlan.proxy.no_git,
-    });
+    const preflight = await checkDirectCacheProxyTagStatus(plannedCacheCheck(nxPlan));
     const proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(nxPlan, proxy.port));
     setProxyOutputs(proxy.port);
     return {
         workspace,

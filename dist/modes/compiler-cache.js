@@ -8,7 +8,7 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { compilerCacheObservation, hasSaveCredential, missingSaveTokenMessage, recordCompilerCacheObservation, startRegistryProxy, stopRegistryProxy, } from '../core';
-import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, directCachePreflightEvidence, exportEnvVars, getModeState, markModeVerifyTagSkipped, planningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, rewritePlannedProxyPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
+import { actionProxyOptions, adapterVerificationSpecs, checkDirectCacheProxyTagStatus, plannedCacheCheck, directCachePreflightEvidence, exportEnvVars, getModeState, markModeVerifyTagSkipped, planningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, plannedProxyEnv, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
 const SCCACHE_DEFAULT_SERVER_PORT = 4226;
 const SCCACHE_START_TIMEOUT_MS = 15_000;
 const SCCACHE_READY_TIMEOUT_MS = 5_000;
@@ -358,43 +358,22 @@ export async function stopCcacheStorageHelpers(statsLog, statsDirectory) {
     }
     return summary;
 }
-export function compilerCacheEnvForStartedProxy(plan, actualPort) {
-    const envVars = {};
-    for (const [key, value] of Object.entries(plan.env_vars || {})) {
-        envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
-    }
-    envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
-    return envVars;
-}
-export function sccacheEnvForStartedProxy(plan, actualPort) {
-    const envVars = compilerCacheEnvForStartedProxy(plan, actualPort);
-    envVars.SCCACHE_IDLE_TIMEOUT = process.env.SCCACHE_IDLE_TIMEOUT
-        || envVars.SCCACHE_IDLE_TIMEOUT
-        || '0';
-    return envVars;
-}
 export async function startCompilerCacheProxy(adapter, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
-    const preflight = await checkDirectCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace: proxyPlan.workspace,
         tag: proxyPlan.tag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy, inputs.failOnCacheError));
+    saveModeState(`${adapter}-check-args`, JSON.stringify(plannedCacheCheck(proxyPlan)));
     saveModeState('workspace', proxyPlan.workspace);
     saveModeState(`${adapter}-tag`, proxyPlan.tag);
-    saveModeState(`${adapter}-no-platform`, String(proxyPlan.proxy.no_platform));
-    saveModeState(`${adapter}-no-git`, String(proxyPlan.proxy.no_git));
     saveModeState(`${adapter}-preflight-cache-entry-hit`, String(preflight.cacheEntryHit));
     saveModeState(`${adapter}-preflight-kv-hit`, String(preflight.kvHit));
     saveModeState(`${adapter}-preflight-kv-checked`, String(preflight.kvChecked));
@@ -406,10 +385,9 @@ export async function startCompilerCacheProxy(adapter, plan, inputs) {
 }
 export function compilerCacheModeState(tool) {
     return {
+        checkArgs: JSON.parse(getModeState(`${tool}-check-args`) || '[]'),
         workspace: getModeState('workspace'),
         tag: getModeState(`${tool}-tag`),
-        noPlatform: getModeState(`${tool}-no-platform`) === 'true',
-        noGit: getModeState(`${tool}-no-git`) === 'true',
         hit: getModeState(`${tool}-preflight-kv-hit`) === 'true',
         cacheEntryHit: getModeState(`${tool}-preflight-cache-entry-hit`) === 'true',
         kvHit: getModeState(`${tool}-preflight-kv-hit`) === 'true',
@@ -461,10 +439,7 @@ export async function finishCompilerCacheSave(tool, state, stats, statsDetail, o
         }
         return;
     }
-    const postShutdownStatus = await checkDirectCacheProxyTagStatus(state.workspace, state.tag, {
-        noPlatform: state.noPlatform,
-        noGit: state.noGit,
-    });
+    const postShutdownStatus = await checkDirectCacheProxyTagStatus(state.checkArgs);
     if (stats.cacheHits > 0) {
         return;
     }
@@ -495,7 +470,7 @@ export async function runCcacheRestore(plan, inputs) {
     const statsLog = path.join(statsDirectory, 'stats.log');
     try {
         const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('ccache', plan, inputs);
-        const envVars = compilerCacheEnvForStartedProxy(proxyPlan, proxy.port);
+        const envVars = plannedProxyEnv(proxyPlan, proxy.port);
         envVars.CCACHE_STATSLOG = statsLog;
         exportEnvVars(envVars);
         saveModeState('ccache-stats-directory', statsDirectory);
@@ -526,7 +501,7 @@ export async function runCcacheSave(options = {}) {
 }
 export async function runSccacheRestore(plan, inputs) {
     const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('sccache', plan, inputs);
-    exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(proxyPlan, proxy.port));
     try {
         await sccacheServerLifecycle.start();
     }

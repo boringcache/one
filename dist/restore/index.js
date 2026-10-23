@@ -42706,6 +42706,49 @@ function readLogTail(filePath, maxLines) {
     }
 }
 
+;// CONCATENATED MODULE: ./dist/core/auth.js
+const CI_BROKER_FILE_ENV = 'BORINGCACHE_CI_BROKER_FILE';
+function getAuthTokens() {
+    const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || undefined;
+    const stageToken = process.env.BORINGCACHE_STAGE_TOKEN || saveToken;
+    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || stageToken;
+    return {
+        restoreToken,
+        stageToken,
+        saveToken,
+    };
+}
+function hasRestoreToken() {
+    return Boolean(getAuthTokens().restoreToken);
+}
+function hasSaveToken() {
+    return Boolean(getAuthTokens().saveToken);
+}
+function hasStageToken() {
+    return Boolean(getAuthTokens().stageToken);
+}
+function hasBrokeredWorkloadIdentity() {
+    return Boolean(process.env[CI_BROKER_FILE_ENV]?.trim());
+}
+function hasRestoreCredential() {
+    return hasBrokeredWorkloadIdentity() || hasRestoreToken();
+}
+function hasStageCredential() {
+    return hasBrokeredWorkloadIdentity() || hasStageToken();
+}
+function auth_hasSaveCredential() {
+    return hasBrokeredWorkloadIdentity() || hasSaveToken();
+}
+function missingRestoreTokenMessage() {
+    return 'A Machine connection or restore-capable token is required. For GitHub OIDC, approve this repository through Connect CI and grant the job id-token: write. For scoped credentials, set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
+}
+function auth_missingSaveTokenMessage() {
+    return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN.';
+}
+function missingStageTokenMessage() {
+    return 'A stage-capable token is required. Set BORINGCACHE_STAGE_TOKEN or BORINGCACHE_SAVE_TOKEN.';
+}
+
 // EXTERNAL MODULE: ./node_modules/semver/index.js
 var node_modules_semver = __nccwpck_require__(2088);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/lib/manifest.js
@@ -100396,6 +100439,235 @@ async function setup_execBoringCache(args, options = {}) {
     }
 }
 
+;// CONCATENATED MODULE: ./dist/core/tags.js
+function requireCliVerificationTags(tags, adapter) {
+    if (!Array.isArray(tags) || tags.some((tag) => typeof tag !== 'string' || !tag.trim())) {
+        throw new Error(`The selected BoringCache CLI did not return exact verification tags for ${adapter}. `
+            + 'Use a CLI release that supports the current boringcache/one plan contract.');
+    }
+    return Array.from(new Set(tags));
+}
+function resolveVerificationTags(specs) {
+    return Array.from(new Set(specs.map((spec) => spec.tag)));
+}
+
+;// CONCATENATED MODULE: ./dist/modes.js
+function normalizeMode(value) {
+    const normalized = (value || 'archive').trim().toLowerCase();
+    switch (normalized) {
+        case 'archive':
+        case 'artifact':
+        case 'docker':
+        case 'buildkit':
+        case 'bazel':
+        case 'bazel-reapi':
+        case 'moon':
+        case 'pants':
+        case 'buck2':
+        case 'sbt':
+        case 'cargo':
+        case 'ccache':
+        case 'go':
+        case 'gradle':
+        case 'gha':
+        case 'maven':
+        case 'nix':
+        case 'nx':
+        case 'sccache':
+        case 'turbo':
+        case 'xcode':
+            return normalized;
+        default:
+            throw new Error(`Unsupported mode "${value}". Expected archive, artifact, docker, buildkit, bazel, bazel-reapi, moon, pants, buck2, sbt, cargo, ccache, gha, go, gradle, maven, nix, nx, sccache, turbo, or xcode.`);
+    }
+}
+function resolveModeSpec(mode) {
+    return { requested: mode, resolved: mode };
+}
+
+;// CONCATENATED MODULE: ./dist/core/plan.js
+
+
+
+
+
+
+function splitEntriesInput(entries) {
+    const values = [];
+    let current = '';
+    for (let index = 0; index < entries.length; index += 1) {
+        const character = entries[index];
+        if (character === '\\' && entries[index + 1] === ',') {
+            current += ',';
+            index += 1;
+        }
+        else if (character === ',' || character === '\n') {
+            values.push(current);
+            current = '';
+        }
+        else if (character !== '\r') {
+            current += character;
+        }
+    }
+    values.push(current);
+    return values.filter((entry) => entry.trim());
+}
+function parseCliVersion(version) {
+    const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    if (!match) {
+        return null;
+    }
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+async function resolveCliCapabilityVersion(version) {
+    const requestedVersion = version.trim();
+    if (requestedVersion.toLowerCase() === 'skip' || parseCliVersion(requestedVersion)) {
+        return requestedVersion;
+    }
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await setup_execBoringCache(['--version'], {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    const output = `${stdout}\n${stderr}`;
+    const match = output.match(/\bboringcache\s+v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/i);
+    if (exitCode !== 0 || !match) {
+        throw new Error(`Unable to determine installed BoringCache CLI capabilities for cli-version '${requestedVersion || '(empty)'}'. `
+            + `Expected 'boringcache --version' to report a semantic version, but it exited ${exitCode}`
+            + `${output.trim() ? `: ${output.trim()}` : '.'}`);
+    }
+    return match[1];
+}
+function archiveRunArgs(profiles, policy) {
+    const args = ['run'];
+    for (const profile of profiles) {
+        args.push('--profile', profile);
+    }
+    if (policy.stage) {
+        args.push('--stage');
+    }
+    else {
+        args.push(policy.readOnly ? '--read-only' : '--write');
+    }
+    return args;
+}
+async function runDryRunPlan(workingDirectory, profiles, policy) {
+    const executePlan = async () => {
+        const args = [...archiveRunArgs(profiles, policy), '--dry-run', '--json'];
+        let stdout = '';
+        let stderr = '';
+        const exitCode = await exec_exec('boringcache', args, {
+            cwd: workingDirectory,
+            ignoreReturnCode: true,
+            silent: true,
+            listeners: {
+                stdout: (data) => {
+                    stdout += data.toString();
+                },
+                stderr: (data) => {
+                    stderr += data.toString();
+                },
+            },
+        });
+        if (exitCode !== 0) {
+            throw new Error(stderr.trim() || stdout.trim() || `boringcache run --dry-run --json exited with code ${exitCode}`);
+        }
+        try {
+            return JSON.parse(stdout);
+        }
+        catch (error) {
+            throw new Error(`Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    };
+    return executePlan();
+}
+function requireMachineConnectionWorkspace(plan) {
+    if (hasBrokeredWorkloadIdentity() && (!plan.workspace?.trim() || plan.workspace_source !== 'machine-connection')) {
+        throw new Error('The BoringCache CLI plan did not resolve the Machine connection workspace. Update the CLI and runner supervisor to versions that support the approved binding workspace.');
+    }
+}
+async function buildArchiveEntries(inputs) {
+    const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
+    if (cacheProfiles.length === 0) {
+        return {
+            entries: '',
+            profiles: [],
+            envVars: {},
+            verificationTags: [],
+        };
+    }
+    const plan = await runDryRunPlan(inputs.workingDirectory, cacheProfiles, inputs);
+    requireMachineConnectionWorkspace(plan);
+    const firstEntry = plan.archive_entries?.[0];
+    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag;
+    const verificationTags = requireCliVerificationTags(plan.verification_tags, 'archive');
+    if (plan.tag_path_pairs.length > 0 && verificationTags.length === 0) {
+        throw new Error('The selected BoringCache CLI returned archive entries without exact verification tags.');
+    }
+    if (plan.tag_path_pairs.length > 0
+        && !['restore', 'save'].every((phase) => plan.archive_phases?.includes(phase))) {
+        throw new Error('The selected BoringCache CLI does not run archive restore and save phases. '
+            + 'Remove the cli-version pin or select a CLI release that supports `boringcache run --phase`.');
+    }
+    return {
+        entries: plan.tag_path_pairs.join('\n'),
+        profiles: cacheProfiles,
+        envVars: plan.env_vars,
+        cacheTagPrefix,
+        workspace: plan.workspace,
+        verificationTags,
+    };
+}
+function validateOneInputs(modeSpec, archiveEntries) {
+    if (modeSpec.resolved === 'archive' && !archiveEntries) {
+        throw new Error('Archive mode requires cache-profiles from the committed .boringcache.toml plan.');
+    }
+    if (modeSpec.resolved !== 'archive' && archiveEntries) {
+        throw new Error(`cache-profiles belongs to mode=archive; use a separate archive Action step before mode=${modeSpec.resolved}.`);
+    }
+}
+async function buildPlan(inputs) {
+    const modeSpec = resolveModeSpec(inputs.mode);
+    const archiveEntries = await buildArchiveEntries(inputs);
+    validateOneInputs(modeSpec, archiveEntries.entries);
+    const workspace = archiveEntries.workspace || '';
+    if (!workspace && modeSpec.resolved === 'archive') {
+        throw new Error('The BoringCache CLI plan did not resolve a workspace. Set workspace in .boringcache.toml.');
+    }
+    const cacheTagPrefix = getCacheTagPrefix(archiveEntries.cacheTagPrefix);
+    return {
+        workspace,
+        workingDirectory: inputs.workingDirectory,
+        mode: modeSpec.resolved,
+        modeSpec,
+        cacheTagPrefix,
+        envVars: archiveEntries.envVars,
+        archiveEntries: archiveEntries.entries,
+        archiveProfiles: archiveEntries.profiles,
+        archiveVerificationTags: archiveEntries.verificationTags,
+    };
+}
+function getCacheTagPrefix(resolvedArchivePrefix) {
+    if (resolvedArchivePrefix?.trim()) {
+        return resolvedArchivePrefix.trim();
+    }
+    return 'one';
+}
+async function applyCliPlanEnv(plan) {
+    for (const [key, value] of Object.entries(plan.envVars)) {
+        exportVariable(key, value);
+    }
+}
+
 ;// CONCATENATED MODULE: ./dist/core/artifacts.js
 
 
@@ -100565,49 +100837,6 @@ async function transferArtifact(inputs) {
 
 ;// CONCATENATED MODULE: external "timers/promises"
 const promises_namespaceObject = require("timers/promises");
-;// CONCATENATED MODULE: ./dist/core/auth.js
-const CI_BROKER_FILE_ENV = 'BORINGCACHE_CI_BROKER_FILE';
-function getAuthTokens() {
-    const saveToken = process.env.BORINGCACHE_SAVE_TOKEN || undefined;
-    const stageToken = process.env.BORINGCACHE_STAGE_TOKEN || saveToken;
-    const restoreToken = process.env.BORINGCACHE_RESTORE_TOKEN || stageToken;
-    return {
-        restoreToken,
-        stageToken,
-        saveToken,
-    };
-}
-function hasRestoreToken() {
-    return Boolean(getAuthTokens().restoreToken);
-}
-function hasSaveToken() {
-    return Boolean(getAuthTokens().saveToken);
-}
-function hasStageToken() {
-    return Boolean(getAuthTokens().stageToken);
-}
-function hasBrokeredWorkloadIdentity() {
-    return Boolean(process.env[CI_BROKER_FILE_ENV]?.trim());
-}
-function hasRestoreCredential() {
-    return hasBrokeredWorkloadIdentity() || hasRestoreToken();
-}
-function hasStageCredential() {
-    return hasBrokeredWorkloadIdentity() || hasStageToken();
-}
-function auth_hasSaveCredential() {
-    return hasBrokeredWorkloadIdentity() || hasSaveToken();
-}
-function missingRestoreTokenMessage() {
-    return 'A Machine connection or restore-capable token is required. For GitHub OIDC, approve this repository through Connect CI and grant the job id-token: write. For scoped credentials, set BORINGCACHE_RESTORE_TOKEN, BORINGCACHE_STAGE_TOKEN, or BORINGCACHE_SAVE_TOKEN.';
-}
-function auth_missingSaveTokenMessage() {
-    return 'A save-capable token is required. Set BORINGCACHE_SAVE_TOKEN.';
-}
-function missingStageTokenMessage() {
-    return 'A stage-capable token is required. Set BORINGCACHE_STAGE_TOKEN or BORINGCACHE_SAVE_TOKEN.';
-}
-
 ;// CONCATENATED MODULE: ./dist/core/workload-identity.js
 
 
@@ -100815,54 +101044,6 @@ async function stopWorkloadIdentity() {
         delete process.env[BROKER_FILE_ENV];
         exportVariable(BROKER_FILE_ENV, '');
     }
-}
-
-;// CONCATENATED MODULE: ./dist/core/inputs.js
-function parseEntries(entriesInput, _action, options = {}) {
-    const separatorMode = options.separatorMode ?? 'newline';
-    const entrySpecs = [];
-    let current = '';
-    for (let index = 0; index < entriesInput.length; index += 1) {
-        const character = entriesInput[index];
-        if (character === '\n' && separatorMode !== 'single') {
-            entrySpecs.push(current);
-            current = '';
-        }
-        else if (character !== '\r') {
-            current += character;
-        }
-    }
-    entrySpecs.push(current);
-    return entrySpecs
-        .filter(entry => entry.trim())
-        .map(entry => {
-        const colonIndex = entry.indexOf(':');
-        if (colonIndex === -1) {
-            throw new Error(`Invalid entry format: ${entry}. Expected format: tag:path or tag:restore_path=>save_path`);
-        }
-        const tag = entry.substring(0, colonIndex).trim();
-        const rawPathSpec = entry.substring(colonIndex + 1);
-        const pathSpec = rawPathSpec;
-        if (!tag) {
-            throw new Error(`Invalid entry format: ${entry}. Tag cannot be empty`);
-        }
-        if (!pathSpec.trim()) {
-            throw new Error(`Invalid entry format: ${entry}. Path cannot be empty`);
-        }
-        let restorePathInput = pathSpec;
-        let savePathInput = pathSpec;
-        const redirectIndex = pathSpec.indexOf('=>');
-        if (redirectIndex !== -1) {
-            const rawRestorePath = pathSpec.substring(0, redirectIndex);
-            const rawSavePath = pathSpec.substring(redirectIndex + 2);
-            restorePathInput = rawRestorePath;
-            savePathInput = rawSavePath;
-            if (!restorePathInput.trim() || !savePathInput.trim()) {
-                throw new Error(`Invalid entry format: ${entry}. Expected restore and save paths when using => syntax`);
-            }
-        }
-        return { tag, restorePath: restorePathInput, savePath: savePathInput };
-    });
 }
 
 // EXTERNAL MODULE: external "net"
@@ -101248,7 +101429,6 @@ function readProxyFailures(filePath) {
 
 
 
-
 const DEFAULT_PROXY_PORT = 22243;
 const PROXY_READY_TIMEOUT_MS = 300000;
 const PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS = 7455;
@@ -101258,7 +101438,6 @@ const PROXY_STOP_KILL_GRACE_MS = 5000;
 const PROXY_VERIFICATION_STOP_TIMEOUT_MS = 60000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
-const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function envSeconds(name) {
     const raw = process.env[name];
     if (!raw) {
@@ -101278,22 +101457,6 @@ function proxyStopTimeoutMs(reportedBudgetSecs) {
         return reportedBudgetSecs * 1000 + PROXY_STOP_MARGIN_MS;
     }
     return PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS * 1000 + PROXY_STOP_MARGIN_MS;
-}
-function normalizeProxyTags(tagInput) {
-    const tags = [];
-    const seen = new Set();
-    for (const rawTag of tagInput.split(',')) {
-        const tag = rawTag.trim();
-        if (!tag || seen.has(tag)) {
-            continue;
-        }
-        seen.add(tag);
-        tags.push(tag);
-    }
-    if (tags.length === 0) {
-        throw new Error('At least one proxy tag is required');
-    }
-    return tags.join(',');
 }
 function isProcessAlive(pid, platform = process.platform, procRoot = '/proc') {
     if (platform === 'linux') {
@@ -101476,107 +101639,18 @@ async function fetchProxyStatus(host, port) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 async function startRegistryProxy(options) {
-    const { restoreToken, stageToken, saveToken } = getAuthTokens();
-    const brokeredWorkloadIdentity = hasBrokeredWorkloadIdentity();
-    if (options.readOnly && options.stage) {
-        throw new Error('Proxy stage cannot be combined with read-only mode.');
-    }
-    let effectiveReadOnly = options.readOnly === true;
-    const requestedStage = options.stage === true;
-    let effectiveStage = requestedStage;
-    let authToken = effectiveReadOnly
-        ? restoreToken
-        : effectiveStage
-            ? stageToken
-            : saveToken;
-    if (!brokeredWorkloadIdentity && !authToken && !effectiveReadOnly && restoreToken) {
-        effectiveReadOnly = true;
-        effectiveStage = false;
-        authToken = restoreToken;
-        diagnostics_routineInfo(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
-    }
-    if (!brokeredWorkloadIdentity && !authToken) {
-        if (effectiveReadOnly) {
-            throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
-        }
-        throw new Error(`${effectiveStage ? missingStageTokenMessage() : auth_missingSaveTokenMessage()} This is required for proxy mode.`);
+    const effectiveReadOnly = options.readOnly === true;
+    if (!options.args?.length) {
+        throw new Error('The CLI plan is missing the proxy command. Upgrade cli-version.');
     }
     const host = options.host || '127.0.0.1';
-    const cliCommand = 'cache-registry';
-    const normalizedTags = normalizeProxyTags(options.tag);
     const readyFile = proxyReadyFilePath(options.port);
     if (await isProxyRunning(host, options.port)) {
         const status = await fetchProxyStatus(host, options.port);
         throw new Error(occupiedPortMessage(options.port, status, options.workspace));
     }
     clearProxyReadyFile(readyFile);
-    const args = [cliCommand, options.workspace, normalizedTags];
-    if (options.noGit) {
-        args.push('--no-git');
-    }
-    if (options.noPlatform) {
-        args.push('--no-platform');
-    }
-    args.push('--host', host, '--port', String(options.port));
-    if (options.protocol === 'reapi') {
-        args.push('--reapi');
-    }
-    args.push('--ready-file', readyFile);
-    if (options.onDemand) {
-        args.push('--on-demand');
-    }
-    else if (options.startupMode?.trim()) {
-        args.push('--startup-mode', options.startupMode.trim());
-    }
-    if (options.warmupStrategy?.trim()) {
-        args.push('--warmup-strategy', options.warmupStrategy.trim());
-    }
-    for (const ref of options.ociPrefetchRefs || []) {
-        const trimmed = ref.trim();
-        if (trimmed) {
-            args.push('--oci-prefetch-ref', trimmed);
-        }
-    }
-    for (const ref of options.ociAliasPromotionRefs || []) {
-        const trimmed = ref.trim();
-        if (trimmed) {
-            args.push('--oci-alias-promotion-ref', trimmed);
-        }
-    }
-    for (const digest of options.candidateDigests || []) {
-        const trimmed = digest.trim();
-        if (trimmed) {
-            args.push('--candidate-digest', trimmed);
-        }
-    }
-    const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
-    if (ociHydration) {
-        args.push('--oci-hydration', ociHydration);
-    }
-    for (const [key, value] of Object.entries(options.metadataHints || {})) {
-        args.push('--metadata-hint', `${key}=${value}`);
-    }
-    if (options.xcodeSocket?.trim()) {
-        args.push('--xcode-socket', options.xcodeSocket.trim());
-    }
-    if (options.xcodeUpstreamPlugin?.trim()) {
-        args.push('--xcode-upstream-plugin', options.xcodeUpstreamPlugin.trim());
-    }
-    if (options.xcodeCasPath?.trim()) {
-        args.push('--xcode-cas-path', options.xcodeCasPath.trim());
-    }
-    if (options.xcodeEvidenceJson?.trim()) {
-        args.push('--xcode-evidence-json', options.xcodeEvidenceJson.trim());
-    }
-    if (options.nixHookSocket?.trim()) {
-        args.push('--nix-hook-socket', options.nixHookSocket.trim());
-    }
-    if (effectiveStage) {
-        args.push('--stage');
-    }
-    else if (effectiveReadOnly) {
-        args.push('--read-only');
-    }
+    const args = [...options.args, '--ready-file', readyFile];
     const strictCacheErrors = options.failOnCacheError ?? !effectiveReadOnly;
     if (strictCacheErrors) {
         args.push('--fail-on-cache-error');
@@ -107314,40 +107388,6 @@ async function writeCompilerCacheJobSummary(observation, publication) {
 
 
 
-;// CONCATENATED MODULE: ./dist/modes.js
-function normalizeMode(value) {
-    const normalized = (value || 'archive').trim().toLowerCase();
-    switch (normalized) {
-        case 'archive':
-        case 'artifact':
-        case 'docker':
-        case 'buildkit':
-        case 'bazel':
-        case 'bazel-reapi':
-        case 'moon':
-        case 'pants':
-        case 'buck2':
-        case 'sbt':
-        case 'cargo':
-        case 'ccache':
-        case 'go':
-        case 'gradle':
-        case 'gha':
-        case 'maven':
-        case 'nix':
-        case 'nx':
-        case 'sccache':
-        case 'turbo':
-        case 'xcode':
-            return normalized;
-        default:
-            throw new Error(`Unsupported mode "${value}". Expected archive, artifact, docker, buildkit, bazel, bazel-reapi, moon, pants, buck2, sbt, cargo, ccache, gha, go, gradle, maven, nix, nx, sccache, turbo, or xcode.`);
-    }
-}
-function resolveModeSpec(mode) {
-    return { requested: mode, resolved: mode };
-}
-
 ;// CONCATENATED MODULE: ./dist/core/action-inputs.js
 
 
@@ -107355,7 +107395,7 @@ function resolveModeSpec(mode) {
 
 
 
-const action_inputs_DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
+const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 const SAVE_ALWAYS_ENVIRONMENT = 'BORINGCACHE_SAVE_ALWAYS';
 function resolveSavePolicy() {
     const requested = (getInput('save') || 'on-success').trim().toLowerCase();
@@ -107373,7 +107413,7 @@ function getInputs() {
     const diagnosticsLogLines = normalizeDiagnosticsLogLines('40');
     const resolvedDiagnostics = loadDiagnosticsConfig({ diagnostics, diagnosticsLogLines });
     return {
-        cliVersion: getInput('cli-version') || 'v1.43.3',
+        cliVersion: getInput('cli-version') || 'v1.44.0',
         cliPlatform: getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -107394,222 +107434,6 @@ function getInputs() {
         lookupOnly: getBooleanInput('lookup-only'),
         verbose: resolvedDiagnostics.includeLogs,
     };
-}
-function buildFlagArgs(inputs) {
-    const flagArgs = [];
-    if (inputs.failOnCacheMiss) {
-        flagArgs.push('--fail-on-cache-miss');
-    }
-    if (inputs.failOnCacheError) {
-        flagArgs.push('--fail-on-cache-error');
-    }
-    if (inputs.lookupOnly) {
-        flagArgs.push('--lookup-only');
-    }
-    if (inputs.verbose) {
-        flagArgs.push('--verbose');
-    }
-    if (!inputs.readOnly && !inputs.stage) {
-        flagArgs.push('--include-pr-tag');
-    }
-    return flagArgs;
-}
-
-;// CONCATENATED MODULE: ./dist/core/tags.js
-function requireCliVerificationTags(tags, adapter) {
-    if (!Array.isArray(tags) || tags.some((tag) => typeof tag !== 'string' || !tag.trim())) {
-        throw new Error(`The selected BoringCache CLI did not return exact verification tags for ${adapter}. `
-            + 'Use a CLI release that supports the current boringcache/one plan contract.');
-    }
-    return Array.from(new Set(tags));
-}
-function resolveVerificationTags(specs) {
-    return Array.from(new Set(specs.map((spec) => spec.tag)));
-}
-
-;// CONCATENATED MODULE: ./dist/core/plan.js
-
-
-
-
-
-
-
-function splitEntriesInput(entries) {
-    const values = [];
-    let current = '';
-    for (let index = 0; index < entries.length; index += 1) {
-        const character = entries[index];
-        if (character === '\\' && entries[index + 1] === ',') {
-            current += ',';
-            index += 1;
-        }
-        else if (character === ',' || character === '\n') {
-            values.push(current);
-            current = '';
-        }
-        else if (character !== '\r') {
-            current += character;
-        }
-    }
-    values.push(current);
-    return values.filter((entry) => entry.trim());
-}
-function parseCliVersion(version) {
-    const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
-    if (!match) {
-        return null;
-    }
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-async function resolveCliCapabilityVersion(version) {
-    const requestedVersion = version.trim();
-    if (requestedVersion.toLowerCase() === 'skip' || parseCliVersion(requestedVersion)) {
-        return requestedVersion;
-    }
-    let stdout = '';
-    let stderr = '';
-    const exitCode = await setup_execBoringCache(['--version'], {
-        ignoreReturnCode: true,
-        silent: true,
-        listeners: {
-            stdout: (data) => {
-                stdout += data.toString();
-            },
-            stderr: (data) => {
-                stderr += data.toString();
-            },
-        },
-    });
-    const output = `${stdout}\n${stderr}`;
-    const match = output.match(/\bboringcache\s+v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/i);
-    if (exitCode !== 0 || !match) {
-        throw new Error(`Unable to determine installed BoringCache CLI capabilities for cli-version '${requestedVersion || '(empty)'}'. `
-            + `Expected 'boringcache --version' to report a semantic version, but it exited ${exitCode}`
-            + `${output.trim() ? `: ${output.trim()}` : '.'}`);
-    }
-    return match[1];
-}
-function plan_appendCliPublicationPolicy(args, readOnly) {
-    args.push(readOnly ? '--read-only' : '--write');
-}
-async function runDryRunPlan(workingDirectory, options) {
-    const { profileNames = [], readOnly = false, noGit = false, } = options;
-    const executePlan = async () => {
-        const args = ['run'];
-        for (const profileName of profileNames) {
-            args.push('--profile', profileName);
-        }
-        if (noGit) {
-            args.push('--no-git');
-        }
-        plan_appendCliPublicationPolicy(args, readOnly);
-        args.push('--dry-run', '--json');
-        let stdout = '';
-        let stderr = '';
-        const exitCode = await exec_exec('boringcache', args, {
-            cwd: workingDirectory,
-            ignoreReturnCode: true,
-            silent: true,
-            listeners: {
-                stdout: (data) => {
-                    stdout += data.toString();
-                },
-                stderr: (data) => {
-                    stderr += data.toString();
-                },
-            },
-        });
-        if (exitCode !== 0) {
-            throw new Error(stderr.trim() || stdout.trim() || `boringcache run --dry-run --json exited with code ${exitCode}`);
-        }
-        try {
-            return JSON.parse(stdout);
-        }
-        catch (error) {
-            throw new Error(`Failed to parse boringcache dry-run JSON: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    };
-    return executePlan();
-}
-function requireMachineConnectionWorkspace(plan) {
-    if (hasBrokeredWorkloadIdentity() && (!plan.workspace?.trim() || plan.workspace_source !== 'machine-connection')) {
-        throw new Error('The BoringCache CLI plan did not resolve the Machine connection workspace. Update the CLI and runner supervisor to versions that support the approved binding workspace.');
-    }
-}
-async function buildArchiveEntries(inputs) {
-    const cacheProfiles = splitEntriesInput(inputs.cacheProfiles).map((entry) => entry.trim());
-    if (cacheProfiles.length === 0) {
-        return {
-            entries: '',
-            envVars: {},
-            verificationTags: [],
-        };
-    }
-    const plan = await runDryRunPlan(inputs.workingDirectory, {
-        profileNames: cacheProfiles,
-        readOnly: inputs.readOnly,
-        noGit: inputs.stage,
-    });
-    requireMachineConnectionWorkspace(plan);
-    const firstEntry = plan.archive_entries?.[0];
-    const firstPair = plan.tag_path_pairs[0];
-    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
-        || (firstPair ? parseEntries(firstPair, 'restore', { separatorMode: 'single' })[0]?.tag : undefined);
-    const verificationTags = requireCliVerificationTags(plan.verification_tags, 'archive');
-    if (plan.tag_path_pairs.length > 0 && verificationTags.length === 0) {
-        throw new Error('The selected BoringCache CLI returned archive entries without exact verification tags.');
-    }
-    return {
-        entries: plan.tag_path_pairs.join('\n'),
-        exclusions: Object.fromEntries((plan.archive_entries || [])
-            .filter((entry) => entry.exclude?.length)
-            .map((entry) => [entry.tag_path_pair, entry.exclude])),
-        envVars: plan.env_vars,
-        cacheTagPrefix,
-        workspace: plan.workspace,
-        verificationTags,
-    };
-}
-function validateOneInputs(modeSpec, archiveEntries) {
-    if (modeSpec.resolved === 'archive' && !archiveEntries) {
-        throw new Error('Archive mode requires cache-profiles from the committed .boringcache.toml plan.');
-    }
-    if (modeSpec.resolved !== 'archive' && archiveEntries) {
-        throw new Error(`cache-profiles belongs to mode=archive; use a separate archive Action step before mode=${modeSpec.resolved}.`);
-    }
-}
-async function buildPlan(inputs) {
-    const modeSpec = resolveModeSpec(inputs.mode);
-    const archiveEntries = await buildArchiveEntries(inputs);
-    validateOneInputs(modeSpec, archiveEntries.entries);
-    const workspace = archiveEntries.workspace || '';
-    if (!workspace && modeSpec.resolved === 'archive') {
-        throw new Error('The BoringCache CLI plan did not resolve a workspace. Set workspace in .boringcache.toml.');
-    }
-    const cacheTagPrefix = getCacheTagPrefix(archiveEntries.cacheTagPrefix);
-    return {
-        workspace,
-        workingDirectory: inputs.workingDirectory,
-        mode: modeSpec.resolved,
-        modeSpec,
-        cacheTagPrefix,
-        envVars: archiveEntries.envVars,
-        archiveEntries: archiveEntries.entries,
-        archiveExclusions: archiveEntries.exclusions,
-        archiveVerificationTags: archiveEntries.verificationTags,
-    };
-}
-function getCacheTagPrefix(resolvedArchivePrefix) {
-    if (resolvedArchivePrefix?.trim()) {
-        return resolvedArchivePrefix.trim();
-    }
-    return 'one';
-}
-async function applyCliPlanEnv(plan) {
-    for (const [key, value] of Object.entries(plan.envVars)) {
-        exportVariable(key, value);
-    }
 }
 
 ;// CONCATENATED MODULE: ./dist/core/candidates.js
@@ -107728,7 +107552,6 @@ async function runNativeProcess(command, args, timeoutMs, spawnProcess = externa
 
 
 
-
 class DockerBuildFailure extends Error {
     constructor(message) {
         super(message);
@@ -107747,22 +107570,7 @@ async function runDockerBuildOperation(operation) {
     }
 }
 function actionProxyOptions(options, proxyPlan, failOnCacheError = false) {
-    // CLI <=1.14 reported "warm" but did not support --startup-mode. Omitting
-    // the new flag preserves that CLI's default while newer plans are explicit.
-    const plannedStartupMode = proxyPlan?.startup_mode;
-    return {
-        ...options,
-        protocol: proxyPlan?.protocol,
-        failOnCacheError,
-        onDemand: plannedStartupMode === 'on-demand',
-        startupMode: plannedStartupMode === 'warm'
-            ? options.startupMode
-            : plannedStartupMode || options.startupMode,
-        warmupStrategy: proxyPlan?.warmup_strategy,
-        ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
-        ociHydration: proxyPlan?.oci_hydration || options.ociHydration || action_inputs_DEFAULT_OCI_HYDRATION_POLICY,
-        metadataHints: proxyPlan?.metadata_hints || options.metadataHints || {},
-    };
+    return { ...options, args: proxyPlan?.command, failOnCacheError };
 }
 function adapterVerificationSpecs(plan) {
     return requireCliVerificationTags(plan.verification_tags, plan.adapter || 'adapter')
@@ -107798,11 +107606,7 @@ function ensureDir(dir) {
     external_fs_namespaceObject.mkdirSync(dir, { recursive: true });
 }
 function planningReadOnly(inputs) {
-    return proxyPlanningReadOnly(inputs.readOnly || inputs.savePolicy === 'never');
-}
-function proxyPlanningReadOnly(requestedReadOnly) {
-    return requestedReadOnly
-        || (!hasBrokeredWorkloadIdentity() && !hasSaveToken() && hasRestoreToken());
+    return inputs.readOnly || inputs.savePolicy === 'never';
 }
 function shared_appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
@@ -107825,7 +107629,13 @@ function exportEnvVars(envVars) {
     }
 }
 function applyAdapterSetupPlan(setup) {
-    exportEnvVars(setup.env_vars || {});
+    const env = { ...setup.env_vars };
+    for (const name of setup.prepend_existing_env || []) {
+        const existing = process.env[name];
+        if (existing?.trim() && env[name])
+            env[name] = `${existing.replace(/\n+$/, '')}\n${env[name]}`;
+    }
+    exportEnvVars(env);
     for (const directory of setup.directories || []) {
         ensureDir(directory);
     }
@@ -107852,17 +107662,6 @@ function applyAdapterSetupPlan(setup) {
             external_fs_namespaceObject.chmodSync(file.path, 0o700);
         }
     }
-}
-function prependExistingNixConfig(setup) {
-    const planned = setup.env_vars?.NIX_CONFIG;
-    const existing = process.env.NIX_CONFIG;
-    if (!planned || !existing?.trim()) {
-        return;
-    }
-    setup.env_vars = {
-        ...setup.env_vars,
-        NIX_CONFIG: `${existing.replace(/\n+$/, '')}\n${planned}`,
-    };
 }
 function setupFilePath(setup, suffix) {
     return (setup.files || []).find((file) => file.path.endsWith(suffix))?.path || '';
@@ -108038,21 +107837,6 @@ async function resolveAdapterCliPlan(adapter, workspace, workingDirectory, input
     await preflightPlannedRequirements(adapter, plan, workingDirectory);
     return plan;
 }
-async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!hasSaveCredential()) {
-        core.notice(`Skipping cache save (${missingSaveTokenMessage()})`);
-        return;
-    }
-    if (!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0) {
-        routineInfo('No cache files to save');
-        return;
-    }
-    const args = ['save', workspace, `${cacheKey}:${cacheDir}`, '--force'];
-    if (flags.verbose) {
-        args.push('--verbose');
-    }
-    await shared_execBoringCache(args);
-}
 async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan, failOnCacheError = false) {
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
@@ -108060,8 +107844,6 @@ async function startPortableCacheProxy(workspace, port, tag, readOnly = false, p
         tag,
         host: proxyPlan.host || '127.0.0.1',
         port,
-        noPlatform: proxyPlan.no_platform,
-        noGit: proxyPlan.no_git,
         readOnly,
     }, proxyPlan, failOnCacheError));
     return proxy;
@@ -108074,85 +107856,37 @@ function emptyDirectCacheTagCheckStatus() {
         kvChecked: false,
     };
 }
-function checkResultHasKvProbe(result) {
-    return typeof result.kv_entry_count === 'number'
-        || typeof result.kv_total_size === 'number'
-        || (result.status === 'hit' && result.cache_type === 'kv');
+function plannedCacheHit(plan, results) {
+    const source = plan.cache_hit_source;
+    if (source === undefined) {
+        throw new Error('The CLI plan is missing cache-hit selection. Upgrade cli-version.');
+    }
+    return source ? results[source.tag]?.[source.field] === true : false;
 }
-function checkResultHasKvRows(result) {
-    if (typeof result.kv_entry_count === 'number') {
-        return result.kv_entry_count > 0;
+function plannedCacheCheck(plan, tag = plan.tag) {
+    const args = plan.cache_checks?.[tag];
+    if (!args?.length) {
+        throw new Error('The CLI plan is missing cache check commands. Upgrade cli-version.');
     }
-    return result.status === 'hit' && result.cache_type === 'kv';
+    return args;
 }
-function checkResultHasCacheEntryHit(result) {
-    if (result.status !== 'hit') {
-        return false;
-    }
-    return result.cache_type !== 'kv';
-}
-async function checkDirectCacheTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
-    const args = ['check', workspace, tag, '--json'];
-    if (requireServerSignature) {
-        args.unshift('--require-server-signature');
-    }
-    if (noPlatform) {
-        args.push('--no-platform');
-    }
-    if (noGit) {
-        args.push('--no-git');
-    }
+async function checkDirectCacheTagStatus(args) {
     let stdout = '';
     const exitCode = await shared_execBoringCache(args, {
         ignoreReturnCode: true,
         silent: true,
-        listeners: {
-            stdout: (data) => {
-                stdout += data.toString();
-            },
-        },
+        listeners: { stdout: (data) => { stdout += data.toString(); } },
     });
     if (exitCode !== 0) {
         return emptyDirectCacheTagCheckStatus();
     }
-    try {
-        const summary = JSON.parse(stdout);
-        const results = summary.results || [];
-        const cacheEntryHit = results.some(checkResultHasCacheEntryHit);
-        const kvHit = results.some(checkResultHasKvRows);
-        const kvChecked = results.some(checkResultHasKvProbe);
-        const legacyHit = results.length === 0 && typeof summary.hits === 'number' && summary.hits > 0;
-        return {
-            hit: cacheEntryHit || kvHit || legacyHit,
-            cacheEntryHit: cacheEntryHit || legacyHit,
-            kvHit,
-            kvChecked,
-        };
+    const summary = JSON.parse(stdout);
+    if (!summary.direct_cache) {
+        throw new Error('The CLI check result is missing direct_cache. Upgrade cli-version.');
     }
-    catch (error) {
-        core_warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
-        return emptyDirectCacheTagCheckStatus();
-    }
+    return summary.direct_cache;
 }
-async function shared_checkDirectCacheProxyTagStatus(workspace, tag, options = {}) {
-    const strictStatus = await checkDirectCacheTagStatus(workspace, tag, {
-        ...options,
-        requireServerSignature: true,
-    });
-    if (strictStatus.kvChecked || strictStatus.kvHit) {
-        return strictStatus;
-    }
-    const kvStatus = await checkDirectCacheTagStatus(workspace, tag, {
-        ...options,
-        requireServerSignature: false,
-    });
-    return {
-        hit: strictStatus.cacheEntryHit || kvStatus.kvHit,
-        cacheEntryHit: strictStatus.cacheEntryHit,
-        kvHit: kvStatus.kvHit,
-        kvChecked: kvStatus.kvChecked || kvStatus.kvHit,
-    };
-}
+const shared_checkDirectCacheProxyTagStatus = checkDirectCacheTagStatus;
 function directCachePreflightEvidence(preflight) {
     return {
         cache_preflight: {
@@ -108162,11 +107896,11 @@ function directCachePreflightEvidence(preflight) {
         },
     };
 }
-function rewritePlannedProxyPort(value, plannedPort, actualPort) {
-    if (plannedPort === actualPort) {
-        return value;
+function plannedProxyEnv(plan, actualPort) {
+    if (actualPort !== plan.proxy.port) {
+        throw new Error('Proxy port differs from the CLI plan.');
     }
-    return value.replace(new RegExp(`:${plannedPort}(?=/|$)`), `:${actualPort}`);
+    return plan.env_vars || {};
 }
 function readBoundedJsonObject(filePath) {
     try {
@@ -108226,9 +107960,7 @@ async function runReapiRestore(plan, inputs) {
         throw new Error(`boringcache ${mode} did not plan a REAPI proxy. Update the CLI and Action together.`);
     const setup = requireAdapterSetupPlan(mode, cliPlan.setup);
     const preflight = inputs.lookupOnly || inputs.failOnCacheMiss
-        ? await checkDirectCacheTagStatus(cliPlan.workspace, cliPlan.tag, {
-            noPlatform: cliPlan.proxy.no_platform, noGit: cliPlan.proxy.no_git, requireServerSignature: true,
-        }) : null;
+        ? await checkDirectCacheTagStatus(plannedCacheCheck(cliPlan)) : null;
     if (inputs.failOnCacheMiss && !preflight?.kvHit)
         throw new Error(`No remote cache entries were found for ${mode}.`);
     saveModeState('proxy-pid', '');
@@ -108326,29 +108058,6 @@ async function adapters_shutdownBazelServer() {
         silent: true,
     });
 }
-function turboEnvForStartedProxy(plan, actualPort) {
-    const envVars = {};
-    for (const [key, value] of Object.entries(plan.env_vars || {})) {
-        envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
-    }
-    const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
-    envVars.TURBO_API = `http://${endpointHost}:${actualPort}`;
-    envVars.TURBO_TOKEN = envVars.TURBO_TOKEN || 'boringcache';
-    envVars.TURBO_TEAM = envVars.TURBO_TEAM || 'boringcache';
-    envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
-    return envVars;
-}
-function nxEnvForStartedProxy(plan, actualPort) {
-    const envVars = {};
-    for (const [key, value] of Object.entries(plan.env_vars || {})) {
-        envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
-    }
-    const endpointHost = plan.proxy.endpoint_host || '127.0.0.1';
-    envVars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER = `http://${endpointHost}:${actualPort}`;
-    envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN = envVars.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || 'boringcache';
-    envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
-    return envVars;
-}
 async function runBazelRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('bazel', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
@@ -108362,8 +108071,6 @@ async function runBazelRestore(plan, inputs) {
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
@@ -108377,23 +108084,6 @@ async function runBazelRestore(plan, inputs) {
         verificationSpecs: adapterVerificationSpecs(proxyPlan),
     };
 }
-function configureGoProxyEnv(gocacheprog) {
-    exportVariable('GOCACHEPROG', gocacheprog);
-}
-function goCacheProgForProxy(proxyPlan, port) {
-    const endpoint = `http://${proxyPlan.proxy.endpoint_host}:${port}`;
-    const planned = proxyPlan.env_vars?.GOCACHEPROG?.trim();
-    if (!planned) {
-        return `boringcache go-cacheprog --endpoint ${endpoint}`;
-    }
-    if (planned.includes('--endpoint=')) {
-        return planned.replace(/--endpoint=\S+/, `--endpoint=${endpoint}`);
-    }
-    if (planned.includes('--endpoint')) {
-        return planned.replace(/--endpoint\s+\S+/, `--endpoint ${endpoint}`);
-    }
-    return `${planned} --endpoint ${endpoint}`;
-}
 async function runGoRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan('go', plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
@@ -108402,10 +108092,7 @@ async function runGoRestore(plan, inputs) {
     }
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
-    const preflight = await shared_checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await shared_checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     saveModeState('proxy-pid', '');
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
@@ -108413,14 +108100,12 @@ async function runGoRestore(plan, inputs) {
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    configureGoProxyEnv(goCacheProgForProxy(proxyPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(proxyPlan, proxy.port));
     setProxyOutputs(proxy.port);
     return {
         workspace,
@@ -108449,18 +108134,13 @@ async function runGradleRestore(plan, inputs) {
         ...setup.env_vars,
         GRADLE_USER_HOME: external_path_namespaceObject.dirname(external_path_namespaceObject.dirname(initScript)),
     };
-    const preflight = await shared_checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await shared_checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
@@ -108482,18 +108162,13 @@ async function runMavenRestore(plan, inputs) {
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const setup = requireAdapterSetupPlan('maven', proxyPlan.setup);
-    const preflight = await shared_checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await shared_checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace,
         tag: cacheTag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy));
@@ -108561,7 +108236,6 @@ async function runNixRestore(plan, inputs) {
         failOnCacheError: inputs.failOnCacheError,
     });
     const setup = requireAdapterSetupPlan('nix', proxyPlan.setup);
-    prependExistingNixConfig(setup);
     const socketPath = proxyPlan.proxy.nix_hook_socket?.trim() || '';
     if (!proxyPlan.proxy.read_only && !socketPath) {
         throw new Error('boringcache nix setup plan did not include its upload socket');
@@ -108572,11 +108246,8 @@ async function runNixRestore(plan, inputs) {
         tag: proxyPlan.tag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-        nixHookSocket: socketPath || undefined,
     }, proxyPlan.proxy, inputs.failOnCacheError));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
@@ -108616,14 +108287,8 @@ async function runXcodeRestore(plan, inputs) {
         tag: proxyPlan.tag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
-        xcodeSocket: socketPath,
-        xcodeUpstreamPlugin: upstreamPlugin,
-        xcodeCasPath: casPath,
-        xcodeEvidenceJson: evidencePath,
     }, proxyPlan.proxy, inputs.failOnCacheError));
     saveModeState('proxy-pid', String(proxy.pid));
     saveModeState('xcode-evidence-json', evidencePath);
@@ -108650,14 +108315,11 @@ async function runTurboProxyRestore(plan, inputs) {
     const turboPlan = await resolveAdapterCliPlan('turbo', plan.workspace, plan.workingDirectory, '', preferredPort, planningReadOnly(inputs), {});
     const workspace = turboPlan.workspace;
     const cacheTag = turboPlan.tag;
-    const preflight = await shared_checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: turboPlan.proxy.no_platform,
-        noGit: turboPlan.proxy.no_git,
-    });
+    const preflight = await shared_checkDirectCacheProxyTagStatus(plannedCacheCheck(turboPlan));
     const proxy = await startPortableCacheProxy(workspace, turboPlan.proxy.port, cacheTag, turboPlan.proxy.read_only, turboPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    exportEnvVars(turboEnvForStartedProxy(turboPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(turboPlan, proxy.port));
     setProxyOutputs(proxy.port);
     return {
         workspace,
@@ -108672,14 +108334,11 @@ async function runNxProxyRestore(plan, inputs) {
     const nxPlan = await resolveAdapterCliPlan('nx', plan.workspace, plan.workingDirectory, '', preferredPort, planningReadOnly(inputs), {});
     const workspace = nxPlan.workspace;
     const cacheTag = nxPlan.tag;
-    const preflight = await shared_checkDirectCacheProxyTagStatus(workspace, cacheTag, {
-        noPlatform: nxPlan.proxy.no_platform,
-        noGit: nxPlan.proxy.no_git,
-    });
+    const preflight = await shared_checkDirectCacheProxyTagStatus(plannedCacheCheck(nxPlan));
     const proxy = await startPortableCacheProxy(workspace, nxPlan.proxy.port, cacheTag, nxPlan.proxy.read_only, nxPlan.proxy);
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
-    exportEnvVars(nxEnvForStartedProxy(nxPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(nxPlan, proxy.port));
     setProxyOutputs(proxy.port);
     return {
         workspace,
@@ -109080,43 +108739,22 @@ async function stopCcacheStorageHelpers(statsLog, statsDirectory) {
     }
     return summary;
 }
-function compilerCacheEnvForStartedProxy(plan, actualPort) {
-    const envVars = {};
-    for (const [key, value] of Object.entries(plan.env_vars || {})) {
-        envVars[key] = rewritePlannedProxyPort(value, plan.proxy.port, actualPort);
-    }
-    envVars.BORINGCACHE_PROXY_PORT = String(actualPort);
-    return envVars;
-}
-function sccacheEnvForStartedProxy(plan, actualPort) {
-    const envVars = compilerCacheEnvForStartedProxy(plan, actualPort);
-    envVars.SCCACHE_IDLE_TIMEOUT = process.env.SCCACHE_IDLE_TIMEOUT
-        || envVars.SCCACHE_IDLE_TIMEOUT
-        || '0';
-    return envVars;
-}
 async function startCompilerCacheProxy(adapter, plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
     const proxyPlan = await resolveAdapterCliPlan(adapter, plan.workspace, plan.workingDirectory, '', requestedPort, planningReadOnly(inputs), {});
-    const preflight = await shared_checkDirectCacheProxyTagStatus(proxyPlan.workspace, proxyPlan.tag, {
-        noPlatform: proxyPlan.proxy.no_platform,
-        noGit: proxyPlan.proxy.no_git,
-    });
+    const preflight = await shared_checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
         workspace: proxyPlan.workspace,
         tag: proxyPlan.tag,
         host: proxyPlan.proxy.host || '127.0.0.1',
         port: proxyPlan.proxy.port,
-        noGit: proxyPlan.proxy.no_git,
-        noPlatform: proxyPlan.proxy.no_platform,
         verbose: inputs.verbose,
         readOnly: proxyPlan.proxy.read_only,
     }, proxyPlan.proxy, inputs.failOnCacheError));
+    saveModeState(`${adapter}-check-args`, JSON.stringify(plannedCacheCheck(proxyPlan)));
     saveModeState('workspace', proxyPlan.workspace);
     saveModeState(`${adapter}-tag`, proxyPlan.tag);
-    saveModeState(`${adapter}-no-platform`, String(proxyPlan.proxy.no_platform));
-    saveModeState(`${adapter}-no-git`, String(proxyPlan.proxy.no_git));
     saveModeState(`${adapter}-preflight-cache-entry-hit`, String(preflight.cacheEntryHit));
     saveModeState(`${adapter}-preflight-kv-hit`, String(preflight.kvHit));
     saveModeState(`${adapter}-preflight-kv-checked`, String(preflight.kvChecked));
@@ -109128,10 +108766,9 @@ async function startCompilerCacheProxy(adapter, plan, inputs) {
 }
 function compiler_cache_compilerCacheModeState(tool) {
     return {
+        checkArgs: JSON.parse(getModeState(`${tool}-check-args`) || '[]'),
         workspace: getModeState('workspace'),
         tag: getModeState(`${tool}-tag`),
-        noPlatform: getModeState(`${tool}-no-platform`) === 'true',
-        noGit: getModeState(`${tool}-no-git`) === 'true',
         hit: getModeState(`${tool}-preflight-kv-hit`) === 'true',
         cacheEntryHit: getModeState(`${tool}-preflight-cache-entry-hit`) === 'true',
         kvHit: getModeState(`${tool}-preflight-kv-hit`) === 'true',
@@ -109183,10 +108820,7 @@ async function compiler_cache_finishCompilerCacheSave(tool, state, stats, statsD
         }
         return;
     }
-    const postShutdownStatus = await checkDirectCacheProxyTagStatus(state.workspace, state.tag, {
-        noPlatform: state.noPlatform,
-        noGit: state.noGit,
-    });
+    const postShutdownStatus = await checkDirectCacheProxyTagStatus(state.checkArgs);
     if (stats.cacheHits > 0) {
         return;
     }
@@ -109217,7 +108851,7 @@ async function runCcacheRestore(plan, inputs) {
     const statsLog = external_path_namespaceObject.join(statsDirectory, 'stats.log');
     try {
         const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('ccache', plan, inputs);
-        const envVars = compilerCacheEnvForStartedProxy(proxyPlan, proxy.port);
+        const envVars = plannedProxyEnv(proxyPlan, proxy.port);
         envVars.CCACHE_STATSLOG = statsLog;
         exportEnvVars(envVars);
         saveModeState('ccache-stats-directory', statsDirectory);
@@ -109248,7 +108882,7 @@ async function compiler_cache_runCcacheSave(options = {}) {
 }
 async function runSccacheRestore(plan, inputs) {
     const { proxyPlan, proxy, preflight } = await startCompilerCacheProxy('sccache', plan, inputs);
-    exportEnvVars(sccacheEnvForStartedProxy(proxyPlan, proxy.port));
+    exportEnvVars(plannedProxyEnv(proxyPlan, proxy.port));
     try {
         await sccacheServerLifecycle.start();
     }
@@ -109297,24 +108931,6 @@ function readPhaseEvidence(file) {
     external_fs_namespaceObject.rmSync(file, { force: true });
     return document;
 }
-const CLI_TARGET_RESTORE_RESULTS = new Set(['restored', 'not-found', 'failed', 'skipped']);
-function cargoTargetRestore(evidence, targetEntry) {
-    if (!targetEntry) {
-        return 'not-configured';
-    }
-    const resolvedTag = targetEntry.resolved_tag;
-    if (!resolvedTag || !evidence || evidence.schema_version !== 'cache_phase_evidence.v1'
-        || evidence.phase !== 'restore' || !Array.isArray(evidence.entries)) {
-        return 'unknown';
-    }
-    const result = evidence.entries.find((entry) => entry.operation === 'restore' && entry.resolved_tag === resolvedTag)?.restore_result;
-    return typeof result === 'string' && CLI_TARGET_RESTORE_RESULTS.has(result)
-        ? result
-        : 'unknown';
-}
-function cargoCacheHit(restore) {
-    return restore === 'unknown' ? undefined : restore === 'restored';
-}
 function seconds(milliseconds) {
     return typeof milliseconds === 'number' ? Math.round(milliseconds / 100) / 10 : null;
 }
@@ -109360,23 +108976,16 @@ async function runCargoRestore(plan, inputs) {
     const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
     const [targetPreflight, compilerPreflight] = await Promise.all([
         targetEntry
-            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.resolved_tag || targetEntry.tag, {
-                // Exact archive identities already include their own scope. Older
-                // CLI plans used one scope for both layers and omit resolved_tag.
-                noPlatform: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_platform,
-                noGit: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_git,
-                requireServerSignature: true,
-            })
+            ? checkDirectCacheTagStatus(plannedCacheCheck(cargoPlan, targetEntry.resolved_tag || targetEntry.tag))
             : emptyDirectCacheTagCheckStatus(),
         compilerCacheEnabled
-            ? checkDirectCacheTagStatus(cargoPlan.workspace, compilerCacheTag, {
-                noPlatform: cargoPlan.proxy.no_platform,
-                noGit: cargoPlan.proxy.no_git,
-                requireServerSignature: true,
-            })
+            ? checkDirectCacheTagStatus(plannedCacheCheck(cargoPlan, compilerCacheTag))
             : emptyDirectCacheTagCheckStatus(),
     ]);
-    const cacheHit = targetEntry ? targetPreflight.cacheEntryHit : compilerPreflight.kvHit;
+    const cacheHit = plannedCacheHit(cargoPlan, {
+        [targetEntry?.resolved_tag || targetEntry?.tag || '']: targetPreflight,
+        [compilerCacheTag]: compilerPreflight,
+    });
     const cacheTag = targetEntry?.tag || (compilerCacheEnabled ? compilerCacheTag : '');
     if (inputs.failOnCacheMiss && !inputs.lookupOnly) {
         throw new Error('mode=cargo does not support fail-on-cache-miss while restoring yet; '
@@ -109413,7 +109022,6 @@ async function runCargoRestore(plan, inputs) {
             cargoPlan,
             command: wrappedCommand,
             compilerCacheEnabled,
-            targetEntry,
             cacheTag,
             resolvedEntries,
             verificationSpecs,
@@ -109452,7 +109060,7 @@ async function runCargoRestore(plan, inputs) {
         throw new Error(`boringcache cargo restore phase exited with code ${restoreExitCode}`);
     }
     const restoreEvidence = readPhaseEvidence(restoreEvidenceFile);
-    const targetRestore = cargoTargetRestore(restoreEvidence, targetEntry);
+    const targetRestore = restoreEvidence?.target_restore || 'unknown';
     setOutput('target-restore', targetRestore);
     setPhaseOutputs('restore', restoreEvidence);
     let proxyPort = cargoPlan.proxy.port;
@@ -109463,13 +109071,11 @@ async function runCargoRestore(plan, inputs) {
             tag: compilerCacheTag,
             host: cargoPlan.proxy.host || '127.0.0.1',
             port: cargoPlan.proxy.port,
-            noGit: cargoPlan.proxy.no_git,
-            noPlatform: cargoPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: cargoPlan.proxy.read_only,
         }, cargoPlan.proxy, inputs.failOnCacheError));
         proxyPort = proxy.port;
-        exportEnvVars(sccacheEnvForStartedProxy(cargoPlan, proxy.port));
+        exportEnvVars(plannedProxyEnv(cargoPlan, proxy.port));
         try {
             await sccacheServerLifecycle.start();
         }
@@ -109497,15 +109103,16 @@ async function runCargoRestore(plan, inputs) {
     saveModeState('cargo-read-only', String(cargoPlan.proxy.read_only));
     saveModeState('cargo-fail-on-cache-error', String(inputs.failOnCacheError));
     saveModeState('cargo-compiler-cache', String(compilerCacheEnabled));
+    if (compilerCacheEnabled) {
+        saveModeState('sccache-check-args', JSON.stringify(plannedCacheCheck(cargoPlan, compilerCacheTag)));
+    }
     saveModeState('sccache-tag', compilerCacheTag);
-    saveModeState('sccache-no-platform', String(cargoPlan.proxy.no_platform));
-    saveModeState('sccache-no-git', String(cargoPlan.proxy.no_git));
     saveModeState('sccache-preflight-cache-entry-hit', String(compilerPreflight.cacheEntryHit));
     saveModeState('sccache-preflight-kv-hit', String(compilerPreflight.kvHit));
     saveModeState('sccache-preflight-kv-checked', String(compilerPreflight.kvChecked));
     return {
         workspace: cargoPlan.workspace,
-        cacheHit: cargoCacheHit(targetRestore),
+        cacheHit: restoreEvidence?.cache_hit,
         cacheTag,
         resolvedEntries,
         verificationSpecs,
@@ -109589,7 +109196,12 @@ async function cargo_runCargoSave(options = {}) {
     await stopProxyFromState();
     if (compilerCacheEnabled) {
         const state = compilerCacheModeState('sccache');
-        await finishCompilerCacheSave('sccache', state, sccacheStats, sccacheStatsDetailText, options);
+        try {
+            await finishCompilerCacheSave('sccache', state, sccacheStats, sccacheStatsDetailText, options);
+        }
+        catch (error) {
+            compilerFailure = error instanceof Error ? error : new Error(String(error));
+        }
         if (failOnCacheError && !compilerFailure) {
             compilerFailure = nativeCompilerCacheFailure(sccacheStats, readOnly);
         }
@@ -109661,12 +109273,12 @@ async function runWrappedCargoCommand(input) {
             external_fs_namespaceObject.rmSync(restoreEvidencePath, { force: true });
         }
     }
-    const targetRestore = cargoTargetRestore(restoreEvidence, input.targetEntry);
+    const targetRestore = restoreEvidence?.target_restore || 'unknown';
     setOutput('target-restore', targetRestore);
     saveModeState('cargo-lifecycle', 'command');
     return {
         workspace: cargoPlan.workspace,
-        cacheHit: cargoCacheHit(targetRestore),
+        cacheHit: restoreEvidence?.cache_hit,
         cacheTag: input.cacheTag,
         resolvedEntries: input.resolvedEntries,
         verificationSpecs: input.verificationSpecs,
@@ -109920,6 +109532,11 @@ async function runModeSave(mode, options = {}) {
 
 
 
+
+
+
+
+
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 function appendRestoreDiagnostic(current, data) {
     return `${current}${data.toString()}`.slice(-MAX_RESTORE_DIAGNOSTIC_CHARS);
@@ -109961,122 +109578,57 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs) {
-    if (!entriesString.trim()) {
-        return { hit: false, evaluated: false, saveEntries: '' };
+async function restoreArchiveProfiles(plan, inputs) {
+    if (!plan.archiveEntries.trim()) {
+        return { hit: false, evaluated: false };
     }
-    const parsedEntries = parseEntries(entriesString, 'restore', {
-        separatorMode: 'newline',
-    });
-    if (parsedEntries.length === 0) {
-        return { hit: false, evaluated: false, saveEntries: '' };
+    const evidenceFile = external_path_namespaceObject.join(external_os_.tmpdir(), `boringcache-one-archive-restore-${process.pid}.json`);
+    external_fs_namespaceObject.rmSync(evidenceFile, { force: true });
+    const args = [
+        ...archiveRunArgs(plan.archiveProfiles, inputs),
+        '--phase', 'restore',
+        '--phase-evidence-json', evidenceFile,
+        '--fail-on-cache-error',
+    ];
+    if (inputs.lookupOnly) {
+        args.push('--lookup-only');
     }
-    const primaryRestoreEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`);
-    const restoreEntriesArg = primaryRestoreEntries.join(',');
-    const saveEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.savePath}`).join('\n');
-    const restoreMissShouldFail = flagArgs.includes('--fail-on-cache-miss');
-    const restoreErrorsShouldFail = flagArgs.includes('--fail-on-cache-error');
-    const attempts = [{
-            entries: primaryRestoreEntries,
-            tags: parsedEntries.map((entry) => entry.tag),
-        }];
-    const failedAttempts = [];
-    for (const attempt of attempts) {
-        const remotelyPresent = await checkEntries(workspace, attempt.tags, flagArgs);
-        if (!remotelyPresent) {
-            continue;
-        }
-        // The Action needs a truthful materialization result even when the workflow chooses
-        // best-effort cache behavior. Make this internal invocation strict, then soften a failure
-        // back to cache-hit=false below unless the user requested strict errors.
-        const restoreFlagArgs = flagArgs.includes('--fail-on-cache-error')
-            ? [...flagArgs]
-            : [...flagArgs, '--fail-on-cache-error'];
-        const restoreArgs = [
-            'restore', workspace,
-            ...attempt.entries.flatMap((entry) => ['--entry', entry]),
-            ...restoreFlagArgs,
-        ];
-        let stdout = '';
-        let stderr = '';
-        const restoreProcess = setup_execBoringCache(restoreArgs, {
-            ignoreReturnCode: true,
-            listeners: {
-                stdout: (data) => {
-                    stdout = appendRestoreDiagnostic(stdout, data);
-                },
-                stderr: (data) => {
-                    stderr = appendRestoreDiagnostic(stderr, data);
-                },
-            },
-        });
-        const restoreExitCode = await restoreProcess;
-        if (restoreExitCode === 0) {
-            return { hit: true, evaluated: true, saveEntries };
-        }
-        const detail = restoreFailureDetail(stdout, stderr, attempt.entries);
-        failedAttempts.push(detail);
-        core_warning(`Cache entry was found but could not be restored: ${detail}`);
+    if (inputs.failOnCacheMiss) {
+        args.push('--fail-on-cache-miss');
     }
-    if (failedAttempts.length > 0) {
-        const detail = failedAttempts[failedAttempts.length - 1];
-        if (restoreErrorsShouldFail || restoreMissShouldFail) {
-            throw new Error(detail);
-        }
-        core_warning('No available cache candidate could be materialized; treating the restore as a miss.');
-    }
-    else if (restoreMissShouldFail) {
-        throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
-    }
-    return { hit: false, evaluated: true, saveEntries };
-}
-async function checkEntries(workspace, tags, restoreFlagArgs) {
-    const checkTags = tags.map((tag) => tag.trim()).filter(Boolean);
-    if (checkTags.length === 0) {
-        return false;
+    if (inputs.verbose) {
+        args.push('--verbose');
     }
     let stdout = '';
-    const args = ['check', workspace, checkTags.join(','), ...checkFlagArgs(restoreFlagArgs), '--json'];
+    let stderr = '';
     const exitCode = await setup_execBoringCache(args, {
+        cwd: plan.workingDirectory,
         ignoreReturnCode: true,
-        silent: true,
         listeners: {
             stdout: (data) => {
-                stdout += data.toString();
+                stdout = appendRestoreDiagnostic(stdout, data);
+            },
+            stderr: (data) => {
+                stderr = appendRestoreDiagnostic(stderr, data);
             },
         },
     });
-    if (!stdout.trim()) {
-        if (exitCode !== 0) {
-            core_warning(`Cache check failed for ${checkTags.join(',')}; treating as a miss.`);
+    const evidence = readBoundedJsonObject(evidenceFile);
+    external_fs_namespaceObject.rmSync(evidenceFile, { force: true });
+    if (exitCode !== 0) {
+        const detail = restoreFailureDetail(stdout, stderr, plan.archiveEntries.split('\n'));
+        if (inputs.failOnCacheError || inputs.failOnCacheMiss) {
+            throw new Error(detail);
         }
-        else {
-            core_warning(`boringcache check --json produced no output for ${checkTags.join(',')}; treating as a miss.`);
-        }
-        return false;
+        core_warning(`Cache restore failed: ${detail}`);
+        core_warning('Treating the failed restore as a cache miss.');
+        return { hit: false, evaluated: true };
     }
-    let summary;
-    try {
-        summary = JSON.parse(stdout);
+    if (typeof evidence?.cache_hit !== 'boolean') {
+        core_warning('boringcache run --phase restore reported no cache_hit; cache-hit is not evaluated.');
+        return { hit: false, evaluated: false };
     }
-    catch (error) {
-        core_warning(`Failed to parse boringcache check JSON for ${checkTags.join(',')}: ${error instanceof Error ? error.message : String(error)}; treating as a miss.`);
-        return false;
-    }
-    return (summary.results || []).some((result) => result.status === 'hit');
-}
-function checkFlagArgs(restoreFlagArgs) {
-    const args = [];
-    if (restoreFlagArgs.includes('--no-platform')) {
-        args.push('--no-platform');
-    }
-    if (restoreFlagArgs.includes('--no-git')) {
-        args.push('--no-git');
-    }
-    if (restoreFlagArgs.includes('--include-pr-tag')) {
-        args.push('--include-pr-tag');
-    }
-    return args;
+    return { hit: evidence.cache_hit, evaluated: true };
 }
 async function run() {
     const originalCwd = process.cwd();
@@ -110166,8 +109718,7 @@ async function run() {
         };
         process.chdir(plan.workingDirectory);
         await applyCliPlanEnv(plan);
-        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(effectiveInputs));
-        const archiveRestore = await archiveRestorePromise;
+        const archiveRestore = await restoreArchiveProfiles(plan, effectiveInputs);
         const modeRestore = await runModeRestore(plan, effectiveInputs);
         const completedPlan = {
             ...plan,
@@ -110177,7 +109728,6 @@ async function run() {
             throw new Error('The BoringCache CLI mode plan did not resolve a workspace. Set workspace in .boringcache.toml.');
         }
         const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
-        const genericSaveEntries = archiveRestore.saveEntries;
         const resolvedTags = Array.from(new Set([
             ...completedPlan.archiveVerificationTags,
             ...(modeRestore.verificationSpecs || []).map((spec) => spec.tag),
@@ -110224,8 +109774,8 @@ async function run() {
             trust_state: trustState,
             trust_policy: trustDecision.resolved,
         };
-        saveActionState('generic-cache-entries', genericSaveEntries);
-        saveActionState('generic-cache-exclusions', JSON.stringify(completedPlan.archiveExclusions || {}));
+        saveActionState('generic-cache-entries', completedPlan.archiveEntries);
+        saveActionState('archive-profiles', JSON.stringify(completedPlan.archiveProfiles));
         saveActionState('generic-cache-workspace', completedPlan.workspace);
         await emitRestoreDiagnostics(completedPlan, inputs, resolvedTags, overallHit, trustState);
         if (!trustDecision.write_allowed) {

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runNativeProcess } from '../core/native-process';
-import { adapterVerificationSpecs, applyAdapterSetupPlan, checkDirectCacheTagStatus, execBoringCache, getModeState, planningReadOnly, readBoundedJsonObject, requireAdapterSetupPlan, resolveAdapterCliPlan, resolvePreferredPort, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxy, stopProxyFromState, } from './shared';
+import { adapterVerificationSpecs, applyAdapterSetupPlan, checkDirectCacheTagStatus, plannedCacheCheck, execBoringCache, getModeState, planningReadOnly, readBoundedJsonObject, requireAdapterSetupPlan, resolveAdapterCliPlan, resolvePreferredPort, saveModeState, saveProxyModeState, setProxyOutputs, startPortableCacheProxy, stopProxyFromState, } from './shared';
 export async function runReapiRestore(plan, inputs) {
     const mode = plan.mode;
     if (!['bazel-reapi', 'moon', 'pants', 'buck2', 'sbt'].includes(mode))
@@ -13,9 +13,7 @@ export async function runReapiRestore(plan, inputs) {
         throw new Error(`boringcache ${mode} did not plan a REAPI proxy. Update the CLI and Action together.`);
     const setup = requireAdapterSetupPlan(mode, cliPlan.setup);
     const preflight = inputs.lookupOnly || inputs.failOnCacheMiss
-        ? await checkDirectCacheTagStatus(cliPlan.workspace, cliPlan.tag, {
-            noPlatform: cliPlan.proxy.no_platform, noGit: cliPlan.proxy.no_git, requireServerSignature: true,
-        }) : null;
+        ? await checkDirectCacheTagStatus(plannedCacheCheck(cliPlan)) : null;
     if (inputs.failOnCacheMiss && !preflight?.kvHit)
         throw new Error(`No remote cache entries were found for ${mode}.`);
     saveModeState('proxy-pid', '');

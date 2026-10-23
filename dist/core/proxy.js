@@ -6,7 +6,6 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { getAuthTokens, hasBrokeredWorkloadIdentity, missingRestoreTokenMessage, missingSaveTokenMessage, missingStageTokenMessage, } from './auth';
 import { readProxyFailures } from './proxy-log';
 export const DEFAULT_PROXY_PORT = 22243;
 const PROXY_READY_TIMEOUT_MS = 300000;
@@ -17,7 +16,6 @@ const PROXY_STOP_KILL_GRACE_MS = 5000;
 export const PROXY_VERIFICATION_STOP_TIMEOUT_MS = 60000;
 const PROXY_READY_POLL_INTERVAL_MS = 200;
 const PROXY_READY_WARN_INTERVAL_MS = 10000;
-const DEFAULT_OCI_HYDRATION_POLICY = 'metadata-only';
 function envSeconds(name) {
     const raw = process.env[name];
     if (!raw) {
@@ -37,22 +35,6 @@ export function proxyStopTimeoutMs(reportedBudgetSecs) {
         return reportedBudgetSecs * 1000 + PROXY_STOP_MARGIN_MS;
     }
     return PROXY_PUBLICATION_SHUTDOWN_BUDGET_SECS * 1000 + PROXY_STOP_MARGIN_MS;
-}
-export function normalizeProxyTags(tagInput) {
-    const tags = [];
-    const seen = new Set();
-    for (const rawTag of tagInput.split(',')) {
-        const tag = rawTag.trim();
-        if (!tag || seen.has(tag)) {
-            continue;
-        }
-        seen.add(tag);
-        tags.push(tag);
-    }
-    if (tags.length === 0) {
-        throw new Error('At least one proxy tag is required');
-    }
-    return tags.join(',');
 }
 export function isProcessAlive(pid, platform = process.platform, procRoot = '/proc') {
     if (platform === 'linux') {
@@ -235,107 +217,18 @@ async function fetchProxyStatus(host, port) {
  * Spawns a detached boringcache process, writes PID file, returns handle.
  */
 export async function startRegistryProxy(options) {
-    const { restoreToken, stageToken, saveToken } = getAuthTokens();
-    const brokeredWorkloadIdentity = hasBrokeredWorkloadIdentity();
-    if (options.readOnly && options.stage) {
-        throw new Error('Proxy stage cannot be combined with read-only mode.');
-    }
-    let effectiveReadOnly = options.readOnly === true;
-    const requestedStage = options.stage === true;
-    let effectiveStage = requestedStage;
-    let authToken = effectiveReadOnly
-        ? restoreToken
-        : effectiveStage
-            ? stageToken
-            : saveToken;
-    if (!brokeredWorkloadIdentity && !authToken && !effectiveReadOnly && restoreToken) {
-        effectiveReadOnly = true;
-        effectiveStage = false;
-        authToken = restoreToken;
-        routineInfo(`No ${requestedStage ? 'stage' : 'save'}-capable token configured; starting the runner-local cache in read-only mode with BORINGCACHE_RESTORE_TOKEN`);
-    }
-    if (!brokeredWorkloadIdentity && !authToken) {
-        if (effectiveReadOnly) {
-            throw new Error(`${missingRestoreTokenMessage()} This is required for proxy mode.`);
-        }
-        throw new Error(`${effectiveStage ? missingStageTokenMessage() : missingSaveTokenMessage()} This is required for proxy mode.`);
+    const effectiveReadOnly = options.readOnly === true;
+    if (!options.args?.length) {
+        throw new Error('The CLI plan is missing the proxy command. Upgrade cli-version.');
     }
     const host = options.host || '127.0.0.1';
-    const cliCommand = 'cache-registry';
-    const normalizedTags = normalizeProxyTags(options.tag);
     const readyFile = proxyReadyFilePath(options.port);
     if (await isProxyRunning(host, options.port)) {
         const status = await fetchProxyStatus(host, options.port);
         throw new Error(occupiedPortMessage(options.port, status, options.workspace));
     }
     clearProxyReadyFile(readyFile);
-    const args = [cliCommand, options.workspace, normalizedTags];
-    if (options.noGit) {
-        args.push('--no-git');
-    }
-    if (options.noPlatform) {
-        args.push('--no-platform');
-    }
-    args.push('--host', host, '--port', String(options.port));
-    if (options.protocol === 'reapi') {
-        args.push('--reapi');
-    }
-    args.push('--ready-file', readyFile);
-    if (options.onDemand) {
-        args.push('--on-demand');
-    }
-    else if (options.startupMode?.trim()) {
-        args.push('--startup-mode', options.startupMode.trim());
-    }
-    if (options.warmupStrategy?.trim()) {
-        args.push('--warmup-strategy', options.warmupStrategy.trim());
-    }
-    for (const ref of options.ociPrefetchRefs || []) {
-        const trimmed = ref.trim();
-        if (trimmed) {
-            args.push('--oci-prefetch-ref', trimmed);
-        }
-    }
-    for (const ref of options.ociAliasPromotionRefs || []) {
-        const trimmed = ref.trim();
-        if (trimmed) {
-            args.push('--oci-alias-promotion-ref', trimmed);
-        }
-    }
-    for (const digest of options.candidateDigests || []) {
-        const trimmed = digest.trim();
-        if (trimmed) {
-            args.push('--candidate-digest', trimmed);
-        }
-    }
-    const ociHydration = (options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY).trim();
-    if (ociHydration) {
-        args.push('--oci-hydration', ociHydration);
-    }
-    for (const [key, value] of Object.entries(options.metadataHints || {})) {
-        args.push('--metadata-hint', `${key}=${value}`);
-    }
-    if (options.xcodeSocket?.trim()) {
-        args.push('--xcode-socket', options.xcodeSocket.trim());
-    }
-    if (options.xcodeUpstreamPlugin?.trim()) {
-        args.push('--xcode-upstream-plugin', options.xcodeUpstreamPlugin.trim());
-    }
-    if (options.xcodeCasPath?.trim()) {
-        args.push('--xcode-cas-path', options.xcodeCasPath.trim());
-    }
-    if (options.xcodeEvidenceJson?.trim()) {
-        args.push('--xcode-evidence-json', options.xcodeEvidenceJson.trim());
-    }
-    if (options.nixHookSocket?.trim()) {
-        args.push('--nix-hook-socket', options.nixHookSocket.trim());
-    }
-    if (effectiveStage) {
-        args.push('--stage');
-    }
-    else if (effectiveReadOnly) {
-        args.push('--read-only');
-    }
+    const args = [...options.args, '--ready-file', readyFile];
     const strictCacheErrors = options.failOnCacheError ?? !effectiveReadOnly;
     if (strictCacheErrors) {
         args.push('--fail-on-cache-error');

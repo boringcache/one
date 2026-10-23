@@ -22,7 +22,7 @@ export function getInputs() {
     const diagnosticsLogLines = normalizeDiagnosticsLogLines('40');
     const resolvedDiagnostics = loadDiagnosticsConfig({ diagnostics, diagnosticsLogLines });
     return {
-        cliVersion: core.getInput('cli-version') || 'v1.43.3',
+        cliVersion: core.getInput('cli-version') || 'v1.44.0',
         cliPlatform: core.getInput('cli-platform'),
         mode,
         artifact: getArtifactInputs(mode),
@@ -43,23 +43,4 @@ export function getInputs() {
         lookupOnly: core.getBooleanInput('lookup-only'),
         verbose: resolvedDiagnostics.includeLogs,
     };
-}
-export function buildFlagArgs(inputs) {
-    const flagArgs = [];
-    if (inputs.failOnCacheMiss) {
-        flagArgs.push('--fail-on-cache-miss');
-    }
-    if (inputs.failOnCacheError) {
-        flagArgs.push('--fail-on-cache-error');
-    }
-    if (inputs.lookupOnly) {
-        flagArgs.push('--lookup-only');
-    }
-    if (inputs.verbose) {
-        flagArgs.push('--verbose');
-    }
-    if (!inputs.readOnly && !inputs.stage) {
-        flagArgs.push('--include-pr-tag');
-    }
-    return flagArgs;
 }

@@ -1,12 +1,11 @@
-import { routineInfo } from '../core/diagnostics';
 import { requireMachineConnectionWorkspace } from '../core/plan';
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execBoringCache as execBoringCacheCore, getActionState, hasBrokeredWorkloadIdentity, hasRestoreToken, hasSaveCredential, hasSaveToken, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, saveActionState, } from '../core';
-import { DEFAULT_OCI_HYDRATION_POLICY, requireCliVerificationTags, } from '../utils';
+import { execBoringCache as execBoringCacheCore, getActionState, startRegistryProxy, stopRegistryProxy, proxyStopTimeoutMs, saveActionState, } from '../core';
+import { requireCliVerificationTags, } from '../utils';
 export class DockerBuildFailure extends Error {
     constructor(message) {
         super(message);
@@ -25,22 +24,7 @@ export async function runDockerBuildOperation(operation) {
     }
 }
 export function actionProxyOptions(options, proxyPlan, failOnCacheError = false) {
-    // CLI <=1.14 reported "warm" but did not support --startup-mode. Omitting
-    // the new flag preserves that CLI's default while newer plans are explicit.
-    const plannedStartupMode = proxyPlan?.startup_mode;
-    return {
-        ...options,
-        protocol: proxyPlan?.protocol,
-        failOnCacheError,
-        onDemand: plannedStartupMode === 'on-demand',
-        startupMode: plannedStartupMode === 'warm'
-            ? options.startupMode
-            : plannedStartupMode || options.startupMode,
-        warmupStrategy: proxyPlan?.warmup_strategy,
-        ociPrefetchRefs: proxyPlan?.oci_prefetch_refs || [],
-        ociHydration: proxyPlan?.oci_hydration || options.ociHydration || DEFAULT_OCI_HYDRATION_POLICY,
-        metadataHints: proxyPlan?.metadata_hints || options.metadataHints || {},
-    };
+    return { ...options, args: proxyPlan?.command, failOnCacheError };
 }
 export function adapterVerificationSpecs(plan) {
     return requireCliVerificationTags(plan.verification_tags, plan.adapter || 'adapter')
@@ -76,11 +60,7 @@ export function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
 }
 export function planningReadOnly(inputs) {
-    return proxyPlanningReadOnly(inputs.readOnly || inputs.savePolicy === 'never');
-}
-export function proxyPlanningReadOnly(requestedReadOnly) {
-    return requestedReadOnly
-        || (!hasBrokeredWorkloadIdentity() && !hasSaveToken() && hasRestoreToken());
+    return inputs.readOnly || inputs.savePolicy === 'never';
 }
 export function appendCliPublicationPolicy(args, readOnly) {
     args.push(readOnly ? '--read-only' : '--write');
@@ -103,7 +83,13 @@ export function exportEnvVars(envVars) {
     }
 }
 export function applyAdapterSetupPlan(setup) {
-    exportEnvVars(setup.env_vars || {});
+    const env = { ...setup.env_vars };
+    for (const name of setup.prepend_existing_env || []) {
+        const existing = process.env[name];
+        if (existing?.trim() && env[name])
+            env[name] = `${existing.replace(/\n+$/, '')}\n${env[name]}`;
+    }
+    exportEnvVars(env);
     for (const directory of setup.directories || []) {
         ensureDir(directory);
     }
@@ -130,17 +116,6 @@ export function applyAdapterSetupPlan(setup) {
             fs.chmodSync(file.path, 0o700);
         }
     }
-}
-export function prependExistingNixConfig(setup) {
-    const planned = setup.env_vars?.NIX_CONFIG;
-    const existing = process.env.NIX_CONFIG;
-    if (!planned || !existing?.trim()) {
-        return;
-    }
-    setup.env_vars = {
-        ...setup.env_vars,
-        NIX_CONFIG: `${existing.replace(/\n+$/, '')}\n${planned}`,
-    };
 }
 export function setupFilePath(setup, suffix) {
     return (setup.files || []).find((file) => file.path.endsWith(suffix))?.path || '';
@@ -316,21 +291,6 @@ export async function resolveAdapterCliPlan(adapter, workspace, workingDirectory
     await preflightPlannedRequirements(adapter, plan, workingDirectory);
     return plan;
 }
-export async function saveSimpleCache(workspace, cacheKey, cacheDir, flags = {}) {
-    if (!hasSaveCredential()) {
-        core.notice(`Skipping cache save (${missingSaveTokenMessage()})`);
-        return;
-    }
-    if (!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0) {
-        routineInfo('No cache files to save');
-        return;
-    }
-    const args = ['save', workspace, `${cacheKey}:${cacheDir}`, '--force'];
-    if (flags.verbose) {
-        args.push('--verbose');
-    }
-    await execBoringCache(args);
-}
 export async function startPortableCacheProxy(workspace, port, tag, readOnly = false, proxyPlan, failOnCacheError = false) {
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
@@ -338,8 +298,6 @@ export async function startPortableCacheProxy(workspace, port, tag, readOnly = f
         tag,
         host: proxyPlan.host || '127.0.0.1',
         port,
-        noPlatform: proxyPlan.no_platform,
-        noGit: proxyPlan.no_git,
         readOnly,
     }, proxyPlan, failOnCacheError));
     return proxy;
@@ -352,85 +310,37 @@ export function emptyDirectCacheTagCheckStatus() {
         kvChecked: false,
     };
 }
-export function checkResultHasKvProbe(result) {
-    return typeof result.kv_entry_count === 'number'
-        || typeof result.kv_total_size === 'number'
-        || (result.status === 'hit' && result.cache_type === 'kv');
+export function plannedCacheHit(plan, results) {
+    const source = plan.cache_hit_source;
+    if (source === undefined) {
+        throw new Error('The CLI plan is missing cache-hit selection. Upgrade cli-version.');
+    }
+    return source ? results[source.tag]?.[source.field] === true : false;
 }
-export function checkResultHasKvRows(result) {
-    if (typeof result.kv_entry_count === 'number') {
-        return result.kv_entry_count > 0;
+export function plannedCacheCheck(plan, tag = plan.tag) {
+    const args = plan.cache_checks?.[tag];
+    if (!args?.length) {
+        throw new Error('The CLI plan is missing cache check commands. Upgrade cli-version.');
     }
-    return result.status === 'hit' && result.cache_type === 'kv';
+    return args;
 }
-export function checkResultHasCacheEntryHit(result) {
-    if (result.status !== 'hit') {
-        return false;
-    }
-    return result.cache_type !== 'kv';
-}
-export async function checkDirectCacheTagStatus(workspace, tag, { noPlatform = false, noGit = false, requireServerSignature = false, } = {}) {
-    const args = ['check', workspace, tag, '--json'];
-    if (requireServerSignature) {
-        args.unshift('--require-server-signature');
-    }
-    if (noPlatform) {
-        args.push('--no-platform');
-    }
-    if (noGit) {
-        args.push('--no-git');
-    }
+export async function checkDirectCacheTagStatus(args) {
     let stdout = '';
     const exitCode = await execBoringCache(args, {
         ignoreReturnCode: true,
         silent: true,
-        listeners: {
-            stdout: (data) => {
-                stdout += data.toString();
-            },
-        },
+        listeners: { stdout: (data) => { stdout += data.toString(); } },
     });
     if (exitCode !== 0) {
         return emptyDirectCacheTagCheckStatus();
     }
-    try {
-        const summary = JSON.parse(stdout);
-        const results = summary.results || [];
-        const cacheEntryHit = results.some(checkResultHasCacheEntryHit);
-        const kvHit = results.some(checkResultHasKvRows);
-        const kvChecked = results.some(checkResultHasKvProbe);
-        const legacyHit = results.length === 0 && typeof summary.hits === 'number' && summary.hits > 0;
-        return {
-            hit: cacheEntryHit || kvHit || legacyHit,
-            cacheEntryHit: cacheEntryHit || legacyHit,
-            kvHit,
-            kvChecked,
-        };
+    const summary = JSON.parse(stdout);
+    if (!summary.direct_cache) {
+        throw new Error('The CLI check result is missing direct_cache. Upgrade cli-version.');
     }
-    catch (error) {
-        core.warning(`Failed to parse boringcache check JSON for ${tag}: ${error.message}`);
-        return emptyDirectCacheTagCheckStatus();
-    }
+    return summary.direct_cache;
 }
-export async function checkDirectCacheProxyTagStatus(workspace, tag, options = {}) {
-    const strictStatus = await checkDirectCacheTagStatus(workspace, tag, {
-        ...options,
-        requireServerSignature: true,
-    });
-    if (strictStatus.kvChecked || strictStatus.kvHit) {
-        return strictStatus;
-    }
-    const kvStatus = await checkDirectCacheTagStatus(workspace, tag, {
-        ...options,
-        requireServerSignature: false,
-    });
-    return {
-        hit: strictStatus.cacheEntryHit || kvStatus.kvHit,
-        cacheEntryHit: strictStatus.cacheEntryHit,
-        kvHit: kvStatus.kvHit,
-        kvChecked: kvStatus.kvChecked || kvStatus.kvHit,
-    };
-}
+export const checkDirectCacheProxyTagStatus = checkDirectCacheTagStatus;
 export function directCachePreflightEvidence(preflight) {
     return {
         cache_preflight: {
@@ -440,11 +350,11 @@ export function directCachePreflightEvidence(preflight) {
         },
     };
 }
-export function rewritePlannedProxyPort(value, plannedPort, actualPort) {
-    if (plannedPort === actualPort) {
-        return value;
+export function plannedProxyEnv(plan, actualPort) {
+    if (actualPort !== plan.proxy.port) {
+        throw new Error('Proxy port differs from the CLI plan.');
     }
-    return value.replace(new RegExp(`:${plannedPort}(?=/|$)`), `:${actualPort}`);
+    return plan.env_vars || {};
 }
 export function readBoundedJsonObject(filePath) {
     try {

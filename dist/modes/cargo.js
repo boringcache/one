@@ -4,8 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { hasSaveCredential, missingSaveTokenMessage, startRegistryProxy, stopRegistryProxy, } from '../core';
-import { compilerCacheModeState, finishCompilerCacheSave, sccacheEnvForStartedProxy, sccacheServerLifecycle, sccacheStatsDetail, stopSccacheServer, } from './compiler-cache';
-import { actionProxyOptions, adapterVerificationSpecs, appendCliPublicationPolicy, checkDirectCacheTagStatus, emptyDirectCacheTagCheckStatus, execBoringCache, exportEnvVars, readBoundedJsonObject, getModeState, planningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
+import { compilerCacheModeState, finishCompilerCacheSave, sccacheServerLifecycle, sccacheStatsDetail, stopSccacheServer, } from './compiler-cache';
+import { actionProxyOptions, adapterVerificationSpecs, appendCliPublicationPolicy, checkDirectCacheTagStatus, plannedCacheCheck, plannedCacheHit, plannedProxyEnv, emptyDirectCacheTagCheckStatus, execBoringCache, exportEnvVars, readBoundedJsonObject, getModeState, planningReadOnly, resolveAdapterCliPlan, resolvePreferredPort, saveModeState, saveProxyModeState, setProxyOutputs, stopProxyFromState, } from './shared';
 const CARGO_FAILED_START_PROXY_STOP_TIMEOUT_MS = 10_000;
 const CARGO_LIFECYCLE_ENV = 'BORINGCACHE_CARGO_LIFECYCLE';
 function phaseEvidencePath(phase) {
@@ -15,24 +15,6 @@ function readPhaseEvidence(file) {
     const document = readBoundedJsonObject(file);
     fs.rmSync(file, { force: true });
     return document;
-}
-const CLI_TARGET_RESTORE_RESULTS = new Set(['restored', 'not-found', 'failed', 'skipped']);
-export function cargoTargetRestore(evidence, targetEntry) {
-    if (!targetEntry) {
-        return 'not-configured';
-    }
-    const resolvedTag = targetEntry.resolved_tag;
-    if (!resolvedTag || !evidence || evidence.schema_version !== 'cache_phase_evidence.v1'
-        || evidence.phase !== 'restore' || !Array.isArray(evidence.entries)) {
-        return 'unknown';
-    }
-    const result = evidence.entries.find((entry) => entry.operation === 'restore' && entry.resolved_tag === resolvedTag)?.restore_result;
-    return typeof result === 'string' && CLI_TARGET_RESTORE_RESULTS.has(result)
-        ? result
-        : 'unknown';
-}
-export function cargoCacheHit(restore) {
-    return restore === 'unknown' ? undefined : restore === 'restored';
 }
 function seconds(milliseconds) {
     return typeof milliseconds === 'number' ? Math.round(milliseconds / 100) / 10 : null;
@@ -79,23 +61,16 @@ export async function runCargoRestore(plan, inputs) {
     const compilerCacheTag = cargoCompilerCacheTag(cargoPlan);
     const [targetPreflight, compilerPreflight] = await Promise.all([
         targetEntry
-            ? checkDirectCacheTagStatus(cargoPlan.workspace, targetEntry.resolved_tag || targetEntry.tag, {
-                // Exact archive identities already include their own scope. Older
-                // CLI plans used one scope for both layers and omit resolved_tag.
-                noPlatform: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_platform,
-                noGit: targetEntry.resolved_tag ? true : cargoPlan.proxy.no_git,
-                requireServerSignature: true,
-            })
+            ? checkDirectCacheTagStatus(plannedCacheCheck(cargoPlan, targetEntry.resolved_tag || targetEntry.tag))
             : emptyDirectCacheTagCheckStatus(),
         compilerCacheEnabled
-            ? checkDirectCacheTagStatus(cargoPlan.workspace, compilerCacheTag, {
-                noPlatform: cargoPlan.proxy.no_platform,
-                noGit: cargoPlan.proxy.no_git,
-                requireServerSignature: true,
-            })
+            ? checkDirectCacheTagStatus(plannedCacheCheck(cargoPlan, compilerCacheTag))
             : emptyDirectCacheTagCheckStatus(),
     ]);
-    const cacheHit = targetEntry ? targetPreflight.cacheEntryHit : compilerPreflight.kvHit;
+    const cacheHit = plannedCacheHit(cargoPlan, {
+        [targetEntry?.resolved_tag || targetEntry?.tag || '']: targetPreflight,
+        [compilerCacheTag]: compilerPreflight,
+    });
     const cacheTag = targetEntry?.tag || (compilerCacheEnabled ? compilerCacheTag : '');
     if (inputs.failOnCacheMiss && !inputs.lookupOnly) {
         throw new Error('mode=cargo does not support fail-on-cache-miss while restoring yet; '
@@ -132,7 +107,6 @@ export async function runCargoRestore(plan, inputs) {
             cargoPlan,
             command: wrappedCommand,
             compilerCacheEnabled,
-            targetEntry,
             cacheTag,
             resolvedEntries,
             verificationSpecs,
@@ -171,7 +145,7 @@ export async function runCargoRestore(plan, inputs) {
         throw new Error(`boringcache cargo restore phase exited with code ${restoreExitCode}`);
     }
     const restoreEvidence = readPhaseEvidence(restoreEvidenceFile);
-    const targetRestore = cargoTargetRestore(restoreEvidence, targetEntry);
+    const targetRestore = restoreEvidence?.target_restore || 'unknown';
     core.setOutput('target-restore', targetRestore);
     setPhaseOutputs('restore', restoreEvidence);
     let proxyPort = cargoPlan.proxy.port;
@@ -182,13 +156,11 @@ export async function runCargoRestore(plan, inputs) {
             tag: compilerCacheTag,
             host: cargoPlan.proxy.host || '127.0.0.1',
             port: cargoPlan.proxy.port,
-            noGit: cargoPlan.proxy.no_git,
-            noPlatform: cargoPlan.proxy.no_platform,
             verbose: inputs.verbose,
             readOnly: cargoPlan.proxy.read_only,
         }, cargoPlan.proxy, inputs.failOnCacheError));
         proxyPort = proxy.port;
-        exportEnvVars(sccacheEnvForStartedProxy(cargoPlan, proxy.port));
+        exportEnvVars(plannedProxyEnv(cargoPlan, proxy.port));
         try {
             await sccacheServerLifecycle.start();
         }
@@ -216,15 +188,16 @@ export async function runCargoRestore(plan, inputs) {
     saveModeState('cargo-read-only', String(cargoPlan.proxy.read_only));
     saveModeState('cargo-fail-on-cache-error', String(inputs.failOnCacheError));
     saveModeState('cargo-compiler-cache', String(compilerCacheEnabled));
+    if (compilerCacheEnabled) {
+        saveModeState('sccache-check-args', JSON.stringify(plannedCacheCheck(cargoPlan, compilerCacheTag)));
+    }
     saveModeState('sccache-tag', compilerCacheTag);
-    saveModeState('sccache-no-platform', String(cargoPlan.proxy.no_platform));
-    saveModeState('sccache-no-git', String(cargoPlan.proxy.no_git));
     saveModeState('sccache-preflight-cache-entry-hit', String(compilerPreflight.cacheEntryHit));
     saveModeState('sccache-preflight-kv-hit', String(compilerPreflight.kvHit));
     saveModeState('sccache-preflight-kv-checked', String(compilerPreflight.kvChecked));
     return {
         workspace: cargoPlan.workspace,
-        cacheHit: cargoCacheHit(targetRestore),
+        cacheHit: restoreEvidence?.cache_hit,
         cacheTag,
         resolvedEntries,
         verificationSpecs,
@@ -308,7 +281,12 @@ export async function runCargoSave(options = {}) {
     await stopProxyFromState();
     if (compilerCacheEnabled) {
         const state = compilerCacheModeState('sccache');
-        await finishCompilerCacheSave('sccache', state, sccacheStats, sccacheStatsDetailText, options);
+        try {
+            await finishCompilerCacheSave('sccache', state, sccacheStats, sccacheStatsDetailText, options);
+        }
+        catch (error) {
+            compilerFailure = error instanceof Error ? error : new Error(String(error));
+        }
         if (failOnCacheError && !compilerFailure) {
             compilerFailure = nativeCompilerCacheFailure(sccacheStats, readOnly);
         }
@@ -380,12 +358,12 @@ async function runWrappedCargoCommand(input) {
             fs.rmSync(restoreEvidencePath, { force: true });
         }
     }
-    const targetRestore = cargoTargetRestore(restoreEvidence, input.targetEntry);
+    const targetRestore = restoreEvidence?.target_restore || 'unknown';
     core.setOutput('target-restore', targetRestore);
     saveModeState('cargo-lifecycle', 'command');
     return {
         workspace: cargoPlan.workspace,
-        cacheHit: cargoCacheHit(targetRestore),
+        cacheHit: restoreEvidence?.cache_hit,
         cacheTag: input.cacheTag,
         resolvedEntries: input.resolvedEntries,
         verificationSpecs: input.verificationSpecs,

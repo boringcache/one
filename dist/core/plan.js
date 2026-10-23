@@ -2,7 +2,6 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import { hasBrokeredWorkloadIdentity } from './auth';
 import { execBoringCache } from './setup';
-import { parseEntries } from './inputs';
 import { requireCliVerificationTags } from './tags';
 import { resolveModeSpec, } from '../modes';
 function splitEntriesInput(entries) {
@@ -60,21 +59,22 @@ export async function resolveCliCapabilityVersion(version) {
     }
     return match[1];
 }
-function appendCliPublicationPolicy(args, readOnly) {
-    args.push(readOnly ? '--read-only' : '--write');
+export function archiveRunArgs(profiles, policy) {
+    const args = ['run'];
+    for (const profile of profiles) {
+        args.push('--profile', profile);
+    }
+    if (policy.stage) {
+        args.push('--stage');
+    }
+    else {
+        args.push(policy.readOnly ? '--read-only' : '--write');
+    }
+    return args;
 }
-async function runDryRunPlan(workingDirectory, options) {
-    const { profileNames = [], readOnly = false, noGit = false, } = options;
+async function runDryRunPlan(workingDirectory, profiles, policy) {
     const executePlan = async () => {
-        const args = ['run'];
-        for (const profileName of profileNames) {
-            args.push('--profile', profileName);
-        }
-        if (noGit) {
-            args.push('--no-git');
-        }
-        appendCliPublicationPolicy(args, readOnly);
-        args.push('--dry-run', '--json');
+        const args = [...archiveRunArgs(profiles, policy), '--dry-run', '--json'];
         let stdout = '';
         let stderr = '';
         const exitCode = await exec.exec('boringcache', args, {
@@ -112,29 +112,27 @@ export async function buildArchiveEntries(inputs) {
     if (cacheProfiles.length === 0) {
         return {
             entries: '',
+            profiles: [],
             envVars: {},
             verificationTags: [],
         };
     }
-    const plan = await runDryRunPlan(inputs.workingDirectory, {
-        profileNames: cacheProfiles,
-        readOnly: inputs.readOnly,
-        noGit: inputs.stage,
-    });
+    const plan = await runDryRunPlan(inputs.workingDirectory, cacheProfiles, inputs);
     requireMachineConnectionWorkspace(plan);
     const firstEntry = plan.archive_entries?.[0];
-    const firstPair = plan.tag_path_pairs[0];
-    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag
-        || (firstPair ? parseEntries(firstPair, 'restore', { separatorMode: 'single' })[0]?.tag : undefined);
+    const cacheTagPrefix = firstEntry?.resolved_tag || firstEntry?.tag;
     const verificationTags = requireCliVerificationTags(plan.verification_tags, 'archive');
     if (plan.tag_path_pairs.length > 0 && verificationTags.length === 0) {
         throw new Error('The selected BoringCache CLI returned archive entries without exact verification tags.');
     }
+    if (plan.tag_path_pairs.length > 0
+        && !['restore', 'save'].every((phase) => plan.archive_phases?.includes(phase))) {
+        throw new Error('The selected BoringCache CLI does not run archive restore and save phases. '
+            + 'Remove the cli-version pin or select a CLI release that supports `boringcache run --phase`.');
+    }
     return {
         entries: plan.tag_path_pairs.join('\n'),
-        exclusions: Object.fromEntries((plan.archive_entries || [])
-            .filter((entry) => entry.exclude?.length)
-            .map((entry) => [entry.tag_path_pair, entry.exclude])),
+        profiles: cacheProfiles,
         envVars: plan.env_vars,
         cacheTagPrefix,
         workspace: plan.workspace,
@@ -166,7 +164,7 @@ export async function buildPlan(inputs) {
         cacheTagPrefix,
         envVars: archiveEntries.envVars,
         archiveEntries: archiveEntries.entries,
-        archiveExclusions: archiveEntries.exclusions,
+        archiveProfiles: archiveEntries.profiles,
         archiveVerificationTags: archiveEntries.verificationTags,
     };
 }

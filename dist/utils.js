@@ -4,7 +4,7 @@ export function resolveTrustDecision(requested) {
     return resolveCliTrustDecision(requested, execBoringCache);
 }
 export { ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, saveActionState, parseEntries, } from './core';
-export { buildFlagArgs, getInputs, DEFAULT_OCI_HYDRATION_POLICY, SAVE_ALWAYS_ENVIRONMENT, } from './core/action-inputs';
+export { getInputs, DEFAULT_OCI_HYDRATION_POLICY, SAVE_ALWAYS_ENVIRONMENT, } from './core/action-inputs';
 export { applyCliPlanEnv, buildArchiveEntries, buildPlan, getCacheTagPrefix, resolveCliCapabilityVersion, validateOneInputs, } from './core/plan';
 export { requireCliVerificationTags, resolveVerificationTags, } from './core/tags';
 export { actionErrorMessage, actionEvidenceProductRefs, cacheStorageFullSkip, ensureCiRunStartedAt, postPhaseSummary, restorePhaseSummary, writeActionEvidence, writeActionFailureEvidence, } from './core/evidence';

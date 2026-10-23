@@ -1,9 +1,14 @@
 import { routineInfo } from './core/diagnostics';
 import * as core from '@actions/core';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { archiveRunArgs } from './core/plan';
 import { transferArtifact } from './core/artifacts';
 import { startWorkloadIdentity, stopWorkloadIdentity } from './core/workload-identity';
-import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildFlagArgs, buildPlan, ensureBoringCache, ensureCiRunStartedAt, ensureXcodePlugin, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, SAVE_ALWAYS_ENVIRONMENT, parseEntries, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
+import { applyTrustEnvPolicy, applyCliPlanEnv, actionEvidenceProductRefs, actionErrorMessage, buildActionTrustState, buildPlan, ensureBoringCache, ensureCiRunStartedAt, ensureXcodePlugin, execBoringCache, getActionState, getInputs, loadDiagnosticsConfig, SAVE_ALWAYS_ENVIRONMENT, prepareCandidateReceiptFile, publishCandidateOutputs, readLogTail, resolveCliCapabilityVersion, resolveTrustDecision, restorePhaseSummary, runDiagnosticsGroup, saveActionState, writeActionEvidence, writeActionFailureEvidence, } from './utils';
 import { DockerBuildFailure, runModeRestore } from './mode-handlers';
+import { readBoundedJsonObject } from './modes/shared';
 const MAX_RESTORE_DIAGNOSTIC_CHARS = 8_000;
 function appendRestoreDiagnostic(current, data) {
     return `${current}${data.toString()}`.slice(-MAX_RESTORE_DIAGNOSTIC_CHARS);
@@ -45,122 +50,57 @@ async function emitRestoreDiagnostics(plan, inputs, resolvedTags, overallHit, tr
         }
     });
 }
-async function restoreEntries(workspace, entriesString, flagArgs) {
-    if (!entriesString.trim()) {
-        return { hit: false, evaluated: false, saveEntries: '' };
+async function restoreArchiveProfiles(plan, inputs) {
+    if (!plan.archiveEntries.trim()) {
+        return { hit: false, evaluated: false };
     }
-    const parsedEntries = parseEntries(entriesString, 'restore', {
-        separatorMode: 'newline',
-    });
-    if (parsedEntries.length === 0) {
-        return { hit: false, evaluated: false, saveEntries: '' };
+    const evidenceFile = path.join(os.tmpdir(), `boringcache-one-archive-restore-${process.pid}.json`);
+    fs.rmSync(evidenceFile, { force: true });
+    const args = [
+        ...archiveRunArgs(plan.archiveProfiles, inputs),
+        '--phase', 'restore',
+        '--phase-evidence-json', evidenceFile,
+        '--fail-on-cache-error',
+    ];
+    if (inputs.lookupOnly) {
+        args.push('--lookup-only');
     }
-    const primaryRestoreEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.restorePath}`);
-    const restoreEntriesArg = primaryRestoreEntries.join(',');
-    const saveEntries = parsedEntries.map((entry) => `${entry.tag}:${entry.savePath}`).join('\n');
-    const restoreMissShouldFail = flagArgs.includes('--fail-on-cache-miss');
-    const restoreErrorsShouldFail = flagArgs.includes('--fail-on-cache-error');
-    const attempts = [{
-            entries: primaryRestoreEntries,
-            tags: parsedEntries.map((entry) => entry.tag),
-        }];
-    const failedAttempts = [];
-    for (const attempt of attempts) {
-        const remotelyPresent = await checkEntries(workspace, attempt.tags, flagArgs);
-        if (!remotelyPresent) {
-            continue;
-        }
-        // The Action needs a truthful materialization result even when the workflow chooses
-        // best-effort cache behavior. Make this internal invocation strict, then soften a failure
-        // back to cache-hit=false below unless the user requested strict errors.
-        const restoreFlagArgs = flagArgs.includes('--fail-on-cache-error')
-            ? [...flagArgs]
-            : [...flagArgs, '--fail-on-cache-error'];
-        const restoreArgs = [
-            'restore', workspace,
-            ...attempt.entries.flatMap((entry) => ['--entry', entry]),
-            ...restoreFlagArgs,
-        ];
-        let stdout = '';
-        let stderr = '';
-        const restoreProcess = execBoringCache(restoreArgs, {
-            ignoreReturnCode: true,
-            listeners: {
-                stdout: (data) => {
-                    stdout = appendRestoreDiagnostic(stdout, data);
-                },
-                stderr: (data) => {
-                    stderr = appendRestoreDiagnostic(stderr, data);
-                },
-            },
-        });
-        const restoreExitCode = await restoreProcess;
-        if (restoreExitCode === 0) {
-            return { hit: true, evaluated: true, saveEntries };
-        }
-        const detail = restoreFailureDetail(stdout, stderr, attempt.entries);
-        failedAttempts.push(detail);
-        core.warning(`Cache entry was found but could not be restored: ${detail}`);
+    if (inputs.failOnCacheMiss) {
+        args.push('--fail-on-cache-miss');
     }
-    if (failedAttempts.length > 0) {
-        const detail = failedAttempts[failedAttempts.length - 1];
-        if (restoreErrorsShouldFail || restoreMissShouldFail) {
-            throw new Error(detail);
-        }
-        core.warning('No available cache candidate could be materialized; treating the restore as a miss.');
-    }
-    else if (restoreMissShouldFail) {
-        throw new Error(`Cache restore failed for ${restoreEntriesArg}`);
-    }
-    return { hit: false, evaluated: true, saveEntries };
-}
-async function checkEntries(workspace, tags, restoreFlagArgs) {
-    const checkTags = tags.map((tag) => tag.trim()).filter(Boolean);
-    if (checkTags.length === 0) {
-        return false;
+    if (inputs.verbose) {
+        args.push('--verbose');
     }
     let stdout = '';
-    const args = ['check', workspace, checkTags.join(','), ...checkFlagArgs(restoreFlagArgs), '--json'];
+    let stderr = '';
     const exitCode = await execBoringCache(args, {
+        cwd: plan.workingDirectory,
         ignoreReturnCode: true,
-        silent: true,
         listeners: {
             stdout: (data) => {
-                stdout += data.toString();
+                stdout = appendRestoreDiagnostic(stdout, data);
+            },
+            stderr: (data) => {
+                stderr = appendRestoreDiagnostic(stderr, data);
             },
         },
     });
-    if (!stdout.trim()) {
-        if (exitCode !== 0) {
-            core.warning(`Cache check failed for ${checkTags.join(',')}; treating as a miss.`);
+    const evidence = readBoundedJsonObject(evidenceFile);
+    fs.rmSync(evidenceFile, { force: true });
+    if (exitCode !== 0) {
+        const detail = restoreFailureDetail(stdout, stderr, plan.archiveEntries.split('\n'));
+        if (inputs.failOnCacheError || inputs.failOnCacheMiss) {
+            throw new Error(detail);
         }
-        else {
-            core.warning(`boringcache check --json produced no output for ${checkTags.join(',')}; treating as a miss.`);
-        }
-        return false;
+        core.warning(`Cache restore failed: ${detail}`);
+        core.warning('Treating the failed restore as a cache miss.');
+        return { hit: false, evaluated: true };
     }
-    let summary;
-    try {
-        summary = JSON.parse(stdout);
+    if (typeof evidence?.cache_hit !== 'boolean') {
+        core.warning('boringcache run --phase restore reported no cache_hit; cache-hit is not evaluated.');
+        return { hit: false, evaluated: false };
     }
-    catch (error) {
-        core.warning(`Failed to parse boringcache check JSON for ${checkTags.join(',')}: ${error instanceof Error ? error.message : String(error)}; treating as a miss.`);
-        return false;
-    }
-    return (summary.results || []).some((result) => result.status === 'hit');
-}
-function checkFlagArgs(restoreFlagArgs) {
-    const args = [];
-    if (restoreFlagArgs.includes('--no-platform')) {
-        args.push('--no-platform');
-    }
-    if (restoreFlagArgs.includes('--no-git')) {
-        args.push('--no-git');
-    }
-    if (restoreFlagArgs.includes('--include-pr-tag')) {
-        args.push('--include-pr-tag');
-    }
-    return args;
+    return { hit: evidence.cache_hit, evaluated: true };
 }
 export async function run() {
     const originalCwd = process.cwd();
@@ -250,8 +190,7 @@ export async function run() {
         };
         process.chdir(plan.workingDirectory);
         await applyCliPlanEnv(plan);
-        const archiveRestorePromise = restoreEntries(plan.workspace, plan.archiveEntries, buildFlagArgs(effectiveInputs));
-        const archiveRestore = await archiveRestorePromise;
+        const archiveRestore = await restoreArchiveProfiles(plan, effectiveInputs);
         const modeRestore = await runModeRestore(plan, effectiveInputs);
         const completedPlan = {
             ...plan,
@@ -261,7 +200,6 @@ export async function run() {
             throw new Error('The BoringCache CLI mode plan did not resolve a workspace. Set workspace in .boringcache.toml.');
         }
         const stagedCandidates = publishCandidateOutputs(candidateReceiptFile);
-        const genericSaveEntries = archiveRestore.saveEntries;
         const resolvedTags = Array.from(new Set([
             ...completedPlan.archiveVerificationTags,
             ...(modeRestore.verificationSpecs || []).map((spec) => spec.tag),
@@ -308,8 +246,8 @@ export async function run() {
             trust_state: trustState,
             trust_policy: trustDecision.resolved,
         };
-        saveActionState('generic-cache-entries', genericSaveEntries);
-        saveActionState('generic-cache-exclusions', JSON.stringify(completedPlan.archiveExclusions || {}));
+        saveActionState('generic-cache-entries', completedPlan.archiveEntries);
+        saveActionState('archive-profiles', JSON.stringify(completedPlan.archiveProfiles));
         saveActionState('generic-cache-workspace', completedPlan.workspace);
         await emitRestoreDiagnostics(completedPlan, inputs, resolvedTags, overallHit, trustState);
         if (!trustDecision.write_allowed) {

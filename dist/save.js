@@ -3,7 +3,8 @@ import * as core from '@actions/core';
 import { checkWorkloadIdentity, restoreWorkloadIdentity, stopWorkloadIdentity, WorkloadIdentityError, } from './core/workload-identity';
 import * as fs from 'fs';
 import { hasStageCredential, hasSaveCredential, missingStageTokenMessage, missingSaveTokenMessage, removeActionStateDocument, } from './core';
-import { actionErrorMessage, buildActionTrustState, cacheStorageFullSkip, compilerCacheObservation, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, parseEntries, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, writeCompilerCacheJobSummary, useCandidateReceiptFile, } from './utils';
+import { actionErrorMessage, buildActionTrustState, cacheStorageFullSkip, compilerCacheObservation, ensureBoringCache, ensureXcodePlugin, execBoringCache, getActionState, getInputs, applyTrustEnvPolicy, loadDiagnosticsConfig, readLogTail, normalizeTrustPolicy, parseSavedTrustDecision, resolveCliCapabilityVersion, resolveTrustDecision, runDiagnosticsGroup, saveActionState, postPhaseSummary, prepareCandidateReceiptFile, publishCandidateOutputs, writeActionEvidence, writeActionFailureEvidence, writeCompilerCacheJobSummary, useCandidateReceiptFile, } from './utils';
+import { archiveRunArgs } from './core/plan';
 import { runModeSave } from './mode-handlers';
 function buildCliSetupOptions(cliVersion, cliPlatform) {
     return {
@@ -116,7 +117,6 @@ export async function run() {
         const cliPlatform = getActionState('cli-platform') || inputs.cliPlatform || undefined;
         let workingDirectory = getActionState('working-directory');
         let genericEntries = getActionState('generic-cache-entries');
-        const genericExclusions = JSON.parse(getActionState('generic-cache-exclusions') || '{}');
         let genericWorkspace = getActionState('generic-cache-workspace');
         const verbose = getActionState('verbose') === 'true';
         const requestedTrustPolicy = normalizeTrustPolicy(getActionState('trust-policy') || inputs.trustPolicy);
@@ -213,43 +213,28 @@ export async function run() {
                     : 'no_generic_save');
             return;
         }
-        const saveEntries = parseEntries(genericEntries, 'save', {
-            separatorMode: 'newline',
-        })
-            .map((entry) => `${entry.tag}:${entry.savePath}`);
-        const saveGroups = new Map();
-        for (const entry of saveEntries) {
-            const selection = JSON.stringify(genericExclusions[entry] || []);
-            const group = saveGroups.get(selection) || [];
-            group.push(entry);
-            saveGroups.set(selection, group);
+        const archiveProfiles = JSON.parse(getActionState('archive-profiles') || '[]');
+        if (archiveProfiles.length === 0) {
+            throw new Error('The main step recorded archive entries without the cache-profiles that planned them.');
+        }
+        const args = [
+            ...archiveRunArgs(archiveProfiles, { readOnly: false, stage: resolvedTrustPolicy === 'stage' }),
+            '--phase', 'save',
+        ];
+        if (verbose) {
+            args.push('--verbose');
+        }
+        if (inputs.failOnCacheError) {
+            args.push('--fail-on-cache-error');
         }
         let storageFullSkip = '';
-        for (const [selection, entries] of saveGroups) {
-            const args = ['save', genericWorkspace];
-            for (const entry of entries) {
-                args.push('--entry', entry);
-            }
-            for (const pattern of JSON.parse(selection)) {
-                args.push('--exclude-pattern', pattern);
-            }
-            if (resolvedTrustPolicy === 'stage') {
-                args.push('--stage');
-            }
-            if (verbose) {
-                args.push('--verbose');
-            }
-            if (inputs.failOnCacheError) {
-                args.push('--fail-on-cache-error');
-            }
-            await execBoringCache(args, {
-                listeners: {
-                    errline: (line) => {
-                        storageFullSkip ||= cacheStorageFullSkip(line);
-                    },
+        await execBoringCache(args, {
+            listeners: {
+                errline: (line) => {
+                    storageFullSkip ||= cacheStorageFullSkip(line);
                 },
-            });
-        }
+            },
+        });
         if (storageFullSkip) {
             core.warning(storageFullSkip);
         }

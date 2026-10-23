@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.44.0] - 2026-10-23
+
+### Changed
+
+- Install BoringCache CLI `v1.44.0` by default, including split archive phases and native Linux BuildKit.
+
+- Proxy cache checks use the CLI-planned signed check without an unsigned retry. The CLI keeps the dedicated sccache daemon alive until cleanup with `SCCACHE_IDLE_TIMEOUT=0`.
+
+- Native adapter modes consume CLI-planned proxy commands, cache checks and environment values. Cargo cache-hit comes from CLI evidence.
+- Archive mode runs `boringcache run --profile <name> --phase restore` in the main step and `boringcache run --profile <name> --phase save` in the post step. The CLI resolves entries, exclusions and tag scope for both steps and reports `cache-hit`. The Action fails with an upgrade message when the installed CLI does not support archive phases.
+
+### Fixed
+
+- Archive entries with `exclude` patterns are no longer re-encoded and re-uploaded in full by every save on a new runner; the restore now uses the same exclusions as the save.
+
+### Security
+
+- Update the transitive IPv6 address parser to fix excessive CPU use when parsing malformed zone identifiers.
+
 ## [1.43.3] - 2026-10-22
 
 ### Changed
@@ -361,7 +380,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.43.3...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.44.0...HEAD
+[1.44.0]: https://github.com/boringcache/one/compare/v1.43.3...v1.44.0
 [1.43.3]: https://github.com/boringcache/one/compare/v1.43.2...v1.43.3
 [1.43.2]: https://github.com/boringcache/one/compare/v1.43.1...v1.43.2
 [1.43.1]: https://github.com/boringcache/one/compare/v1.43.0...v1.43.1
