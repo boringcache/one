@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.45.0] - 2026-10-27
+
+### Changed
+
+- Install BoringCache CLI `v1.45.0` by default, including immutable tool-cache versions on enabled servers, archive save request reductions and remote Docker and BuildKit builds.
+
+### Security
+
+- Update undici to 6.29.1 for the published response-decoding security fixes.
+
 ## [1.44.0] - 2026-10-23
 
 ### Changed
@@ -380,7 +390,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.44.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.45.0...HEAD
+[1.45.0]: https://github.com/boringcache/one/compare/v1.44.0...v1.45.0
 [1.44.0]: https://github.com/boringcache/one/compare/v1.43.3...v1.44.0
 [1.43.3]: https://github.com/boringcache/one/compare/v1.43.2...v1.43.3
 [1.43.2]: https://github.com/boringcache/one/compare/v1.43.1...v1.43.2
