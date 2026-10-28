@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.46.0] - 2026-10-28
+
+### Changed
+
+- Install BoringCache CLI `v1.46.0` by default, including archive chunk uploads during encoding, Gradle task evidence, concurrent local Cargo snapshot restores and upload-plan refresh after a rejected tool-cache receipt.
+
 ## [1.45.0] - 2026-10-27
 
 ### Changed
@@ -390,7 +396,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.45.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.46.0...HEAD
+[1.46.0]: https://github.com/boringcache/one/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/boringcache/one/compare/v1.44.0...v1.45.0
 [1.44.0]: https://github.com/boringcache/one/compare/v1.43.3...v1.44.0
 [1.43.3]: https://github.com/boringcache/one/compare/v1.43.2...v1.43.3
