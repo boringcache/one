@@ -409,15 +409,17 @@ export async function ensureBoringCache(options) {
         throw new Error('BoringCache CLI not found and cli-version is set to "skip"');
     }
     if (installedVersion !== null) {
-        core.debug('BoringCache CLI already available');
-        if (!runnerProvided) {
+        if (installedVersion !== '' && installedVersion === options.version.replace(/^v/, '')) {
+            core.debug('The requested BoringCache CLI is already available');
             return options.version;
         }
-        if (installedVersion === '') {
-            throw new Error('cli-version: runner needs the installed BoringCache CLI to report a semantic version, '
-                + 'but `boringcache --version` did not. Pin an exact cli-version instead.');
+        if (runnerProvided) {
+            if (installedVersion === '') {
+                throw new Error('cli-version: runner needs the installed BoringCache CLI to report a semantic version, '
+                    + 'but `boringcache --version` did not. Pin an exact cli-version instead.');
+            }
+            return `v${installedVersion}`;
         }
-        return `v${installedVersion}`;
     }
     const platform = getPlatformInfo(options.platform);
     const enableCache = options.cache !== false;

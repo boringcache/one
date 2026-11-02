@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Install the selected CLI release when a different version is already on `PATH`.
 
 ## [1.46.0] - 2026-10-29
 

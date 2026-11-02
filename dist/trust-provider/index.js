@@ -10626,6 +10626,9 @@ class Signed {
         else if (!(typeof expires === 'string')) {
             throw new TypeError('expires must be a string');
         }
+        else if (Number.isNaN(new Date(expires).getTime())) {
+            throw new error_1.ValueError('Failed to parse expires');
+        }
         if (!utils_1.guard.isDefined(version)) {
             throw new error_1.ValueError('version is not defined');
         }
@@ -12159,6 +12162,7 @@ const NULL_BYTE = 0x00;
 const OID_EDDSA = '1.3.101.112';
 const OID_EC_PUBLIC_KEY = '1.2.840.10045.2.1';
 const OID_EC_CURVE_P256V1 = '1.2.840.10045.3.1.7';
+const OID_EC_CURVE_P384 = '1.3.132.0.34';
 const PEM_HEADER = '-----BEGIN PUBLIC KEY-----';
 function getPublicKey(keyInfo) {
     switch (keyInfo.keyType) {
@@ -12182,8 +12186,11 @@ function getRSAPublicKey(keyInfo) {
     const key = crypto_1.default.createPublicKey(keyInfo.keyVal);
     switch (keyInfo.scheme) {
         case 'rsassa-pss-sha256':
+        case 'rsassa-pss-sha384':
+        case 'rsassa-pss-sha512':
             return {
                 key: key,
+                hashAlgorithm: keyInfo.scheme.slice('rsassa-pss-'.length),
                 padding: crypto_1.default.constants.RSA_PKCS1_PSS_PADDING,
             };
         default:
@@ -12210,6 +12217,26 @@ function getED25519PublicKey(keyInfo) {
     return { key };
 }
 function getECDCSAPublicKey(keyInfo) {
+    let namedCurve;
+    let curveOID;
+    let hashAlgorithm;
+    switch (keyInfo.scheme) {
+        case 'ecdsa-sha2-nistp256':
+            namedCurve = 'prime256v1';
+            curveOID = OID_EC_CURVE_P256V1;
+            hashAlgorithm = 'sha256';
+            break;
+        case 'ecdsa-sha2-nistp384':
+            namedCurve = 'secp384r1';
+            curveOID = OID_EC_CURVE_P384;
+            hashAlgorithm = 'sha384';
+            break;
+        default:
+            throw new error_1.UnsupportedAlgorithmError(`Unsupported ECDSA scheme: ${keyInfo.scheme}`);
+    }
+    if (keyInfo.keyType !== 'ecdsa' && keyInfo.keyType !== keyInfo.scheme) {
+        throw new error_1.CryptoError('ECDSA key type does not match scheme');
+    }
     let key;
     // If key is already PEM-encoded we can just parse it
     if (keyInfo.keyVal.startsWith(PEM_HEADER)) {
@@ -12221,12 +12248,16 @@ function getECDCSAPublicKey(keyInfo) {
             throw new error_1.CryptoError('Invalid key format');
         }
         key = crypto_1.default.createPublicKey({
-            key: ecdsa.hexToDER(keyInfo.keyVal),
+            key: ecdsa.hexToDER(keyInfo.keyVal, curveOID),
             format: 'der',
             type: 'spki',
         });
     }
-    return { key };
+    if (key.asymmetricKeyType !== 'ec' ||
+        key.asymmetricKeyDetails?.namedCurve !== namedCurve) {
+        throw new error_1.CryptoError('ECDSA key curve does not match scheme');
+    }
+    return { key, hashAlgorithm };
 }
 const ed25519 = {
     // Translates a hex key into a crypto KeyObject
@@ -12258,7 +12289,7 @@ const ed25519 = {
     },
 };
 const ecdsa = {
-    hexToDER: (hex) => {
+    hexToDER: (hex, curveOID) => {
         const key = Buffer.from(hex, 'hex');
         const bitString = Buffer.concat([
             Buffer.from([ANS1_TAG_BIT_STRING]),
@@ -12268,7 +12299,7 @@ const ecdsa = {
         ]);
         const oids = Buffer.concat([
             (0, oid_1.encodeOIDString)(OID_EC_PUBLIC_KEY),
-            (0, oid_1.encodeOIDString)(OID_EC_CURVE_P256V1),
+            (0, oid_1.encodeOIDString)(curveOID),
         ]);
         const oidSequence = Buffer.concat([
             Buffer.from([ASN1_TAG_SEQUENCE]),
@@ -12313,11 +12344,11 @@ function encodeOIDString(oid) {
 function encodeVariableLengthInteger(value) {
     const bytes = [];
     let mask = 0x00;
-    while (value > 0) {
+    do {
         bytes.unshift((value & 0x7f) | mask);
         value >>= 7;
         mask = 0x80;
-    }
+    } while (value > 0);
     return bytes;
 }
 
@@ -12338,7 +12369,7 @@ const canonical_json_1 = __nccwpck_require__(5178);
 const crypto_1 = __importDefault(__nccwpck_require__(6982));
 const verifySignature = (metaDataSignedData, key, signature) => {
     const canonicalData = Buffer.from((0, canonical_json_1.canonicalize)(metaDataSignedData));
-    return crypto_1.default.verify(undefined, canonicalData, key, Buffer.from(signature, 'hex'));
+    return crypto_1.default.verify(key.hashAlgorithm, canonicalData, key, Buffer.from(signature, 'hex'));
 };
 exports.verifySignature = verifySignature;
 
@@ -19323,10 +19354,10 @@ function stringToPaddedHex(numberString) {
  */
 function testBit(binaryValue, position) {
     const { length } = binaryValue;
-    if (position > length) {
+    if (position >= length) {
         return false;
     }
-    const positionInString = length - position;
+    const positionInString = length - position - 1;
     return binaryValue.substring(positionInString, positionInString + 1) === '1';
 }
 //# sourceMappingURL=common.js.map
@@ -34496,8 +34527,14 @@ class Updater {
     // Load local and remote targets metadata.
     // Client workflow 5.6: update targets role
     async loadTargets(role, parentRole) {
-        if (this.trustedSet.getRole(role)) {
-            return this.trustedSet.getRole(role);
+        const cachedRole = this.trustedSet.getRole(role);
+        if (cachedRole) {
+            const delegator = this.trustedSet.getRole(parentRole);
+            if (!delegator) {
+                throw new error_1.RuntimeError(`No trusted ${parentRole} metadata`);
+            }
+            delegator.verifyDelegate(role, cachedRole);
+            return cachedRole;
         }
         try {
             const buffer = this.loadLocalMetadata(role);
@@ -40892,7 +40929,7 @@ module.exports = {"rE":"6.0.0"};
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"name":"tuf-js","version":"6.0.0","description":"JavaScript implementation of The Update Framework (TUF)","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc --build tsconfig.build.json","clean":"rm -rf dist && rm tsconfig.build.tsbuildinfo","test":"jest"},"repository":{"type":"git","url":"git+https://github.com/theupdateframework/tuf-js.git"},"files":["dist"],"keywords":["tuf","security","update"],"author":"bdehamer@github.com","license":"MIT","bugs":{"url":"https://github.com/theupdateframework/tuf-js/issues"},"homepage":"https://github.com/theupdateframework/tuf-js/tree/main/packages/client#readme","devDependencies":{"@tufjs/repo-mock":"5.0.0","@types/debug":"^4.1.13","@types/retry":"^0.12.5"},"dependencies":{"@gar/promise-retry":"^1.0.3","@tufjs/models":"5.0.0","debug":"^4.4.3"},"engines":{"node":"^22.22.2 || ^24.15.0 || >=26.0.0"}}');
+module.exports = /*#__PURE__*/JSON.parse('{"name":"tuf-js","version":"6.0.1","description":"JavaScript implementation of The Update Framework (TUF)","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc --build tsconfig.build.json","clean":"rm -rf dist && rm tsconfig.build.tsbuildinfo","test":"jest"},"repository":{"type":"git","url":"git+https://github.com/theupdateframework/tuf-js.git"},"files":["dist"],"keywords":["tuf","security","update"],"author":"bdehamer@github.com","license":"MIT","bugs":{"url":"https://github.com/theupdateframework/tuf-js/issues"},"homepage":"https://github.com/theupdateframework/tuf-js/tree/main/packages/client#readme","devDependencies":{"@tufjs/repo-mock":"5.0.1","@types/debug":"^4.1.13","@types/retry":"^0.12.5"},"dependencies":{"@gar/promise-retry":"^1.0.3","@tufjs/models":"5.0.1","debug":"^4.4.3"},"engines":{"node":"^22.22.2 || ^24.15.0 || >=26.0.0"}}');
 
 /***/ })
 
