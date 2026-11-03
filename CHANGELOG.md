@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Install the selected CLI release when a different version is already on `PATH`. A CLI that already matches the selected binary stays in place, and a different one is replaced without writing into a running executable, so a cache proxy started by the Action keeps running through the post-step save.
 
 ## [1.46.0] - 2026-10-29
 

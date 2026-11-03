@@ -140,14 +140,58 @@ export async function exposeBoringCacheCli(toolPath, binaryName = process.platfo
     // The source is the selected CLI binary in the hosted tool cache; the destination is runner-local action state.
     // codeql[js/path-injection]
     await fs.promises.mkdir(stableBinDir, { recursive: true });
-    // codeql[js/path-injection]
-    await fs.promises.copyFile(sourcePath, stablePath);
-    if (process.platform !== 'win32') {
-        // codeql[js/path-injection]
-        await fs.promises.chmod(stablePath, 0o755);
+    if (!(await sameFileContent(sourcePath, stablePath))) {
+        await replaceExecutable(sourcePath, stablePath);
     }
     await ensureMacosCodeSignature(stablePath);
     return stableBinDir;
+}
+async function sameFileContent(first, second) {
+    // codeql[js/path-injection]
+    const [firstStat, secondStat] = await Promise.all([
+        fs.promises.stat(first),
+        fs.promises.stat(second).catch(() => null),
+    ]);
+    if (!secondStat?.isFile() || firstStat.size !== secondStat.size) {
+        return false;
+    }
+    const [firstHash, secondHash] = await Promise.all([computeFileHash(first), computeFileHash(second)]);
+    return firstHash === secondHash;
+}
+async function replaceExecutable(sourcePath, stablePath) {
+    const staged = `${stablePath}.${process.pid}.tmp`;
+    try {
+        // codeql[js/path-injection]
+        await fs.promises.copyFile(sourcePath, staged);
+        if (process.platform !== 'win32') {
+            // codeql[js/path-injection]
+            await fs.promises.chmod(staged, 0o755);
+        }
+        try {
+            // codeql[js/path-injection]
+            await fs.promises.rename(staged, stablePath);
+        }
+        catch (error) {
+            if (process.platform !== 'win32' || !isBusyExecutableError(error)) {
+                throw error;
+            }
+            const retired = `${stablePath}.${process.pid}.old`;
+            // codeql[js/path-injection]
+            await fs.promises.rename(stablePath, retired);
+            // codeql[js/path-injection]
+            await fs.promises.rename(staged, stablePath);
+            // codeql[js/path-injection]
+            await fs.promises.unlink(retired).catch(() => undefined);
+        }
+    }
+    finally {
+        // codeql[js/path-injection]
+        await fs.promises.rm(staged, { force: true });
+    }
+}
+function isBusyExecutableError(error) {
+    const code = error?.code;
+    return code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
 }
 function getPlatformInfo(platformOverride) {
     if (platformOverride) {
@@ -409,15 +453,17 @@ export async function ensureBoringCache(options) {
         throw new Error('BoringCache CLI not found and cli-version is set to "skip"');
     }
     if (installedVersion !== null) {
-        core.debug('BoringCache CLI already available');
-        if (!runnerProvided) {
+        if (installedVersion !== '' && installedVersion === options.version.replace(/^v/, '')) {
+            core.debug('The requested BoringCache CLI is already available');
             return options.version;
         }
-        if (installedVersion === '') {
-            throw new Error('cli-version: runner needs the installed BoringCache CLI to report a semantic version, '
-                + 'but `boringcache --version` did not. Pin an exact cli-version instead.');
+        if (runnerProvided) {
+            if (installedVersion === '') {
+                throw new Error('cli-version: runner needs the installed BoringCache CLI to report a semantic version, '
+                    + 'but `boringcache --version` did not. Pin an exact cli-version instead.');
+            }
+            return `v${installedVersion}`;
         }
-        return `v${installedVersion}`;
     }
     const platform = getPlatformInfo(options.platform);
     const enableCache = options.cache !== false;
