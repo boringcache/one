@@ -50,7 +50,7 @@ permissions:
   id-token: write
 
 steps:
-  - uses: boringcache/one@4814c7a9ed44a2963635837151d957a702389037 # v1.46.0
+  - uses: boringcache/one@7a48f358c4a42f6944285300f5effe58975875d9 # v1.47.0
     with:
       trust-policy: auto
       mode: archive
@@ -66,7 +66,7 @@ precedence and does not require a BoringCache token.
 If workload identity is unavailable, configure explicitly scoped credentials:
 
 ```yaml
-- uses: boringcache/one@4814c7a9ed44a2963635837151d957a702389037 # v1.46.0
+- uses: boringcache/one@7a48f358c4a42f6944285300f5effe58975875d9 # v1.47.0
   with:
     trust-policy: auto
     mode: archive
