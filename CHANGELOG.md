@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.47.0] - 2026-11-04
+
+### Changed
+
+- Install BoringCache CLI `v1.47.0` by default, including `run --remote` on named Linux remotes, Daytona remote workers, the warning for Cargo targets built under another Cargo home, and downloads of large cache objects that continue instead of restarting on slow storage connections.
+
+### Fixed
+
+- Install the selected CLI release when a different version is already on `PATH`. A CLI that already matches the selected binary stays in place, and a different one is replaced without writing into a running executable, so a cache proxy started by the Action keeps running through the post-step save.
+
 ## [1.46.0] - 2026-10-29
 
 ### Changed
@@ -396,7 +406,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.46.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.47.0...HEAD
+[1.47.0]: https://github.com/boringcache/one/compare/v1.46.0...v1.47.0
 [1.46.0]: https://github.com/boringcache/one/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/boringcache/one/compare/v1.44.0...v1.45.0
 [1.44.0]: https://github.com/boringcache/one/compare/v1.43.3...v1.44.0
