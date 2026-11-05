@@ -1,4 +1,4 @@
-import { cleanupNixRuntimeDirectory, drainNixUploads, runBazelRestore, runReapiRestore, cleanupReapiSetup, execReapiShutdown, runGoRestore, runGradleRestore, runMavenRestore, runNixRestore, runNxProxyRestore, runTurboProxyRestore, runXcodeRestore, shutdownBazelServer, } from './modes/adapters';
+import { cleanupNixRuntimeDirectory, cleanupGoSetup, drainNixUploads, runBazelRestore, runReapiRestore, cleanupReapiSetup, execReapiShutdown, runGoRestore, runGradleRestore, runMavenRestore, runNixRestore, runNxProxyRestore, runTurboProxyRestore, runXcodeRestore, shutdownBazelServer, } from './modes/adapters';
 import { runCargoRestore, runCargoSave } from './modes/cargo';
 import { runCcacheRestore, runCcacheSave, runSccacheRestore, runSccacheSave, } from './modes/compiler-cache';
 import { runGhaRestore } from './modes/gha';
@@ -89,7 +89,12 @@ export async function runModeSave(mode, options = {}) {
             await runCcacheSave(options);
             return;
         case 'go':
-            await stopProxyFromState();
+            try {
+                await stopProxyFromState();
+            }
+            finally {
+                cleanupGoSetup();
+            }
             return;
         case 'gradle':
         case 'gha':

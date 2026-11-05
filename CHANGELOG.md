@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Go mode applies export-directory setup from the CLI and removes those directories in post, after workflow steps finish. This requires a CLI that supplies the export-directory setup plan.
+
 
 ## [1.47.0] - 2026-11-04
 

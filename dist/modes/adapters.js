@@ -47,6 +47,8 @@ export async function runGoRestore(plan, inputs) {
     const workspace = proxyPlan.workspace;
     const cacheTag = proxyPlan.tag;
     const preflight = await checkDirectCacheProxyTagStatus(plannedCacheCheck(proxyPlan));
+    const setup = proxyPlan.setup ? requireAdapterSetupPlan('go', proxyPlan.setup) : undefined;
+    saveModeState('go-setup', setup ? JSON.stringify(setup) : '');
     saveModeState('proxy-pid', '');
     const proxy = await startRegistryProxy(actionProxyOptions({
         command: 'cache-registry',
@@ -59,6 +61,8 @@ export async function runGoRestore(plan, inputs) {
     }, proxyPlan.proxy));
     saveModeState('proxy-pid', String(proxy.pid));
     saveProxyModeState(proxy);
+    if (setup)
+        applyAdapterSetupPlan(setup);
     exportEnvVars(plannedProxyEnv(proxyPlan, proxy.port));
     setProxyOutputs(proxy.port);
     return {
@@ -68,6 +72,15 @@ export async function runGoRestore(plan, inputs) {
         evidence: directCachePreflightEvidence(preflight),
         verificationSpecs: adapterVerificationSpecs(proxyPlan),
     };
+}
+export function cleanupGoSetup() {
+    const state = getModeState('go-setup');
+    if (!state)
+        return;
+    const setup = JSON.parse(state);
+    for (const directory of setup.cleanup_directories || []) {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
 }
 export async function runGradleRestore(plan, inputs) {
     const requestedPort = await resolvePreferredPort(inputs.proxyPort, 'proxy-port');
