@@ -7175,8 +7175,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 const make_fetch_happen_1 = __importDefault(__nccwpck_require__(9310));
+const node_child_process_1 = __nccwpck_require__(1421);
 // Collection of all the CI-specific providers we have implemented
-const providers = [getGHAToken, getEnv];
+const providers = [getGHAToken, getBuildkiteToken, getEnv];
 /**
  * CIContextProvider is a composite identity provider which will iterate
  * over all of the CI-specific providers and return the token from the first
@@ -7216,6 +7217,19 @@ async function getGHAToken(audience) {
         },
     });
     return response.json().then((data) => data.value);
+}
+/**
+ * getBuildkiteToken can retrieve an OIDC token when running in a Buildkite job.
+ */
+async function getBuildkiteToken(audience) {
+    if (process.env.BUILDKITE !== 'true') {
+        return Promise.reject('no token available');
+    }
+    const stdout = await new Promise((resolve, reject) => {
+        (0, node_child_process_1.execFile)('buildkite-agent', ['oidc', 'request-token', '--audience', audience], (error, stdout) => (error ? reject(error) : resolve(stdout)));
+    });
+    const token = stdout.trim();
+    return token || Promise.reject('no token available');
 }
 /**
  * getEnv can retrieve an OIDC token from an environment variable.
@@ -7745,7 +7759,7 @@ class TLogClient {
     rekor;
     fetchOnConflict;
     constructor(options) {
-        this.fetchOnConflict = options.fetchOnConflict ?? false;
+        this.fetchOnConflict = options.fetchOnConflict ?? true;
         this.rekor = new rekor_1.Rekor({
             baseURL: options.rekorBaseURL,
             retry: options.retry,
@@ -9885,7 +9899,9 @@ function verifyTLogInclusion(entry, tlogAuthorities) {
         inclusionVerified = true;
     }
     if (isTLogEntryWithInclusionProof(entry)) {
-        const checkpoint = (0, checkpoint_1.verifyCheckpoint)(entry, tlogAuthorities);
+        // Bind the claimed log ID to the authority that verifies the checkpoint.
+        const matchingAuthorities = tlogAuthorities.filter((tlog) => tlog.logID.equals(entry.logId.keyId));
+        const checkpoint = (0, checkpoint_1.verifyCheckpoint)(entry, matchingAuthorities);
         (0, merkle_1.verifyMerkleInclusion)(entry, checkpoint);
         inclusionVerified = true;
     }
@@ -10411,11 +10427,15 @@ class Verifier {
         tlogEntries.forEach((entry) => {
             (0, tlog_1.verifyTLogInclusion)(entry, this.trustMaterial.tlogs);
             (0, tlog_1.verifyTLogBody)(entry, content);
-            entryIDs.push({ logID: entry.logId.keyId, logIndex: entry.logIndex });
+            entryIDs.push({
+                logID: entry.logId.keyId,
+                body: entry.canonicalizedBody,
+            });
         });
         // Check for duplicate entries so that repeated copies of a single entry
-        // cannot be counted more than once toward the threshold. The timestamp and
-        // SCT checks above dedupe their collections the same way.
+        // cannot be counted more than once toward the threshold. Inclusion
+        // verification authenticates the log ID and body, but a proof does not
+        // authenticate the top-level log index.
         if (containsDupes(entryIDs)) {
             throw new error_1.VerificationError({
                 code: 'TLOG_ERROR',
@@ -10766,6 +10786,9 @@ function rolesFromJSON(data) {
         }
         roleMap = data.reduce((acc, role) => {
             const delegatedRole = role_1.DelegatedRole.fromJSON(role);
+            if (Object.hasOwn(acc, delegatedRole.name)) {
+                throw new error_1.ValueError(`duplicate delegated role: ${delegatedRole.name}`);
+            }
             return {
                 ...acc,
                 [delegatedRole.name]: delegatedRole,
@@ -20754,7 +20777,7 @@ class Address6 {
         address = this.parse4in6(address);
         const badCharacters = address.match(constants6.RE_BAD_CHARACTERS);
         if (badCharacters) {
-            throw new address_error_1.AddressError(`Bad character${badCharacters.length > 1 ? 's' : ''} detected in address: ${badCharacters.join('')}`, address.replace(constants6.RE_BAD_CHARACTERS, '<span class="parse-error">$1</span>'));
+            throw new address_error_1.AddressError(`Bad character${badCharacters.length > 1 ? 's' : ''} detected in address: ${badCharacters.join('')}`, address.replace(constants6.RE_BAD_CHARACTERS, (character) => `<span class="parse-error">${helpers.escapeHtml(character)}</span>`));
         }
         const badAddress = address.match(constants6.RE_BAD_ADDRESS);
         if (badAddress) {
@@ -27717,7 +27740,7 @@ class Range {
     debug('hyphen replace', range)
 
     // `> 1.2.3 < 1.2.5` => `>1.2.3 <1.2.5`
-    range = range.replace(re[t.COMPARATORTRIM], comparatorTrimReplace)
+    range = trimComparatorWhitespace(range)
     debug('comparator trim', range)
 
     // `~ 1.2.3` => `~1.2.3`
@@ -27822,11 +27845,11 @@ const parseOptions = __nccwpck_require__(356)
 const Comparator = __nccwpck_require__(9379)
 const debug = __nccwpck_require__(1159)
 const SemVer = __nccwpck_require__(7163)
+const trimComparatorWhitespace = __nccwpck_require__(9737)
 const {
   safeRe: re,
   src,
   t,
-  comparatorTrimReplace,
   tildeTrimReplace,
   caretTrimReplace,
 } = __nccwpck_require__(5471)
@@ -29237,6 +29260,35 @@ const MAX_SAFE_COMPONENT_LENGTH = 16
 // the shortest version with a build 0.0.0+BUILD.
 const MAX_SAFE_BUILD_LENGTH = MAX_LENGTH - 6
 
+// ECMAScript whitespace and line terminators matched by \s.
+const WHITESPACE_CHARACTERS = [
+  '\t',
+  '\n',
+  '\v',
+  '\f',
+  '\r',
+  ' ',
+  '\u00a0',
+  '\u1680',
+  '\u2000',
+  '\u2001',
+  '\u2002',
+  '\u2003',
+  '\u2004',
+  '\u2005',
+  '\u2006',
+  '\u2007',
+  '\u2008',
+  '\u2009',
+  '\u200a',
+  '\u2028',
+  '\u2029',
+  '\u202f',
+  '\u205f',
+  '\u3000',
+  '\ufeff',
+]
+
 const RELEASE_TYPES = [
   'major',
   'premajor',
@@ -29252,6 +29304,7 @@ module.exports = {
   MAX_SAFE_COMPONENT_LENGTH,
   MAX_SAFE_BUILD_LENGTH,
   MAX_SAFE_INTEGER,
+  WHITESPACE_CHARACTERS,
   RELEASE_TYPES,
   SEMVER_SPEC_VERSION,
   FLAG_INCLUDE_PRERELEASE: 0b001,
@@ -29619,6 +29672,452 @@ createToken('STAR', '(<|>)?=?\\s*\\*')
 // >=0.0.0 is like a star
 createToken('GTE0', '^\\s*>=\\s*0\\.0\\.0\\s*$')
 createToken('GTE0PRE', '^\\s*>=\\s*0\\.0\\.0-0\\s*$')
+
+
+/***/ }),
+
+/***/ 9737:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+// @ts-check
+
+
+// Reproduce safeRe[COMPARATORTRIM] replacement boundaries, not version
+// validation. Each end-index finder returns an exclusive end, or its start
+// on no match.
+// Positions count from zero. An end of 3 means characters 0, 1, and 2 were read;
+// range.slice(start, end) gives the matched text, not a converted number.
+const {
+  MAX_LENGTH,
+  MAX_SAFE_BUILD_LENGTH,
+  WHITESPACE_CHARACTERS,
+} = __nccwpck_require__(5101)
+
+/**
+ * Remembers the last two rows of digits so their characters need not be reread.
+ * Positions start at -1 until a row has been found.
+ *
+ * @typedef {object} DigitRunCache
+ * @property {number} start The first character of the most recently found row.
+ * @property {number} end The position after that row's last character.
+ * @property {number} previousStart The first character of the previous row.
+ * @property {number} previousEnd The position after the previous row.
+ */
+
+// One entry per UTF-16 code unit keeps membership checks constant-time.
+const whitespace = new Uint8Array(0x10000)
+for (const char of WHITESPACE_CHARACTERS) {
+  whitespace[char.charCodeAt(0)] = 1
+}
+
+/**
+ * Checks whether a character is whitespace, like a space, tab, or newline.
+ * Looking past the end of the string returns false.
+ *
+ * @param {string|undefined} char One character, or undefined past the string's end.
+ * @returns {boolean} Whether the character is whitespace.
+ * @example isWhitespace(' ') // true
+ * @example isWhitespace('1') // false
+ */
+const isWhitespace = char =>
+  char !== undefined && whitespace[char.charCodeAt(0)] === 1
+
+/**
+ * Checks for v, =, or whitespace before the version number.
+ * These are historical version prefixes, not range operators:
+ * < and > are handled separately, as are tilde and caret ranges.
+ *
+ * @param {string|undefined} char One character to check.
+ * @returns {boolean} Whether the character can belong to a version prefix.
+ * @example isVersionPrefix('=') // true
+ * @example isVersionPrefix('>') // false
+ */
+const isVersionPrefix = char =>
+  char === 'v' ||
+  char === '=' ||
+  isWhitespace(char)
+
+/**
+ * Checks whether a character is one of the digits 0 through 9.
+ *
+ * @param {string|undefined} char One character to check.
+ * @returns {boolean} Whether the character is an ASCII digit.
+ * @example isDigit('7') // true
+ * @example isDigit('.') // false
+ */
+const isDigit = char => char !== undefined && char >= '0' && char <= '9'
+
+/**
+ * Checks whether a character is an English letter, uppercase or lowercase.
+ *
+ * @param {string|undefined} char One character to check.
+ * @returns {boolean} Whether the character is an ASCII letter.
+ * @example isLetter('b') // true
+ * @example isLetter('7') // false
+ */
+const isLetter = char =>
+  char !== undefined && (
+    (char >= 'a' && char <= 'z') ||
+    (char >= 'A' && char <= 'Z')
+  )
+
+/**
+ * Checks for a letter, digit, or hyphen: the characters allowed inside
+ * prerelease and build names such as beta-1.
+ *
+ * @param {string|undefined} char One character to check.
+ * @returns {boolean} Whether the character can be part of an identifier.
+ * @example isIdentifierCharacter('-') // true
+ * @example isIdentifierCharacter('.') // false; dots separate identifiers
+ */
+const isIdentifierCharacter = char => isDigit(char) || isLetter(char) || char === '-'
+
+/**
+ * Checks whether a version component can begin here: with a digit or
+ * a wildcard such as x, X, or *.
+ *
+ * @param {string|undefined} char One character to check.
+ * @returns {boolean} Whether a number or wildcard can start with this character.
+ * @example isVersionStart('x') // true
+ * @example isVersionStart('v') // false; v belongs to the prefix
+ */
+const isVersionStart = char =>
+  isDigit(char) ||
+  char === 'x' ||
+  char === 'X' ||
+  char === '*'
+
+/**
+ * Finds the end of a row of digits, but returns no more than limit digits.
+ * Remembers the last two rows so looking at them again does not reread them.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position of the first character to check.
+ * @param {number} limit The most digit characters the returned match can include.
+ * @param {DigitRunCache} digitRuns Shared cache of digit-run positions, updated in place.
+ * @returns {number} The position after the matched digits, or start if none match.
+ * @example findDigitsEndIndex('123abc', 0, 10, digitRuns) // 3, pointing at a
+ * @example findDigitsEndIndex('123abc', 0, 2, digitRuns) // 2, pointing at the unread 3
+ */
+const findDigitsEndIndex = (range, start, limit, digitRuns) => {
+  if (!isDigit(range[start])) {
+    return start
+  }
+  if (start >= digitRuns.start && start < digitRuns.end) {
+    return Math.min(start + limit, digitRuns.end)
+  }
+  if (start >= digitRuns.previousStart && start < digitRuns.previousEnd) {
+    return Math.min(start + limit, digitRuns.previousEnd)
+  }
+  let end = start + 1
+  while (isDigit(range[end])) {
+    end++
+  }
+  // A failed full version can rewind from its second run to its first.
+  digitRuns.previousStart = digitRuns.start
+  digitRuns.previousEnd = digitRuns.end
+  digitRuns.start = start
+  digitRuns.end = end
+  return Math.min(start + limit, end)
+}
+
+/**
+ * Reads a number using the old regex's length and leading-zero rules.
+ * Strict mode reads just the first zero in 012; loose mode can read all three.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position where the number should begin.
+ * @param {boolean} loose Whether to allow leading zeros.
+ * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+ * @returns {number} The position after the matched digits, not their numeric value.
+ * @example findVersionNumberEndIndex('012', 0, false, digitRuns) // 1
+ * @example findVersionNumberEndIndex('012', 0, true, digitRuns) // 3
+ */
+const findVersionNumberEndIndex = (range, start, loose, digitRuns) => {
+  if (!loose && range[start] === '0') {
+    return start + 1
+  }
+  // Strict syntax allows an initial nonzero digit plus MAX_LENGTH digits.
+  return findDigitsEndIndex(range, start, loose ? MAX_LENGTH : MAX_LENGTH + 1, digitRuns)
+}
+
+/**
+ * Reads one piece of a prerelease name, such as beta or 1 in beta.1.
+ * Tries the letter-or-hyphen form first, then the number-only form.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position where the identifier should begin.
+ * @param {boolean} loose Whether numeric identifiers may have leading zeros.
+ * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+ * @returns {number} The position after the identifier, or start if none matches.
+ * @example findPrereleaseIdentifierEndIndex('beta.1', 0, false, digitRuns) // 4, at the dot
+ * @example findPrereleaseIdentifierEndIndex('001beta', 0, false, digitRuns) // 7
+ */
+const findPrereleaseIdentifierEndIndex = (range, start, loose, digitRuns) => {
+  const digitsEnd = findDigitsEndIndex(range, start, MAX_LENGTH, digitRuns)
+  // The legacy regex tries a nonnumeric identifier before a numeric one.
+  if (isLetter(range[digitsEnd]) || range[digitsEnd] === '-') {
+    let end = digitsEnd + 1
+    const limit = end + MAX_SAFE_BUILD_LENGTH
+    while (end < limit && isIdentifierCharacter(range[end])) {
+      end++
+    }
+    return end
+  }
+  return findVersionNumberEndIndex(range, start, loose, digitRuns)
+}
+
+/**
+ * Reads a prerelease suffix such as -beta.1, one dot-separated piece at a time.
+ * Loose mode also allows the name without its opening hyphen.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position where the suffix should begin, including -.
+ * @param {boolean} loose Whether the opening hyphen is optional and zeros allowed.
+ * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+ * @returns {number} The position after the matched suffix, or start if absent.
+ * @example findPrereleaseEndIndex('-beta.1+sha', 0, false, digitRuns) // 7, at the plus
+ * @example findPrereleaseEndIndex('beta', 0, false, digitRuns) // 0; no opening hyphen
+ */
+const findPrereleaseEndIndex = (range, start, loose, digitRuns) => {
+  const hyphen = range[start] === '-'
+  if (!loose && !hyphen) {
+    return start
+  }
+  const identifierStart = start + (hyphen ? 1 : 0)
+  let end = findPrereleaseIdentifierEndIndex(range, identifierStart, loose, digitRuns)
+  if (end === identifierStart) {
+    if (!loose || !hyphen) {
+      return start
+    }
+    // In loose syntax, a lone hyphen can itself be the identifier.
+    end = findPrereleaseIdentifierEndIndex(range, start, loose, digitRuns)
+  }
+  while (range[end] === '.') {
+    const next = findPrereleaseIdentifierEndIndex(range, end + 1, loose, digitRuns)
+    if (next === end + 1) {
+      break
+    }
+    end = next
+  }
+  return end
+}
+
+/**
+ * Reads one build-name piece, such as sha or 123 in +sha.123.
+ * Stops at a disallowed character or the old regex's length limit.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position where the identifier should begin.
+ * @returns {number} The position after the identifier, or start if none matches.
+ * @example findBuildIdentifierEndIndex('sha.123', 0) // 3, at the dot
+ * @example findBuildIdentifierEndIndex('001', 0) // 3; leading zeros are allowed
+ */
+const findBuildIdentifierEndIndex = (range, start) => {
+  let end = start
+  while (end - start < MAX_SAFE_BUILD_LENGTH && isIdentifierCharacter(range[end])) {
+    end++
+  }
+  return end
+}
+
+/**
+ * Reads optional build metadata such as +sha.123.
+ * Leaves the position unchanged if there is no plus sign followed by a name.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position where the opening + should be.
+ * @returns {number} The position after the matched metadata, or start if absent.
+ * @example findBuildEndIndex('+sha.123 <2', 0) // 8, at the space
+ * @example findBuildEndIndex('+', 0) // 0; a plus sign alone is not a match
+ */
+const findBuildEndIndex = (range, start) => {
+  if (range[start] !== '+') {
+    return start
+  }
+  let end = findBuildIdentifierEndIndex(range, start + 1)
+  if (end === start + 1) {
+    return start
+  }
+  while (range[end] === '.') {
+    const next = findBuildIdentifierEndIndex(range, end + 1)
+    if (next === end + 1) {
+      break
+    }
+    end = next
+  }
+  return end
+}
+
+/**
+ * Reads three numbers separated by dots, then any prerelease and build suffixes.
+ * Uses loose rules, so forms such as 01.02.03beta can match here.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position of the first number, after any prefix.
+ * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+ * @returns {number} The position after the version match, or start if none matches.
+ * @example findLooseFullVersionEndIndex('1.2.3-beta+sha <2', 0, digitRuns) // 14
+ * @example findLooseFullVersionEndIndex('1.2', 0, digitRuns) // 0; needs three numbers
+ */
+const findLooseFullVersionEndIndex = (range, start, digitRuns) => {
+  let end = start
+  for (let component = 0; component < 3; component++) {
+    const next = findVersionNumberEndIndex(range, end, true, digitRuns)
+    if (next === end) {
+      return start
+    }
+    end = next
+    if (component < 2) {
+      if (range[end] !== '.') {
+        return start
+      }
+      end++
+    }
+  }
+  const prereleaseEnd = findPrereleaseEndIndex(range, end, true, digitRuns)
+  return findBuildEndIndex(range, prereleaseEnd)
+}
+
+/**
+ * Reads one component of a partial or wildcard version, such as 2 or x in 2.x.
+ * Numbers use strict leading-zero rules; wildcards take up one character.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position where the component should begin.
+ * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+ * @returns {number} The position after the component, or start if none matches.
+ * @example findPartialVersionComponentEndIndex('2.x', 0, digitRuns) // 1, at the dot
+ * @example findPartialVersionComponentEndIndex('2.x', 2, digitRuns) // 3, after x
+ */
+const findPartialVersionComponentEndIndex = (range, start, digitRuns) => {
+  if (isDigit(range[start])) {
+    return findVersionNumberEndIndex(range, start, false, digitRuns)
+  }
+  return isVersionStart(range[start]) ? start + 1 : start
+}
+
+/**
+ * Reads up to three components, allowing forms such as 1, 1.2, or 1.x.
+ * After the third component, also reads any strict prerelease and build suffixes.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position of a number or wildcard, after any prefix.
+ * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+ * @returns {number} The position after the matched version text.
+ * @example findPartialVersionEndIndex('1.x <2', 0, digitRuns) // 3, at the space
+ * @example findPartialVersionEndIndex('1.', 0, digitRuns) // 1; the trailing dot is unread
+ */
+const findPartialVersionEndIndex = (range, start, digitRuns) => {
+  let end = findPartialVersionComponentEndIndex(range, start, digitRuns)
+  for (let component = 0; component < 2; component++) {
+    if (range[end] !== '.') {
+      return end
+    }
+    const next = findPartialVersionComponentEndIndex(range, end + 1, digitRuns)
+    if (next === end + 1) {
+      return end
+    }
+    end = next
+  }
+  const prereleaseEnd = findPrereleaseEndIndex(range, end, false, digitRuns)
+  return findBuildEndIndex(range, prereleaseEnd)
+}
+
+/**
+ * Finds where a version match ends, without deciding whether the range is valid.
+ * Tries a loose full version first, then a partial or wildcard version, just
+ * like the old regex's LOOSEPLAIN and XRANGEPLAIN alternatives.
+ *
+ * @param {string} range The text to read; it is not changed.
+ * @param {number} start The position of a number or wildcard, after any prefix.
+ * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+ * @returns {number} The position where scanning the next candidate can resume.
+ * @example findVersionEndIndex('1.2.3 <2', 0, digitRuns) // 5, at the space
+ * @example findVersionEndIndex('1.x <2', 0, digitRuns) // 3, at the space
+ */
+const findVersionEndIndex = (range, start, digitRuns) => {
+  const fullVersionEnd = findLooseFullVersionEndIndex(range, start, digitRuns)
+  return fullVersionEnd !== start
+    ? fullVersionEnd
+    : findPartialVersionEndIndex(range, start, digitRuns)
+}
+
+/**
+ * Finds the one whitespace character the old replacement would remove.
+ * Keeps leading whitespace, skips an optional operator, and checks immediately
+ * after it. Returns -1 if there is nothing to remove.
+ *
+ * @param {string} range The text containing a candidate already found by the caller.
+ * @param {number} matchStart The candidate's position, including leading whitespace.
+ * @returns {number} The position of the removable whitespace, or -1 if absent.
+ * @example findRemovableWhitespaceIndex(' > 1', 0) // 2; keep the space at position 0
+ * @example findRemovableWhitespaceIndex('>1', 0) // -1
+ */
+const findRemovableWhitespaceIndex = (range, matchStart) => {
+  let position = matchStart
+  if (isWhitespace(range[position])) {
+    position++
+  }
+  if (range[position] === '<' || range[position] === '>') {
+    position++
+  }
+  if (range[position] === '=') {
+    position++
+  }
+  return isWhitespace(range[position]) ? position : -1
+}
+
+/**
+ * Joins an operator to its version, turning > 1.2.3 into >1.2.3.
+ * Copies everything else according to the old regex's matching rules.
+ * Moves forward through prefixes and whole versions to avoid repeatedly
+ * searching the same characters on long inputs.
+ *
+ * @param {string} range The range text to process; the original string is unchanged.
+ * @returns {string} The range with matched operator whitespace removed.
+ * @example trimComparatorWhitespace('> 1.2.3 < 2') // '>1.2.3 <2'
+ * @example trimComparatorWhitespace('> invalid') // '> invalid'
+ */
+const trimComparatorWhitespace = range => {
+  let result = ''
+  let copyFrom = 0
+  let cursor = 0
+  const digitRuns = { start: -1, end: -1, previousStart: -1, previousEnd: -1 }
+
+  while (cursor < range.length) {
+    const matchStart = cursor
+    if (range[cursor] === '<' || range[cursor] === '>') {
+      cursor++
+    } else if (!isVersionPrefix(range[cursor]) && !isVersionStart(range[cursor])) {
+      cursor++
+      continue
+    }
+
+    // Consume a v/=/whitespace run once, even when no version follows it.
+    while (cursor < range.length && isVersionPrefix(range[cursor])) {
+      cursor++
+    }
+    if (!isVersionStart(range[cursor])) {
+      continue
+    }
+
+    const whitespacePosition = findRemovableWhitespaceIndex(range, matchStart)
+    if (whitespacePosition !== -1) {
+      result += range.slice(copyFrom, whitespacePosition)
+      copyFrom = whitespacePosition + 1
+    }
+
+    // Skip the entire match, so a prerelease's trailing v cannot be
+    // reconsidered as the prefix of another version.
+    cursor = findVersionEndIndex(range, cursor, digitRuns)
+  }
+
+  return result + range.slice(copyFrom)
+}
+
+module.exports = trimComparatorWhitespace
 
 
 /***/ }),
@@ -34789,6 +35288,14 @@ module.exports = require("https");
 
 "use strict";
 module.exports = require("net");
+
+/***/ }),
+
+/***/ 1421:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:child_process");
 
 /***/ }),
 
@@ -40817,7 +41324,7 @@ function omit(obj, ...keys) {
 /***/ ((module) => {
 
 "use strict";
-module.exports = {"rE":"5.0.0"};
+module.exports = {"rE":"5.1.0"};
 
 /***/ }),
 
@@ -40825,7 +41332,7 @@ module.exports = {"rE":"5.0.0"};
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"name":"@sigstore/tuf","version":"5.0.0","description":"Client for the Sigstore TUF repository","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"clean":"shx rm -rf dist *.tsbuildinfo","build":"tsc --build","test":"jest"},"files":["dist","seeds.json"],"author":"bdehamer@github.com","license":"Apache-2.0","repository":{"type":"git","url":"git+https://github.com/sigstore/sigstore-js.git"},"bugs":{"url":"https://github.com/sigstore/sigstore-js/issues"},"homepage":"https://github.com/sigstore/sigstore-js/tree/main/packages/tuf#readme","publishConfig":{"provenance":true},"devDependencies":{"@sigstore/jest":"^0.0.0","@tufjs/repo-mock":"^5.0.0","@types/make-fetch-happen":"^10.0.4"},"dependencies":{"@sigstore/protobuf-specs":"^0.5.0","tuf-js":"^6.0.0"},"engines":{"node":"^22.22.2 || ^24.15.0 || >=26.0.0"}}');
+module.exports = /*#__PURE__*/JSON.parse('{"name":"@sigstore/tuf","version":"5.0.1","description":"Client for the Sigstore TUF repository","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"clean":"shx rm -rf dist *.tsbuildinfo","build":"tsc --build","test":"jest"},"files":["dist","seeds.json"],"author":"bdehamer@github.com","license":"Apache-2.0","repository":{"type":"git","url":"git+https://github.com/sigstore/sigstore-js.git"},"bugs":{"url":"https://github.com/sigstore/sigstore-js/issues"},"homepage":"https://github.com/sigstore/sigstore-js/tree/main/packages/tuf#readme","publishConfig":{"provenance":true},"devDependencies":{"@sigstore/jest":"^0.0.0","@tufjs/repo-mock":"^5.0.2","@types/make-fetch-happen":"^10.0.4"},"dependencies":{"@sigstore/protobuf-specs":"^0.5.2","tuf-js":"^6.0.2"},"engines":{"node":"^22.22.2 || ^24.15.0 || >=26.0.0"}}');
 
 /***/ }),
 
@@ -40833,7 +41340,7 @@ module.exports = /*#__PURE__*/JSON.parse('{"name":"@sigstore/tuf","version":"5.0
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"https://tuf-repo-cdn.sigstore.dev":{"root.json":"ewogInNpZ25hdHVyZXMiOiBbCiAgewogICAia2V5aWQiOiAiZTcxYTU0ZDU0MzgzNWJhODZhZGFkOTQ2MDM3OWM3NjQxZmI4NzI2ZDE2NGVhNzY2ODAxYTFjNTIyYWJhN2VhMiIsCiAgICJzaWciOiAiMzA0NTAyMjEwMGVhMmYzNzRmNDA5ODEwZTJkYjk1MDc0OWQ5Y2ZlZDA5YTE1YjZhNWUyNWYzZDVmZmQwNzk5NDU5ZDdiZWUxNjcwMjIwMjhkM2FjZGRlNmRiZDUwMzRjZmFkMjIyZDMxYjQxMDkwZWUyMTg5NGUyYzQ2Y2I4OTc0MTk4YWIwMzc3ZGI0NCIKICB9LAogIHsKICAgImtleWlkIjogIjIyZjRjYWVjNmQ4ZTZmOTU1NWFmNjZiM2Q0YzNjYjA2YTNiYjIzZmRjN2UzOWM5MTZjNjFmNDYyZTZmNTJiMDYiLAogICAic2lnIjogIjMwNDQwMjIwN2ViYjI0ZTMyMzdlNDcwNjkxZDc4NzU5MDNhNzc1NGQwZWYyYWU3ZTdiNTAyNGE3ODg4YzlhMzhhNTJkZWVjZDAyMjA2ZWQ1YWQxYzZmNGZhYjQ2OTk1ODQzYWI2YjIzZjk0MjBjNWE0Y2Y2Y2UxY2IyY2IyYTZmYzJlODdlMmVmM2UxIgogIH0sCiAgewogICAia2V5aWQiOiAiNjE2NDM4MzgxMjViNDQwYjQwZGI2OTQyZjVjYjVhMzFjMGRjMDQzNjgzMTZlYjJhYWE1OGI5NTkwNGE1ODIyMiIsCiAgICJzaWciOiAiMzA0NjAyMjEwMDg5ZDlkZmQ4ZTEwNmNjOTU4MDg4YTRkYTNjOGNmNzI1NGFiNmY2NWE5NjQ3ZDM3YWRhNzMwZWY0NzYzYzUxNjMwMjIxMDBkODgyZWU3NDQ2MTViZTc5ODYxZTIxNGUxZWViOWUxZWRkZjZhMWUyMDNhMjAxYjRjNWQwM2Y1MjI0ZDcxZDE2IgogIH0sCiAgewogICAia2V5aWQiOiAiYTY4N2U1YmY0ZmFiODJiMGVlNThkNDZlMDVjOTUzNTE0NWEyYzlhZmI0NThmNDNkNDJiNDVjYTBmZGNlMmE3MCIsCiAgICJzaWciOiAiMzA0NTAyMjEwMDg4YmQ0Yjg4ZTgzZjU4NmNlNTY4ZDI3ZDA0MjE0YzRhYjNmZDE4OTQxNzhlZjAxNTMwM2Q1NmFmYTkzOTIwNTMwMjIwNTUzOGViYWI5Mzg3NmFiYjkwNzVhZDc3MTE0YmZmMjhhMGQ3OWE3Y2MyMjliNTM0YTBjNWNlZDU1MjZiNDhlNyIKICB9LAogIHsKICAgImtleWlkIjogIjE4M2U2NGYzNzY3MGRjMTNjYTBkMjg5OTVhMzA1M2YzNzQwOTU0ZGRjZTQ0MzIxYTQxZTQ2NTM0Y2Y0NGU2MzIiLAogICAic2lnIjogIjMwNDUwMjIxMDBmMzViMDdlOTM4ZDQ5NDljYWY4MmU2OWU4NmNjOWRiM2I2OWI2ZGJjNjc0MGMxZjM0M2QwNjg5M2Y5OTZmYmViMDIyMDAxZTg0N2Q4MTYyNTlhOTZhNDllNDI3NzlhMjM1MGRhYjk3YjcxYzhhZTdlMjZiMjM4MGM2ZmE3ZjU4MTMxYjMiCiAgfQogXSwKICJzaWduZWQiOiB7CiAgIl90eXBlIjogInJvb3QiLAogICJjb25zaXN0ZW50X3NuYXBzaG90IjogdHJ1ZSwKICAiZXhwaXJlcyI6ICIyMDI2LTExLTIwVDEzOjU4OjE4WiIsCiAgImtleXMiOiB7CiAgICIwYzg3NDMyYzNiZjA5ZmQ5OTE4OWZkYzMyZmE1ZWFlZGY0ZTRhNWZhYzdiYWI3M2ZhMDRhMmUwZmM2NGFmNmY1IjogewogICAgImtleWlkX2hhc2hfYWxnb3JpdGhtcyI6IFsKICAgICAic2hhMjU2IiwKICAgICAic2hhNTEyIgogICAgXSwKICAgICJrZXl0eXBlIjogImVjZHNhIiwKICAgICJrZXl2YWwiOiB7CiAgICAgInB1YmxpYyI6ICItLS0tLUJFR0lOIFBVQkxJQyBLRVktLS0tLVxuTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFV1JpR3I1K2orM0o1U3NIK1p0cjVuRTJIMndPN1xuQlYrbk8zczkzZ0xjYTE4cVRPekhZMW9XeUFHRHlrTVNzR1RVQlN0OUQrQW4wS2ZLc0QybWZTTTQyUT09XG4tLS0tLUVORCBQVUJMSUMgS0VZLS0tLS1cbiIKICAgIH0sCiAgICAic2NoZW1lIjogImVjZHNhLXNoYTItbmlzdHAyNTYiLAogICAgIngtdHVmLW9uLWNpLW9ubGluZS11cmkiOiAiZ2Nwa21zOnByb2plY3RzL3NpZ3N0b3JlLXJvb3Qtc2lnbmluZy9sb2NhdGlvbnMvZ2xvYmFsL2tleVJpbmdzL3Jvb3QvY3J5cHRvS2V5cy90aW1lc3RhbXAvY3J5cHRvS2V5VmVyc2lvbnMvMSIKICAgfSwKICAgIjE4M2U2NGYzNzY3MGRjMTNjYTBkMjg5OTVhMzA1M2YzNzQwOTU0ZGRjZTQ0MzIxYTQxZTQ2NTM0Y2Y0NGU2MzIiOiB7CiAgICAia2V5dHlwZSI6ICJlY2RzYSIsCiAgICAia2V5dmFsIjogewogICAgICJwdWJsaWMiOiAiLS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS1cbk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRU14cFBPSkNJWjVvdEc0MTA2ZkdKc2VFUWkzVjlcbnBrTVlRNHV5VjlUajFNN1dIWEl5TEcramtmdnVHMGdsUTFKWmJSWlpCVjNnQVI0c29qZEdISVNlb3c9PVxuLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tXG4iCiAgICB9LAogICAgInNjaGVtZSI6ICJlY2RzYS1zaGEyLW5pc3RwMjU2IiwKICAgICJ4LXR1Zi1vbi1jaS1rZXlvd25lciI6ICJAbGFuY2UiCiAgIH0sCiAgICIyMmY0Y2FlYzZkOGU2Zjk1NTVhZjY2YjNkNGMzY2IwNmEzYmIyM2ZkYzdlMzljOTE2YzYxZjQ2MmU2ZjUyYjA2IjogewogICAgImtleWlkX2hhc2hfYWxnb3JpdGhtcyI6IFsKICAgICAic2hhMjU2IiwKICAgICAic2hhNTEyIgogICAgXSwKICAgICJrZXl0eXBlIjogImVjZHNhIiwKICAgICJrZXl2YWwiOiB7CiAgICAgInB1YmxpYyI6ICItLS0tLUJFR0lOIFBVQkxJQyBLRVktLS0tLVxuTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFekJ6Vk9tSENQb2pNVkxTSTM2NFdpaVY4TlByRFxuNklnUnhWbGlza3ovdit5M0pFUjVtY1ZHY09ObGlEY1dNQzVKMmxmSG1qUE5QaGI0SDd4bThMemZTQT09XG4tLS0tLUVORCBQVUJMSUMgS0VZLS0tLS1cbiIKICAgIH0sCiAgICAic2NoZW1lIjogImVjZHNhLXNoYTItbmlzdHAyNTYiLAogICAgIngtdHVmLW9uLWNpLWtleW93bmVyIjogIkBzYW50aWFnb3RvcnJlcyIKICAgfSwKICAgIjYxNjQzODM4MTI1YjQ0MGI0MGRiNjk0MmY1Y2I1YTMxYzBkYzA0MzY4MzE2ZWIyYWFhNThiOTU5MDRhNTgyMjIiOiB7CiAgICAia2V5aWRfaGFzaF9hbGdvcml0aG1zIjogWwogICAgICJzaGEyNTYiLAogICAgICJzaGE1MTIiCiAgICBdLAogICAgImtleXR5cGUiOiAiZWNkc2EiLAogICAgImtleXZhbCI6IHsKICAgICAicHVibGljIjogIi0tLS0tQkVHSU4gUFVCTElDIEtFWS0tLS0tXG5NRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVpbmlrU3NBUW1Za05lSDVlWXEvQ25JekxhYWNPXG54bFNhYXdRRE93cUt5L3RDcXhxNXh4UFNKYzIxSzRXSWhzOUd5T2tLZnp1ZVkzR0lMemNNSlo0Y1d3PT1cbi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLVxuIgogICAgfSwKICAgICJzY2hlbWUiOiAiZWNkc2Etc2hhMi1uaXN0cDI1NiIsCiAgICAieC10dWYtb24tY2kta2V5b3duZXIiOiAiQGJvYmNhbGxhd2F5IgogICB9LAogICAiYTY4N2U1YmY0ZmFiODJiMGVlNThkNDZlMDVjOTUzNTE0NWEyYzlhZmI0NThmNDNkNDJiNDVjYTBmZGNlMmE3MCI6IHsKICAgICJrZXlpZF9oYXNoX2FsZ29yaXRobXMiOiBbCiAgICAgInNoYTI1NiIsCiAgICAgInNoYTUxMiIKICAgIF0sCiAgICAia2V5dHlwZSI6ICJlY2RzYSIsCiAgICAia2V5dmFsIjogewogICAgICJwdWJsaWMiOiAiLS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS1cbk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRTBnaHJoOTJMdzFZcjNpZEdWNVdxQ3RNREI4Q3hcbitEOGhkQzR3MlpMTklwbFZSb1ZHTHNrWWEzZ2hlTXlPamlKOGtQaTE1YVEyLy83UCtvajdVdkpQR3c9PVxuLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tXG4iCiAgICB9LAogICAgInNjaGVtZSI6ICJlY2RzYS1zaGEyLW5pc3RwMjU2IiwKICAgICJ4LXR1Zi1vbi1jaS1rZXlvd25lciI6ICJAam9zaHVhZ2wiCiAgIH0sCiAgICJlNzFhNTRkNTQzODM1YmE4NmFkYWQ5NDYwMzc5Yzc2NDFmYjg3MjZkMTY0ZWE3NjY4MDFhMWM1MjJhYmE3ZWEyIjogewogICAgImtleWlkX2hhc2hfYWxnb3JpdGhtcyI6IFsKICAgICAic2hhMjU2IiwKICAgICAic2hhNTEyIgogICAgXSwKICAgICJrZXl0eXBlIjogImVjZHNhIiwKICAgICJrZXl2YWwiOiB7CiAgICAgInB1YmxpYyI6ICItLS0tLUJFR0lOIFBVQkxJQyBLRVktLS0tLVxuTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFRVhzejNTWlhGYjhqTVY0Mmo2cEpseWpialI4S1xuTjNCd29jZXhxNkxNSWI1cXNXS09RdkxOMTZOVWVmTGM0SHN3T291bVJzVlZhYWpTcFFTNmZvYmtSdz09XG4tLS0tLUVORCBQVUJMSUMgS0VZLS0tLS1cbiIKICAgIH0sCiAgICAic2NoZW1lIjogImVjZHNhLXNoYTItbmlzdHAyNTYiLAogICAgIngtdHVmLW9uLWNpLWtleW93bmVyIjogIkBtbm02NzgiCiAgIH0KICB9LAogICJyb2xlcyI6IHsKICAgInJvb3QiOiB7CiAgICAia2V5aWRzIjogWwogICAgICJlNzFhNTRkNTQzODM1YmE4NmFkYWQ5NDYwMzc5Yzc2NDFmYjg3MjZkMTY0ZWE3NjY4MDFhMWM1MjJhYmE3ZWEyIiwKICAgICAiMjJmNGNhZWM2ZDhlNmY5NTU1YWY2NmIzZDRjM2NiMDZhM2JiMjNmZGM3ZTM5YzkxNmM2MWY0NjJlNmY1MmIwNiIsCiAgICAgIjYxNjQzODM4MTI1YjQ0MGI0MGRiNjk0MmY1Y2I1YTMxYzBkYzA0MzY4MzE2ZWIyYWFhNThiOTU5MDRhNTgyMjIiLAogICAgICJhNjg3ZTViZjRmYWI4MmIwZWU1OGQ0NmUwNWM5NTM1MTQ1YTJjOWFmYjQ1OGY0M2Q0MmI0NWNhMGZkY2UyYTcwIiwKICAgICAiMTgzZTY0ZjM3NjcwZGMxM2NhMGQyODk5NWEzMDUzZjM3NDA5NTRkZGNlNDQzMjFhNDFlNDY1MzRjZjQ0ZTYzMiIKICAgIF0sCiAgICAidGhyZXNob2xkIjogMwogICB9LAogICAic25hcHNob3QiOiB7CiAgICAia2V5aWRzIjogWwogICAgICIwYzg3NDMyYzNiZjA5ZmQ5OTE4OWZkYzMyZmE1ZWFlZGY0ZTRhNWZhYzdiYWI3M2ZhMDRhMmUwZmM2NGFmNmY1IgogICAgXSwKICAgICJ0aHJlc2hvbGQiOiAxLAogICAgIngtdHVmLW9uLWNpLWV4cGlyeS1wZXJpb2QiOiAzNjUwLAogICAgIngtdHVmLW9uLWNpLXNpZ25pbmctcGVyaW9kIjogMzY1CiAgIH0sCiAgICJ0YXJnZXRzIjogewogICAgImtleWlkcyI6IFsKICAgICAiZTcxYTU0ZDU0MzgzNWJhODZhZGFkOTQ2MDM3OWM3NjQxZmI4NzI2ZDE2NGVhNzY2ODAxYTFjNTIyYWJhN2VhMiIsCiAgICAgIjIyZjRjYWVjNmQ4ZTZmOTU1NWFmNjZiM2Q0YzNjYjA2YTNiYjIzZmRjN2UzOWM5MTZjNjFmNDYyZTZmNTJiMDYiLAogICAgICI2MTY0MzgzODEyNWI0NDBiNDBkYjY5NDJmNWNiNWEzMWMwZGMwNDM2ODMxNmViMmFhYTU4Yjk1OTA0YTU4MjIyIiwKICAgICAiYTY4N2U1YmY0ZmFiODJiMGVlNThkNDZlMDVjOTUzNTE0NWEyYzlhZmI0NThmNDNkNDJiNDVjYTBmZGNlMmE3MCIsCiAgICAgIjE4M2U2NGYzNzY3MGRjMTNjYTBkMjg5OTVhMzA1M2YzNzQwOTU0ZGRjZTQ0MzIxYTQxZTQ2NTM0Y2Y0NGU2MzIiCiAgICBdLAogICAgInRocmVzaG9sZCI6IDMKICAgfSwKICAgInRpbWVzdGFtcCI6IHsKICAgICJrZXlpZHMiOiBbCiAgICAgIjBjODc0MzJjM2JmMDlmZDk5MTg5ZmRjMzJmYTVlYWVkZjRlNGE1ZmFjN2JhYjczZmEwNGEyZTBmYzY0YWY2ZjUiCiAgICBdLAogICAgInRocmVzaG9sZCI6IDEsCiAgICAieC10dWYtb24tY2ktZXhwaXJ5LXBlcmlvZCI6IDcsCiAgICAieC10dWYtb24tY2ktc2lnbmluZy1wZXJpb2QiOiA2CiAgIH0KICB9LAogICJzcGVjX3ZlcnNpb24iOiAiMS4wIiwKICAidmVyc2lvbiI6IDE1LAogICJ4LXR1Zi1vbi1jaS1leHBpcnktcGVyaW9kIjogMTk3LAogICJ4LXR1Zi1vbi1jaS1zaWduaW5nLXBlcmlvZCI6IDQ2CiB9Cn0=","targets":{"trusted_root.json":"ewogICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLmRldi5zaWdzdG9yZS50cnVzdGVkcm9vdCtqc29uO3ZlcnNpb249MC4xIiwKICAidGxvZ3MiOiBbCiAgICB7CiAgICAgICJiYXNlVXJsIjogImh0dHBzOi8vcmVrb3Iuc2lnc3RvcmUuZGV2IiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUUyRzJZKzJ0YWJkVFY1QmNHaUJJeDBhOWZBRndya0JibUxTR3RrczRMM3FYNnlZWTB6dWZCbmhDOFVyL2l5NTVHaFdQLzlBL2JZMkxoQzMwTTkrUll0dz09IiwKICAgICAgICAia2V5RGV0YWlscyI6ICJQS0lYX0VDRFNBX1AyNTZfU0hBXzI1NiIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjEtMDEtMTJUMTE6NTM6MjdaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICJ3Tkk5YXRRR2x6K1ZXZk82TFJ5Z0g0UVVmWS84VzRSRndpVDVpNVdSZ0IwPSIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgImJhc2VVcmwiOiAiaHR0cHM6Ly9sb2cyMDI1LTEucmVrb3Iuc2lnc3RvcmUuZGV2IiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNQ293QlFZREsyVndBeUVBdDhybHAxa25Hd2pmYmNYQVlQWUFrbjBYaUx6MXg4TzR0MFlrRWhpZTI0ND0iLAogICAgICAgICJrZXlEZXRhaWxzIjogIlBLSVhfRUQyNTUxOSIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjUtMDktMjNUMDA6MDA6MDBaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICJ6eEdaRlZ2ZDBGRW1qUjhXckZ3TWRjQUo5dnRhWS9RWGY0NFkxd1VlUDZBPSIKICAgICAgfQogICAgfQogIF0sCiAgImNlcnRpZmljYXRlQXV0aG9yaXRpZXMiOiBbCiAgICB7CiAgICAgICJzdWJqZWN0IjogewogICAgICAgICJvcmdhbml6YXRpb24iOiAic2lnc3RvcmUuZGV2IiwKICAgICAgICAiY29tbW9uTmFtZSI6ICJzaWdzdG9yZSIKICAgICAgfSwKICAgICAgInVyaSI6ICJodHRwczovL2Z1bGNpby5zaWdzdG9yZS5kZXYiLAogICAgICAiY2VydENoYWluIjogewogICAgICAgICJjZXJ0aWZpY2F0ZXMiOiBbCiAgICAgICAgICB7CiAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNSUlCK0RDQ0FYNmdBd0lCQWdJVE5Wa0Rab0Npb2ZQRHN5N2RmbTZnZUxidWh6QUtCZ2dxaGtqT1BRUURBekFxTVJVd0V3WURWUVFLRXd4emFXZHpkRzl5WlM1a1pYWXhFVEFQQmdOVkJBTVRDSE5wWjNOMGIzSmxNQjRYRFRJeE1ETXdOekF6TWpBeU9Wb1hEVE14TURJeU16QXpNakF5T1Zvd0tqRVZNQk1HQTFVRUNoTU1jMmxuYzNSdmNtVXVaR1YyTVJFd0R3WURWUVFERXdoemFXZHpkRzl5WlRCMk1CQUdCeXFHU000OUFnRUdCU3VCQkFBaUEySUFCTFN5QTdJaTVrK3BOTzhaRVdZMHlsZW1XRG93T2tOYTNrTCtHWkU1WjVHV2VoTDkvQTliUk5BM1JicnNaNWkwSmNhc3RhUkw3U3A1ZnAvakQ1ZHhxYy9VZFRWbmx2UzE2YW4rMllmc3dlL1F1TG9sUlVDcmNPRTIrMmlBNSt0emQ2Tm1NR1F3RGdZRFZSMFBBUUgvQkFRREFnRUdNQklHQTFVZEV3RUIvd1FJTUFZQkFmOENBUUV3SFFZRFZSME9CQllFRk1qRkhRQkJtaVFwTWxFazZ3MnVTdTFLQnRQc01COEdBMVVkSXdRWU1CYUFGTWpGSFFCQm1pUXBNbEVrNncydVN1MUtCdFBzTUFvR0NDcUdTTTQ5QkFNREEyZ0FNR1VDTUg4bGlXSmZNdWk2dlhYQmhqRGdZNE13c2xtTi9USnhWZS84M1dyRm9td21OZjA1NnkxWDQ4RjljNG0zYTNvelhBSXhBS2pSYXk1L2FqL2pzS0tHSWttUWF0akk4dXVwSHIvK0N4RnZhSldtcFlxTmtMREdSVSs5b3J6aDVoSTJScmN1YVE9PSIKICAgICAgICAgIH0KICAgICAgICBdCiAgICAgIH0sCiAgICAgICJ2YWxpZEZvciI6IHsKICAgICAgICAic3RhcnQiOiAiMjAyMS0wMy0wN1QwMzoyMDoyOVoiLAogICAgICAgICJlbmQiOiAiMjAyMi0xMi0zMVQyMzo1OTo1OS45OTlaIgogICAgICB9CiAgICB9LAogICAgewogICAgICAic3ViamVjdCI6IHsKICAgICAgICAib3JnYW5pemF0aW9uIjogInNpZ3N0b3JlLmRldiIsCiAgICAgICAgImNvbW1vbk5hbWUiOiAic2lnc3RvcmUiCiAgICAgIH0sCiAgICAgICJ1cmkiOiAiaHR0cHM6Ly9mdWxjaW8uc2lnc3RvcmUuZGV2IiwKICAgICAgImNlcnRDaGFpbiI6IHsKICAgICAgICAiY2VydGlmaWNhdGVzIjogWwogICAgICAgICAgewogICAgICAgICAgICAicmF3Qnl0ZXMiOiAiTUlJQ0dqQ0NBYUdnQXdJQkFnSVVBTG5WaVZmblUwYnJKYXNtUmtIcm4vVW5mYVF3Q2dZSUtvWkl6ajBFQXdNd0tqRVZNQk1HQTFVRUNoTU1jMmxuYzNSdmNtVXVaR1YyTVJFd0R3WURWUVFERXdoemFXZHpkRzl5WlRBZUZ3MHlNakEwTVRNeU1EQTJNVFZhRncwek1URXdNRFV4TXpVMk5UaGFNRGN4RlRBVEJnTlZCQW9UREhOcFozTjBiM0psTG1SbGRqRWVNQndHQTFVRUF4TVZjMmxuYzNSdmNtVXRhVzUwWlhKdFpXUnBZWFJsTUhZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUNJRFlnQUU4UlZTL3lzSCtOT3Z1RFp5UEladGlsZ1VGOU5sYXJZcEFkOUhQMXZCQkgxVTVDVjc3TFNTN3MwWmlING5FN0h2N3B0UzZMdnZSL1NUazc5OExWZ016TGxKNEhlSWZGM3RIU2FleExjWXBTQVNyMWtTME4vUmdCSnovOWpXQ2lYbm8zc3dlVEFPQmdOVkhROEJBZjhFQkFNQ0FRWXdFd1lEVlIwbEJBd3dDZ1lJS3dZQkJRVUhBd013RWdZRFZSMFRBUUgvQkFnd0JnRUIvd0lCQURBZEJnTlZIUTRFRmdRVTM5UHB6MVlrRVpiNXFOanBLRldpeGk0WVpEOHdId1lEVlIwakJCZ3dGb0FVV01BZVg1RkZwV2FwZXN5UW9aTWkwQ3JGeGZvd0NnWUlLb1pJemowRUF3TURad0F3WkFJd1BDc1FLNERZaVpZRFBJYURpNUhGS25meFh4NkFTU1ZtRVJmc3luWUJpWDJYNlNKUm5aVTg0LzlEWmRuRnZ2eG1BakJPdDZRcEJsYzRKLzBEeHZrVENxcGNsdnppTDZCQ0NQbmpkbElCM1B1M0J4c1BteWdVWTdJaTJ6YmRDZGxpaW93PSIKICAgICAgICAgIH0sCiAgICAgICAgICB7CiAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNSUlCOXpDQ0FYeWdBd0lCQWdJVUFMWk5BUEZkeEhQd2plRGxvRHd5WUNoQU8vNHdDZ1lJS29aSXpqMEVBd013S2pFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUkV3RHdZRFZRUURFd2h6YVdkemRHOXlaVEFlRncweU1URXdNRGN4TXpVMk5UbGFGdzB6TVRFd01EVXhNelUyTlRoYU1Db3hGVEFUQmdOVkJBb1RESE5wWjNOMGIzSmxMbVJsZGpFUk1BOEdBMVVFQXhNSWMybG5jM1J2Y21Vd2RqQVFCZ2NxaGtqT1BRSUJCZ1VyZ1FRQUlnTmlBQVQ3WGVGVDRyYjNQUUd3UzRJYWp0TGszL09sbnBnYW5nYUJjbFlwc1lCcjVpKzR5bkIwN2NlYjNMUDBPSU9aZHhleFg2OWM1aVZ1eUpSUStIejA1eWkrVUYzdUJXQWxIcGlTNXNoMCtIMkdIRTdTWHJrMUVDNW0xVHIxOUw5Z2c5MmpZekJoTUE0R0ExVWREd0VCL3dRRUF3SUJCakFQQmdOVkhSTUJBZjhFQlRBREFRSC9NQjBHQTFVZERnUVdCQlJZd0I1ZmtVV2xacWw2ekpDaGt5TFFLc1hGK2pBZkJnTlZIU01FR0RBV2dCUll3QjVma1VXbFpxbDZ6SkNoa3lMUUtzWEYrakFLQmdncWhrak9QUVFEQXdOcEFEQm1BakVBajFuSGVYWnArMTNOV0JOYStFRHNEUDhHMVdXZzF0Q01XUC9XSFBxcGFWbzBqaHN3ZU5GWmdTczBlRTd3WUk0cUFqRUEyV0I5b3Q5OHNJa29GM3ZaWWRkMy9WdFdCNWI5VE5NZWE3SXgvc3RKNVRmY0xMZUFCTEU0Qk5KT3NRNHZuQkhKIgogICAgICAgICAgfQogICAgICAgIF0KICAgICAgfSwKICAgICAgInZhbGlkRm9yIjogewogICAgICAgICJzdGFydCI6ICIyMDIyLTA0LTEzVDIwOjA2OjE1WiIKICAgICAgfQogICAgfQogIF0sCiAgImN0bG9ncyI6IFsKICAgIHsKICAgICAgImJhc2VVcmwiOiAiaHR0cHM6Ly9jdGZlLnNpZ3N0b3JlLmRldi90ZXN0IiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUViZndSK1JKdWRYc2NnUkJScEtYMVhGRHkzUHl1ZER4ei9TZm5SaTFmVDhla3BmQmQyTzF1b3o3anIzWjhuS3p4QTY5RVVRK2VGQ0ZJM3pldWJQV1U3dz09IiwKICAgICAgICAia2V5RGV0YWlscyI6ICJQS0lYX0VDRFNBX1AyNTZfU0hBXzI1NiIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjEtMDMtMTRUMDA6MDA6MDBaIiwKICAgICAgICAgICJlbmQiOiAiMjAyMi0xMC0zMVQyMzo1OTo1OS45OTlaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICJDR0NTOENoUy8yaEYwZEZySjRTY1JXY1lyQlk5d3pqU2JlYThJZ1kyYjNJPSIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgImJhc2VVcmwiOiAiaHR0cHM6Ly9jdGZlLnNpZ3N0b3JlLmRldi8yMDIyIiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVpUFNsRmkwQ21GVGZFakNVcUY5SHVDRWNZWE5LQWFZYWxJSm1CWjh5eWV6UGpUcWh4cktCcE1uYW9jVnRMSkJJMWVNM3VYblF6UUdBSmRKNGdzOUZ5dz09IiwKICAgICAgICAia2V5RGV0YWlscyI6ICJQS0lYX0VDRFNBX1AyNTZfU0hBXzI1NiIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjItMTAtMjBUMDA6MDA6MDBaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICIzVDB3YXNiSEVUSmpHUjRjbVdjM0FxSktYcmplUEszL2g0cHlnQzhwN280PSIKICAgICAgfQogICAgfQogIF0sCiAgInRpbWVzdGFtcEF1dGhvcml0aWVzIjogWwogICAgewogICAgICAic3ViamVjdCI6IHsKICAgICAgICAib3JnYW5pemF0aW9uIjogInNpZ3N0b3JlLmRldiIsCiAgICAgICAgImNvbW1vbk5hbWUiOiAic2lnc3RvcmUtdHNhLXNlbGZzaWduZWQiCiAgICAgIH0sCiAgICAgICJ1cmkiOiAiaHR0cHM6Ly90aW1lc3RhbXAuc2lnc3RvcmUuZGV2L2FwaS92MS90aW1lc3RhbXAiLAogICAgICAiY2VydENoYWluIjogewogICAgICAgICJjZXJ0aWZpY2F0ZXMiOiBbCiAgICAgICAgICB7CiAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNSUlDRURDQ0FaYWdBd0lCQWdJVU9oTlVMd3lRWWU2OHdVTXZ5NHFPaXlvaml3d3dDZ1lJS29aSXpqMEVBd013T1RFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNU0F3SGdZRFZRUURFeGR6YVdkemRHOXlaUzEwYzJFdGMyVnNabk5wWjI1bFpEQWVGdzB5TlRBME1EZ3dOalU1TkROYUZ3MHpOVEEwTURZd05qVTVORE5hTUM0eEZUQVRCZ05WQkFvVERITnBaM04wYjNKbExtUmxkakVWTUJNR0ExVUVBeE1NYzJsbmMzUnZjbVV0ZEhOaE1IWXdFQVlIS29aSXpqMENBUVlGSzRFRUFDSURZZ0FFNHJhMlo4aEtOaWcyVDlrRmpDQVRvR0czMGpreStXUXYzQnpMK21LdmgxU0tOUi9Vd3V3c2ZOQ2c0c3J5b1lBZDhFNmlzb3ZWQTNNNGFvTmRtOVFEaTUwWjhuVEV5dnFnZkRQdFRJd1hJdGZpVy9BRmYxVjd1d2tia0FvajB4eGNvMm93YURBT0JnTlZIUThCQWY4RUJBTUNCNEF3SFFZRFZSME9CQllFRkluOWVVT0h6OUJsUnNNQ1JzY3NjMXQ5dE9zRE1COEdBMVVkSXdRWU1CYUFGSmpzQWU5L3UxSC8xSlVlYjRxSW1GTUhpYzYvTUJZR0ExVWRKUUVCL3dRTU1Bb0dDQ3NHQVFVRkJ3TUlNQW9HQ0NxR1NNNDlCQU1EQTJnQU1HVUNNRHRwc1YvNkthTzBxeUYvVU1zWDJhU1VYS1FGZG9HVHB0UUdjMGZ0cTFjc3VsSFBHRzZkc215TU5kM0pCK0czRVFJeEFPYWp2QmNqcEptS2I0TnYrMlRhb2o4VWM1K2I2aWg2RlhDQ0tyYVNxdXBlMDd6cXN3TWNYSlRlMWNFeHZIdnZsdz09IgogICAgICAgICAgfSwKICAgICAgICAgIHsKICAgICAgICAgICAgInJhd0J5dGVzIjogIk1JSUI5ekNDQVh5Z0F3SUJBZ0lVVjdmMEdMRE9vRXpJaDhMWFNXODBPSmlVcDE0d0NnWUlLb1pJemowRUF3TXdPVEVWTUJNR0ExVUVDaE1NYzJsbmMzUnZjbVV1WkdWMk1TQXdIZ1lEVlFRREV4ZHphV2R6ZEc5eVpTMTBjMkV0YzJWc1puTnBaMjVsWkRBZUZ3MHlOVEEwTURnd05qVTVORE5hRncwek5UQTBNRFl3TmpVNU5ETmFNRGt4RlRBVEJnTlZCQW9UREhOcFozTjBiM0psTG1SbGRqRWdNQjRHQTFVRUF4TVhjMmxuYzNSdmNtVXRkSE5oTFhObGJHWnphV2R1WldRd2RqQVFCZ2NxaGtqT1BRSUJCZ1VyZ1FRQUlnTmlBQVFVUU50ZlJUL291M1lBVGE2d0Iva0tUZTcwY2ZKd3lSSUJvdk1udDhSY0pwaC9DT0U4MnV5UzZGbXBwTExMMVZCUEdjUGZwUVBZSk5Yeld3aThpY3doS1E2Vy9RZTJoM29lYkJiMkZIcHdOSkRxbytUTWFDL3RkZmt2L0VsSkI3MmpSVEJETUE0R0ExVWREd0VCL3dRRUF3SUJCakFTQmdOVkhSTUJBZjhFQ0RBR0FRSC9BZ0VBTUIwR0ExVWREZ1FXQkJTWTdBSHZmN3RSLzlTVkhtK0tpSmhUQjRuT3Z6QUtCZ2dxaGtqT1BRUURBd05wQURCbUFqRUF3R0VHcmZHWlIxY2VuMVI4L0RUVk1JOTQzTHNzWm1KUnREcC9pN1NmR0htR1JQNmdSYnVqOXZPSzNiNjdaMFFRQWpFQXVUMkg2NzNMUUVhSFRjeVFTWnJrcDRtWDdXd2ttRitzVmJrWVk1bVhOK1JNSDEzS1VFSEhPcUFTYWVtWVdLL0UiCiAgICAgICAgICB9CiAgICAgICAgXQogICAgICB9LAogICAgICAidmFsaWRGb3IiOiB7CiAgICAgICAgInN0YXJ0IjogIjIwMjUtMDctMDRUMDA6MDA6MDBaIgogICAgICB9CiAgICB9CiAgXQp9Cg==","registry.npmjs.org%2Fkeys.json":"ewogICAgImtleXMiOiBbCiAgICAgICAgewogICAgICAgICAgICAia2V5SWQiOiAiU0hBMjU2OmpsM2J3c3d1ODBQampva0NnaDBvMnc1YzJVNExoUUFFNTdnajljejFrekEiLAogICAgICAgICAgICAia2V5VXNhZ2UiOiAibnBtOnNpZ25hdHVyZXMiLAogICAgICAgICAgICAicHVibGljS2V5IjogewogICAgICAgICAgICAgICAgInJhd0J5dGVzIjogIk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRTFPbGIzek1BRkZ4WEtIaUlrUU81Y0ozWWhsNWk2VVBwK0lodXRlQkpidUhjQTVVb2dLbzBFV3RsV3dXNktTYUtvVE5FWUw3SmxDUWlWbmtoQmt0VWdnPT0iLAogICAgICAgICAgICAgICAgImtleURldGFpbHMiOiAiUEtJWF9FQ0RTQV9QMjU2X1NIQV8yNTYiLAogICAgICAgICAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgICAgICAgICAgICJzdGFydCI6ICIxOTk5LTAxLTAxVDAwOjAwOjAwLjAwMFoiLAogICAgICAgICAgICAgICAgICAgICJlbmQiOiAiMjAyNS0wMS0yOVQwMDowMDowMC4wMDBaIgogICAgICAgICAgICAgICAgfQogICAgICAgICAgICB9CiAgICAgICAgfSwKICAgICAgICB7CiAgICAgICAgICAgICJrZXlJZCI6ICJTSEEyNTY6amwzYndzd3U4MFBqam9rQ2doMG8ydzVjMlU0TGhRQUU1N2dqOWN6MWt6QSIsCiAgICAgICAgICAgICJrZXlVc2FnZSI6ICJucG06YXR0ZXN0YXRpb25zIiwKICAgICAgICAgICAgInB1YmxpY0tleSI6IHsKICAgICAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUUxT2xiM3pNQUZGeFhLSGlJa1FPNWNKM1lobDVpNlVQcCtJaHV0ZUJKYnVIY0E1VW9nS28wRVd0bFd3VzZLU2FLb1RORVlMN0psQ1FpVm5raEJrdFVnZz09IiwKICAgICAgICAgICAgICAgICJrZXlEZXRhaWxzIjogIlBLSVhfRUNEU0FfUDI1Nl9TSEFfMjU2IiwKICAgICAgICAgICAgICAgICJ2YWxpZEZvciI6IHsKICAgICAgICAgICAgICAgICAgICAic3RhcnQiOiAiMjAyMi0xMi0wMVQwMDowMDowMC4wMDBaIiwKICAgICAgICAgICAgICAgICAgICAiZW5kIjogIjIwMjUtMDEtMjlUMDA6MDA6MDAuMDAwWiIKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgIH0sCiAgICAgICAgewogICAgICAgICAgICAia2V5SWQiOiAiU0hBMjU2OkRoUTh3UjVBUEJ2RkhMRi8rVGMrQVl2UE9kVHBjSURxT2h4c0JIUndDN1UiLAogICAgICAgICAgICAia2V5VXNhZ2UiOiAibnBtOnNpZ25hdHVyZXMiLAogICAgICAgICAgICAicHVibGljS2V5IjogewogICAgICAgICAgICAgICAgInJhd0J5dGVzIjogIk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRVk2WWE3VysrN2FVUHp2TVRyZXpINlljeDNjK0hPS1lDY05HeWJKWlNDSnEvZmQ3UWE4dXVBS3RkSWtVUXRRaUVLRVJoQW1FNWxNTUpoUDhPa0RPYTJnPT0iLAogICAgICAgICAgICAgICAgImtleURldGFpbHMiOiAiUEtJWF9FQ0RTQV9QMjU2X1NIQV8yNTYiLAogICAgICAgICAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgICAgICAgICAgICJzdGFydCI6ICIyMDI1LTAxLTEzVDAwOjAwOjAwLjAwMFoiCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICAgImtleUlkIjogIlNIQTI1NjpEaFE4d1I1QVBCdkZITEYvK1RjK0FZdlBPZFRwY0lEcU9oeHNCSFJ3QzdVIiwKICAgICAgICAgICAgImtleVVzYWdlIjogIm5wbTphdHRlc3RhdGlvbnMiLAogICAgICAgICAgICAicHVibGljS2V5IjogewogICAgICAgICAgICAgICAgInJhd0J5dGVzIjogIk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRVk2WWE3VysrN2FVUHp2TVRyZXpINlljeDNjK0hPS1lDY05HeWJKWlNDSnEvZmQ3UWE4dXVBS3RkSWtVUXRRaUVLRVJoQW1FNWxNTUpoUDhPa0RPYTJnPT0iLAogICAgICAgICAgICAgICAgImtleURldGFpbHMiOiAiUEtJWF9FQ0RTQV9QMjU2X1NIQV8yNTYiLAogICAgICAgICAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgICAgICAgICAgICJzdGFydCI6ICIyMDI1LTAxLTEzVDAwOjAwOjAwLjAwMFoiCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICB9CiAgICBdCn0K"}}}');
+module.exports = /*#__PURE__*/JSON.parse('{"https://tuf-repo-cdn.sigstore.dev":{"root.json":"ewogInNpZ25hdHVyZXMiOiBbCiAgewogICAia2V5aWQiOiAiZTcxYTU0ZDU0MzgzNWJhODZhZGFkOTQ2MDM3OWM3NjQxZmI4NzI2ZDE2NGVhNzY2ODAxYTFjNTIyYWJhN2VhMiIsCiAgICJzaWciOiAiMzA0NTAyMjA2NWM2OGYyOGViZTQ0ZDBhNGUwNDdhNmUyODdmOTY2OWM4ZTNiMzFlMDg1MzYzOTZjNjdhMTQ4MzMyNmJlOGM2MDIyMTAwZTc1MjRhODg5ZTQwZGUwZGY4NDIzMWRkNDBlMWZjYzU3ZmJiYmY2MjA1NWMxNzA3NjU2ODMwN2RiYzUwOTA0NiIKICB9LAogIHsKICAgImtleWlkIjogIjIyZjRjYWVjNmQ4ZTZmOTU1NWFmNjZiM2Q0YzNjYjA2YTNiYjIzZmRjN2UzOWM5MTZjNjFmNDYyZTZmNTJiMDYiLAogICAic2lnIjogIjMwNDUwMjIwNmZlZGM0YTM4MmEwYzUxNTVlODEyYzliNzQ2MWZlMzg4ZWY3MDRmZWY5ZTA5M2M1YzIzNmUyMGFiYmY4ZTY2MjAyMjEwMDhiYmVjMzZiNjNiZjliYWViYzAzYTgzYzc3MGNmOTM4N2VmYzkwOTA3ZWI4MzA3MGI3YTg3NTEyOTUxMmQ2ODciCiAgfSwKICB7CiAgICJrZXlpZCI6ICI2MTY0MzgzODEyNWI0NDBiNDBkYjY5NDJmNWNiNWEzMWMwZGMwNDM2ODMxNmViMmFhYTU4Yjk1OTA0YTU4MjIyIiwKICAgInNpZyI6ICIzMDQ1MDIyMDQ2OGY0MjE5ZGI1MWM3ZTgxNWUxZTNkMzNkOTk4Nzg3OGFhMTJhZWFmMzMxNjA0ZDUxODBkZDYwYjE5ZGZiMzUwMjIxMDA5Zjc3OGVmNWU5NjY0N2MwOGJkMjNkNjNmNjljMGNjZTZmYzM1M2Q3NDdiOWQ1MWYzNWRjMGY4Njc4ZGU5ZmVmIgogIH0sCiAgewogICAia2V5aWQiOiAiYTY4N2U1YmY0ZmFiODJiMGVlNThkNDZlMDVjOTUzNTE0NWEyYzlhZmI0NThmNDNkNDJiNDVjYTBmZGNlMmE3MCIsCiAgICJzaWciOiAiMzA0NTAyMjAyOWUyNTE4YTdiY2FjMDVlYzBiMjI3ODA5Y2UwYzk2OTQwNjc0MzQxMmY5MGRjNTI1NTQwMWFmYjEzMzYzZjQ2MDIyMTAwODdhNjQxODIyNDllNDFkZDExZGU5MWM5ZjM4NWEzMzY1OWJkNjAxNDdhOTNkMTNjODZiN2E2NGU0NDdmOTgyNiIKICB9LAogIHsKICAgImtleWlkIjogIjE4M2U2NGYzNzY3MGRjMTNjYTBkMjg5OTVhMzA1M2YzNzQwOTU0ZGRjZTQ0MzIxYTQxZTQ2NTM0Y2Y0NGU2MzIiLAogICAic2lnIjogIjMwNDUwMjIxMDA4MDUxYzQ1NmVkMmJmNDhhYTVmYzU3NDI5MjhhYjA5MDQyNjZjMWQ2YmRkZTVmYzc1YWUyMGYxMmQwOThhOTU1MDIyMDNjYzY4M2JkODY3OTM4MDhlNmM5Zjg5ZTJjYTkzZjgwYjAwYzZlYTY0ODgwYWM0ZTM3ZGI2OWUyZTg2YjI0ZTMiCiAgfQogXSwKICJzaWduZWQiOiB7CiAgIl90eXBlIjogInJvb3QiLAogICJjb25zaXN0ZW50X3NuYXBzaG90IjogdHJ1ZSwKICAiZXhwaXJlcyI6ICIyMDI3LTA0LTIyVDE5OjI3OjMxWiIsCiAgImtleXMiOiB7CiAgICIwYzg3NDMyYzNiZjA5ZmQ5OTE4OWZkYzMyZmE1ZWFlZGY0ZTRhNWZhYzdiYWI3M2ZhMDRhMmUwZmM2NGFmNmY1IjogewogICAgImtleWlkX2hhc2hfYWxnb3JpdGhtcyI6IFsKICAgICAic2hhMjU2IiwKICAgICAic2hhNTEyIgogICAgXSwKICAgICJrZXl0eXBlIjogImVjZHNhIiwKICAgICJrZXl2YWwiOiB7CiAgICAgInB1YmxpYyI6ICItLS0tLUJFR0lOIFBVQkxJQyBLRVktLS0tLVxuTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFV1JpR3I1K2orM0o1U3NIK1p0cjVuRTJIMndPN1xuQlYrbk8zczkzZ0xjYTE4cVRPekhZMW9XeUFHRHlrTVNzR1RVQlN0OUQrQW4wS2ZLc0QybWZTTTQyUT09XG4tLS0tLUVORCBQVUJMSUMgS0VZLS0tLS1cbiIKICAgIH0sCiAgICAic2NoZW1lIjogImVjZHNhLXNoYTItbmlzdHAyNTYiLAogICAgIngtdHVmLW9uLWNpLW9ubGluZS11cmkiOiAiZ2Nwa21zOnByb2plY3RzL3NpZ3N0b3JlLXJvb3Qtc2lnbmluZy9sb2NhdGlvbnMvZ2xvYmFsL2tleVJpbmdzL3Jvb3QvY3J5cHRvS2V5cy90aW1lc3RhbXAvY3J5cHRvS2V5VmVyc2lvbnMvMSIKICAgfSwKICAgIjE4M2U2NGYzNzY3MGRjMTNjYTBkMjg5OTVhMzA1M2YzNzQwOTU0ZGRjZTQ0MzIxYTQxZTQ2NTM0Y2Y0NGU2MzIiOiB7CiAgICAia2V5dHlwZSI6ICJlY2RzYSIsCiAgICAia2V5dmFsIjogewogICAgICJwdWJsaWMiOiAiLS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS1cbk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRU14cFBPSkNJWjVvdEc0MTA2ZkdKc2VFUWkzVjlcbnBrTVlRNHV5VjlUajFNN1dIWEl5TEcramtmdnVHMGdsUTFKWmJSWlpCVjNnQVI0c29qZEdISVNlb3c9PVxuLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tXG4iCiAgICB9LAogICAgInNjaGVtZSI6ICJlY2RzYS1zaGEyLW5pc3RwMjU2IiwKICAgICJ4LXR1Zi1vbi1jaS1rZXlvd25lciI6ICJAbGFuY2UiCiAgIH0sCiAgICIyMmY0Y2FlYzZkOGU2Zjk1NTVhZjY2YjNkNGMzY2IwNmEzYmIyM2ZkYzdlMzljOTE2YzYxZjQ2MmU2ZjUyYjA2IjogewogICAgImtleWlkX2hhc2hfYWxnb3JpdGhtcyI6IFsKICAgICAic2hhMjU2IiwKICAgICAic2hhNTEyIgogICAgXSwKICAgICJrZXl0eXBlIjogImVjZHNhIiwKICAgICJrZXl2YWwiOiB7CiAgICAgInB1YmxpYyI6ICItLS0tLUJFR0lOIFBVQkxJQyBLRVktLS0tLVxuTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFekJ6Vk9tSENQb2pNVkxTSTM2NFdpaVY4TlByRFxuNklnUnhWbGlza3ovdit5M0pFUjVtY1ZHY09ObGlEY1dNQzVKMmxmSG1qUE5QaGI0SDd4bThMemZTQT09XG4tLS0tLUVORCBQVUJMSUMgS0VZLS0tLS1cbiIKICAgIH0sCiAgICAic2NoZW1lIjogImVjZHNhLXNoYTItbmlzdHAyNTYiLAogICAgIngtdHVmLW9uLWNpLWtleW93bmVyIjogIkBzYW50aWFnb3RvcnJlcyIKICAgfSwKICAgIjYxNjQzODM4MTI1YjQ0MGI0MGRiNjk0MmY1Y2I1YTMxYzBkYzA0MzY4MzE2ZWIyYWFhNThiOTU5MDRhNTgyMjIiOiB7CiAgICAia2V5aWRfaGFzaF9hbGdvcml0aG1zIjogWwogICAgICJzaGEyNTYiLAogICAgICJzaGE1MTIiCiAgICBdLAogICAgImtleXR5cGUiOiAiZWNkc2EiLAogICAgImtleXZhbCI6IHsKICAgICAicHVibGljIjogIi0tLS0tQkVHSU4gUFVCTElDIEtFWS0tLS0tXG5NRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVpbmlrU3NBUW1Za05lSDVlWXEvQ25JekxhYWNPXG54bFNhYXdRRE93cUt5L3RDcXhxNXh4UFNKYzIxSzRXSWhzOUd5T2tLZnp1ZVkzR0lMemNNSlo0Y1d3PT1cbi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLVxuIgogICAgfSwKICAgICJzY2hlbWUiOiAiZWNkc2Etc2hhMi1uaXN0cDI1NiIsCiAgICAieC10dWYtb24tY2kta2V5b3duZXIiOiAiQGJvYmNhbGxhd2F5IgogICB9LAogICAiYTY4N2U1YmY0ZmFiODJiMGVlNThkNDZlMDVjOTUzNTE0NWEyYzlhZmI0NThmNDNkNDJiNDVjYTBmZGNlMmE3MCI6IHsKICAgICJrZXlpZF9oYXNoX2FsZ29yaXRobXMiOiBbCiAgICAgInNoYTI1NiIsCiAgICAgInNoYTUxMiIKICAgIF0sCiAgICAia2V5dHlwZSI6ICJlY2RzYSIsCiAgICAia2V5dmFsIjogewogICAgICJwdWJsaWMiOiAiLS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS1cbk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRTBnaHJoOTJMdzFZcjNpZEdWNVdxQ3RNREI4Q3hcbitEOGhkQzR3MlpMTklwbFZSb1ZHTHNrWWEzZ2hlTXlPamlKOGtQaTE1YVEyLy83UCtvajdVdkpQR3c9PVxuLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tXG4iCiAgICB9LAogICAgInNjaGVtZSI6ICJlY2RzYS1zaGEyLW5pc3RwMjU2IiwKICAgICJ4LXR1Zi1vbi1jaS1rZXlvd25lciI6ICJAam9zaHVhZ2wiCiAgIH0sCiAgICJlNzFhNTRkNTQzODM1YmE4NmFkYWQ5NDYwMzc5Yzc2NDFmYjg3MjZkMTY0ZWE3NjY4MDFhMWM1MjJhYmE3ZWEyIjogewogICAgImtleWlkX2hhc2hfYWxnb3JpdGhtcyI6IFsKICAgICAic2hhMjU2IiwKICAgICAic2hhNTEyIgogICAgXSwKICAgICJrZXl0eXBlIjogImVjZHNhIiwKICAgICJrZXl2YWwiOiB7CiAgICAgInB1YmxpYyI6ICItLS0tLUJFR0lOIFBVQkxJQyBLRVktLS0tLVxuTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFRVhzejNTWlhGYjhqTVY0Mmo2cEpseWpialI4S1xuTjNCd29jZXhxNkxNSWI1cXNXS09RdkxOMTZOVWVmTGM0SHN3T291bVJzVlZhYWpTcFFTNmZvYmtSdz09XG4tLS0tLUVORCBQVUJMSUMgS0VZLS0tLS1cbiIKICAgIH0sCiAgICAic2NoZW1lIjogImVjZHNhLXNoYTItbmlzdHAyNTYiLAogICAgIngtdHVmLW9uLWNpLWtleW93bmVyIjogIkBtbm02NzgiCiAgIH0KICB9LAogICJyb2xlcyI6IHsKICAgInJvb3QiOiB7CiAgICAia2V5aWRzIjogWwogICAgICJlNzFhNTRkNTQzODM1YmE4NmFkYWQ5NDYwMzc5Yzc2NDFmYjg3MjZkMTY0ZWE3NjY4MDFhMWM1MjJhYmE3ZWEyIiwKICAgICAiMjJmNGNhZWM2ZDhlNmY5NTU1YWY2NmIzZDRjM2NiMDZhM2JiMjNmZGM3ZTM5YzkxNmM2MWY0NjJlNmY1MmIwNiIsCiAgICAgIjYxNjQzODM4MTI1YjQ0MGI0MGRiNjk0MmY1Y2I1YTMxYzBkYzA0MzY4MzE2ZWIyYWFhNThiOTU5MDRhNTgyMjIiLAogICAgICJhNjg3ZTViZjRmYWI4MmIwZWU1OGQ0NmUwNWM5NTM1MTQ1YTJjOWFmYjQ1OGY0M2Q0MmI0NWNhMGZkY2UyYTcwIiwKICAgICAiMTgzZTY0ZjM3NjcwZGMxM2NhMGQyODk5NWEzMDUzZjM3NDA5NTRkZGNlNDQzMjFhNDFlNDY1MzRjZjQ0ZTYzMiIKICAgIF0sCiAgICAidGhyZXNob2xkIjogMwogICB9LAogICAic25hcHNob3QiOiB7CiAgICAia2V5aWRzIjogWwogICAgICIwYzg3NDMyYzNiZjA5ZmQ5OTE4OWZkYzMyZmE1ZWFlZGY0ZTRhNWZhYzdiYWI3M2ZhMDRhMmUwZmM2NGFmNmY1IgogICAgXSwKICAgICJ0aHJlc2hvbGQiOiAxLAogICAgIngtdHVmLW9uLWNpLWV4cGlyeS1wZXJpb2QiOiAzNjUwLAogICAgIngtdHVmLW9uLWNpLXNpZ25pbmctcGVyaW9kIjogMzY1CiAgIH0sCiAgICJ0YXJnZXRzIjogewogICAgImtleWlkcyI6IFsKICAgICAiZTcxYTU0ZDU0MzgzNWJhODZhZGFkOTQ2MDM3OWM3NjQxZmI4NzI2ZDE2NGVhNzY2ODAxYTFjNTIyYWJhN2VhMiIsCiAgICAgIjIyZjRjYWVjNmQ4ZTZmOTU1NWFmNjZiM2Q0YzNjYjA2YTNiYjIzZmRjN2UzOWM5MTZjNjFmNDYyZTZmNTJiMDYiLAogICAgICI2MTY0MzgzODEyNWI0NDBiNDBkYjY5NDJmNWNiNWEzMWMwZGMwNDM2ODMxNmViMmFhYTU4Yjk1OTA0YTU4MjIyIiwKICAgICAiYTY4N2U1YmY0ZmFiODJiMGVlNThkNDZlMDVjOTUzNTE0NWEyYzlhZmI0NThmNDNkNDJiNDVjYTBmZGNlMmE3MCIsCiAgICAgIjE4M2U2NGYzNzY3MGRjMTNjYTBkMjg5OTVhMzA1M2YzNzQwOTU0ZGRjZTQ0MzIxYTQxZTQ2NTM0Y2Y0NGU2MzIiCiAgICBdLAogICAgInRocmVzaG9sZCI6IDMKICAgfSwKICAgInRpbWVzdGFtcCI6IHsKICAgICJrZXlpZHMiOiBbCiAgICAgIjBjODc0MzJjM2JmMDlmZDk5MTg5ZmRjMzJmYTVlYWVkZjRlNGE1ZmFjN2JhYjczZmEwNGEyZTBmYzY0YWY2ZjUiCiAgICBdLAogICAgInRocmVzaG9sZCI6IDEsCiAgICAieC10dWYtb24tY2ktZXhwaXJ5LXBlcmlvZCI6IDcsCiAgICAieC10dWYtb24tY2ktc2lnbmluZy1wZXJpb2QiOiA2CiAgIH0KICB9LAogICJzcGVjX3ZlcnNpb24iOiAiMS4wIiwKICAidmVyc2lvbiI6IDE2LAogICJ4LXR1Zi1vbi1jaS1leHBpcnktcGVyaW9kIjogMTk3LAogICJ4LXR1Zi1vbi1jaS1zaWduaW5nLXBlcmlvZCI6IDQ2CiB9Cn0=","targets":{"trusted_root.json":"ewogICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLmRldi5zaWdzdG9yZS50cnVzdGVkcm9vdCtqc29uO3ZlcnNpb249MC4xIiwKICAidGxvZ3MiOiBbCiAgICB7CiAgICAgICJiYXNlVXJsIjogImh0dHBzOi8vcmVrb3Iuc2lnc3RvcmUuZGV2IiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUUyRzJZKzJ0YWJkVFY1QmNHaUJJeDBhOWZBRndya0JibUxTR3RrczRMM3FYNnlZWTB6dWZCbmhDOFVyL2l5NTVHaFdQLzlBL2JZMkxoQzMwTTkrUll0dz09IiwKICAgICAgICAia2V5RGV0YWlscyI6ICJQS0lYX0VDRFNBX1AyNTZfU0hBXzI1NiIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjEtMDEtMTJUMTE6NTM6MjdaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICJ3Tkk5YXRRR2x6K1ZXZk82TFJ5Z0g0UVVmWS84VzRSRndpVDVpNVdSZ0IwPSIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgImJhc2VVcmwiOiAiaHR0cHM6Ly9sb2cyMDI1LTEucmVrb3Iuc2lnc3RvcmUuZGV2IiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNQ293QlFZREsyVndBeUVBdDhybHAxa25Hd2pmYmNYQVlQWUFrbjBYaUx6MXg4TzR0MFlrRWhpZTI0ND0iLAogICAgICAgICJrZXlEZXRhaWxzIjogIlBLSVhfRUQyNTUxOSIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjUtMDktMjNUMDA6MDA6MDBaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICJ6eEdaRlZ2ZDBGRW1qUjhXckZ3TWRjQUo5dnRhWS9RWGY0NFkxd1VlUDZBPSIKICAgICAgfQogICAgfQogIF0sCiAgImNlcnRpZmljYXRlQXV0aG9yaXRpZXMiOiBbCiAgICB7CiAgICAgICJzdWJqZWN0IjogewogICAgICAgICJvcmdhbml6YXRpb24iOiAic2lnc3RvcmUuZGV2IiwKICAgICAgICAiY29tbW9uTmFtZSI6ICJzaWdzdG9yZSIKICAgICAgfSwKICAgICAgInVyaSI6ICJodHRwczovL2Z1bGNpby5zaWdzdG9yZS5kZXYiLAogICAgICAiY2VydENoYWluIjogewogICAgICAgICJjZXJ0aWZpY2F0ZXMiOiBbCiAgICAgICAgICB7CiAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNSUlCK0RDQ0FYNmdBd0lCQWdJVE5Wa0Rab0Npb2ZQRHN5N2RmbTZnZUxidWh6QUtCZ2dxaGtqT1BRUURBekFxTVJVd0V3WURWUVFLRXd4emFXZHpkRzl5WlM1a1pYWXhFVEFQQmdOVkJBTVRDSE5wWjNOMGIzSmxNQjRYRFRJeE1ETXdOekF6TWpBeU9Wb1hEVE14TURJeU16QXpNakF5T1Zvd0tqRVZNQk1HQTFVRUNoTU1jMmxuYzNSdmNtVXVaR1YyTVJFd0R3WURWUVFERXdoemFXZHpkRzl5WlRCMk1CQUdCeXFHU000OUFnRUdCU3VCQkFBaUEySUFCTFN5QTdJaTVrK3BOTzhaRVdZMHlsZW1XRG93T2tOYTNrTCtHWkU1WjVHV2VoTDkvQTliUk5BM1JicnNaNWkwSmNhc3RhUkw3U3A1ZnAvakQ1ZHhxYy9VZFRWbmx2UzE2YW4rMllmc3dlL1F1TG9sUlVDcmNPRTIrMmlBNSt0emQ2Tm1NR1F3RGdZRFZSMFBBUUgvQkFRREFnRUdNQklHQTFVZEV3RUIvd1FJTUFZQkFmOENBUUV3SFFZRFZSME9CQllFRk1qRkhRQkJtaVFwTWxFazZ3MnVTdTFLQnRQc01COEdBMVVkSXdRWU1CYUFGTWpGSFFCQm1pUXBNbEVrNncydVN1MUtCdFBzTUFvR0NDcUdTTTQ5QkFNREEyZ0FNR1VDTUg4bGlXSmZNdWk2dlhYQmhqRGdZNE13c2xtTi9USnhWZS84M1dyRm9td21OZjA1NnkxWDQ4RjljNG0zYTNvelhBSXhBS2pSYXk1L2FqL2pzS0tHSWttUWF0akk4dXVwSHIvK0N4RnZhSldtcFlxTmtMREdSVSs5b3J6aDVoSTJScmN1YVE9PSIKICAgICAgICAgIH0KICAgICAgICBdCiAgICAgIH0sCiAgICAgICJ2YWxpZEZvciI6IHsKICAgICAgICAic3RhcnQiOiAiMjAyMS0wMy0wN1QwMzoyMDoyOVoiLAogICAgICAgICJlbmQiOiAiMjAyMi0xMi0zMVQyMzo1OTo1OS45OTlaIgogICAgICB9CiAgICB9LAogICAgewogICAgICAic3ViamVjdCI6IHsKICAgICAgICAib3JnYW5pemF0aW9uIjogInNpZ3N0b3JlLmRldiIsCiAgICAgICAgImNvbW1vbk5hbWUiOiAic2lnc3RvcmUiCiAgICAgIH0sCiAgICAgICJ1cmkiOiAiaHR0cHM6Ly9mdWxjaW8uc2lnc3RvcmUuZGV2IiwKICAgICAgImNlcnRDaGFpbiI6IHsKICAgICAgICAiY2VydGlmaWNhdGVzIjogWwogICAgICAgICAgewogICAgICAgICAgICAicmF3Qnl0ZXMiOiAiTUlJQ0dqQ0NBYUdnQXdJQkFnSVVBTG5WaVZmblUwYnJKYXNtUmtIcm4vVW5mYVF3Q2dZSUtvWkl6ajBFQXdNd0tqRVZNQk1HQTFVRUNoTU1jMmxuYzNSdmNtVXVaR1YyTVJFd0R3WURWUVFERXdoemFXZHpkRzl5WlRBZUZ3MHlNakEwTVRNeU1EQTJNVFZhRncwek1URXdNRFV4TXpVMk5UaGFNRGN4RlRBVEJnTlZCQW9UREhOcFozTjBiM0psTG1SbGRqRWVNQndHQTFVRUF4TVZjMmxuYzNSdmNtVXRhVzUwWlhKdFpXUnBZWFJsTUhZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUNJRFlnQUU4UlZTL3lzSCtOT3Z1RFp5UEladGlsZ1VGOU5sYXJZcEFkOUhQMXZCQkgxVTVDVjc3TFNTN3MwWmlING5FN0h2N3B0UzZMdnZSL1NUazc5OExWZ016TGxKNEhlSWZGM3RIU2FleExjWXBTQVNyMWtTME4vUmdCSnovOWpXQ2lYbm8zc3dlVEFPQmdOVkhROEJBZjhFQkFNQ0FRWXdFd1lEVlIwbEJBd3dDZ1lJS3dZQkJRVUhBd013RWdZRFZSMFRBUUgvQkFnd0JnRUIvd0lCQURBZEJnTlZIUTRFRmdRVTM5UHB6MVlrRVpiNXFOanBLRldpeGk0WVpEOHdId1lEVlIwakJCZ3dGb0FVV01BZVg1RkZwV2FwZXN5UW9aTWkwQ3JGeGZvd0NnWUlLb1pJemowRUF3TURad0F3WkFJd1BDc1FLNERZaVpZRFBJYURpNUhGS25meFh4NkFTU1ZtRVJmc3luWUJpWDJYNlNKUm5aVTg0LzlEWmRuRnZ2eG1BakJPdDZRcEJsYzRKLzBEeHZrVENxcGNsdnppTDZCQ0NQbmpkbElCM1B1M0J4c1BteWdVWTdJaTJ6YmRDZGxpaW93PSIKICAgICAgICAgIH0sCiAgICAgICAgICB7CiAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNSUlCOXpDQ0FYeWdBd0lCQWdJVUFMWk5BUEZkeEhQd2plRGxvRHd5WUNoQU8vNHdDZ1lJS29aSXpqMEVBd013S2pFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUkV3RHdZRFZRUURFd2h6YVdkemRHOXlaVEFlRncweU1URXdNRGN4TXpVMk5UbGFGdzB6TVRFd01EVXhNelUyTlRoYU1Db3hGVEFUQmdOVkJBb1RESE5wWjNOMGIzSmxMbVJsZGpFUk1BOEdBMVVFQXhNSWMybG5jM1J2Y21Vd2RqQVFCZ2NxaGtqT1BRSUJCZ1VyZ1FRQUlnTmlBQVQ3WGVGVDRyYjNQUUd3UzRJYWp0TGszL09sbnBnYW5nYUJjbFlwc1lCcjVpKzR5bkIwN2NlYjNMUDBPSU9aZHhleFg2OWM1aVZ1eUpSUStIejA1eWkrVUYzdUJXQWxIcGlTNXNoMCtIMkdIRTdTWHJrMUVDNW0xVHIxOUw5Z2c5MmpZekJoTUE0R0ExVWREd0VCL3dRRUF3SUJCakFQQmdOVkhSTUJBZjhFQlRBREFRSC9NQjBHQTFVZERnUVdCQlJZd0I1ZmtVV2xacWw2ekpDaGt5TFFLc1hGK2pBZkJnTlZIU01FR0RBV2dCUll3QjVma1VXbFpxbDZ6SkNoa3lMUUtzWEYrakFLQmdncWhrak9QUVFEQXdOcEFEQm1BakVBajFuSGVYWnArMTNOV0JOYStFRHNEUDhHMVdXZzF0Q01XUC9XSFBxcGFWbzBqaHN3ZU5GWmdTczBlRTd3WUk0cUFqRUEyV0I5b3Q5OHNJa29GM3ZaWWRkMy9WdFdCNWI5VE5NZWE3SXgvc3RKNVRmY0xMZUFCTEU0Qk5KT3NRNHZuQkhKIgogICAgICAgICAgfQogICAgICAgIF0KICAgICAgfSwKICAgICAgInZhbGlkRm9yIjogewogICAgICAgICJzdGFydCI6ICIyMDIyLTA0LTEzVDIwOjA2OjE1WiIKICAgICAgfQogICAgfQogIF0sCiAgImN0bG9ncyI6IFsKICAgIHsKICAgICAgImJhc2VVcmwiOiAiaHR0cHM6Ly9jdGZlLnNpZ3N0b3JlLmRldi90ZXN0IiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUViZndSK1JKdWRYc2NnUkJScEtYMVhGRHkzUHl1ZER4ei9TZm5SaTFmVDhla3BmQmQyTzF1b3o3anIzWjhuS3p4QTY5RVVRK2VGQ0ZJM3pldWJQV1U3dz09IiwKICAgICAgICAia2V5RGV0YWlscyI6ICJQS0lYX0VDRFNBX1AyNTZfU0hBXzI1NiIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjEtMDMtMTRUMDA6MDA6MDBaIiwKICAgICAgICAgICJlbmQiOiAiMjAyMi0xMC0zMVQyMzo1OTo1OS45OTlaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICJDR0NTOENoUy8yaEYwZEZySjRTY1JXY1lyQlk5d3pqU2JlYThJZ1kyYjNJPSIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgImJhc2VVcmwiOiAiaHR0cHM6Ly9jdGZlLnNpZ3N0b3JlLmRldi8yMDIyIiwKICAgICAgImhhc2hBbGdvcml0aG0iOiAiU0hBMl8yNTYiLAogICAgICAicHVibGljS2V5IjogewogICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVpUFNsRmkwQ21GVGZFakNVcUY5SHVDRWNZWE5LQWFZYWxJSm1CWjh5eWV6UGpUcWh4cktCcE1uYW9jVnRMSkJJMWVNM3VYblF6UUdBSmRKNGdzOUZ5dz09IiwKICAgICAgICAia2V5RGV0YWlscyI6ICJQS0lYX0VDRFNBX1AyNTZfU0hBXzI1NiIsCiAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgInN0YXJ0IjogIjIwMjItMTAtMjBUMDA6MDA6MDBaIgogICAgICAgIH0KICAgICAgfSwKICAgICAgImxvZ0lkIjogewogICAgICAgICJrZXlJZCI6ICIzVDB3YXNiSEVUSmpHUjRjbVdjM0FxSktYcmplUEszL2g0cHlnQzhwN280PSIKICAgICAgfQogICAgfQogIF0sCiAgInRpbWVzdGFtcEF1dGhvcml0aWVzIjogWwogICAgewogICAgICAic3ViamVjdCI6IHsKICAgICAgICAib3JnYW5pemF0aW9uIjogInNpZ3N0b3JlLmRldiIsCiAgICAgICAgImNvbW1vbk5hbWUiOiAic2lnc3RvcmUtdHNhLXNlbGZzaWduZWQiCiAgICAgIH0sCiAgICAgICJ1cmkiOiAiaHR0cHM6Ly90aW1lc3RhbXAuc2lnc3RvcmUuZGV2L2FwaS92MS90aW1lc3RhbXAiLAogICAgICAiY2VydENoYWluIjogewogICAgICAgICJjZXJ0aWZpY2F0ZXMiOiBbCiAgICAgICAgICB7CiAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNSUlDRURDQ0FaYWdBd0lCQWdJVU9oTlVMd3lRWWU2OHdVTXZ5NHFPaXlvaml3d3dDZ1lJS29aSXpqMEVBd013T1RFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNU0F3SGdZRFZRUURFeGR6YVdkemRHOXlaUzEwYzJFdGMyVnNabk5wWjI1bFpEQWVGdzB5TlRBME1EZ3dOalU1TkROYUZ3MHpOVEEwTURZd05qVTVORE5hTUM0eEZUQVRCZ05WQkFvVERITnBaM04wYjNKbExtUmxkakVWTUJNR0ExVUVBeE1NYzJsbmMzUnZjbVV0ZEhOaE1IWXdFQVlIS29aSXpqMENBUVlGSzRFRUFDSURZZ0FFNHJhMlo4aEtOaWcyVDlrRmpDQVRvR0czMGpreStXUXYzQnpMK21LdmgxU0tOUi9Vd3V3c2ZOQ2c0c3J5b1lBZDhFNmlzb3ZWQTNNNGFvTmRtOVFEaTUwWjhuVEV5dnFnZkRQdFRJd1hJdGZpVy9BRmYxVjd1d2tia0FvajB4eGNvMm93YURBT0JnTlZIUThCQWY4RUJBTUNCNEF3SFFZRFZSME9CQllFRkluOWVVT0h6OUJsUnNNQ1JzY3NjMXQ5dE9zRE1COEdBMVVkSXdRWU1CYUFGSmpzQWU5L3UxSC8xSlVlYjRxSW1GTUhpYzYvTUJZR0ExVWRKUUVCL3dRTU1Bb0dDQ3NHQVFVRkJ3TUlNQW9HQ0NxR1NNNDlCQU1EQTJnQU1HVUNNRHRwc1YvNkthTzBxeUYvVU1zWDJhU1VYS1FGZG9HVHB0UUdjMGZ0cTFjc3VsSFBHRzZkc215TU5kM0pCK0czRVFJeEFPYWp2QmNqcEptS2I0TnYrMlRhb2o4VWM1K2I2aWg2RlhDQ0tyYVNxdXBlMDd6cXN3TWNYSlRlMWNFeHZIdnZsdz09IgogICAgICAgICAgfSwKICAgICAgICAgIHsKICAgICAgICAgICAgInJhd0J5dGVzIjogIk1JSUI5ekNDQVh5Z0F3SUJBZ0lVVjdmMEdMRE9vRXpJaDhMWFNXODBPSmlVcDE0d0NnWUlLb1pJemowRUF3TXdPVEVWTUJNR0ExVUVDaE1NYzJsbmMzUnZjbVV1WkdWMk1TQXdIZ1lEVlFRREV4ZHphV2R6ZEc5eVpTMTBjMkV0YzJWc1puTnBaMjVsWkRBZUZ3MHlOVEEwTURnd05qVTVORE5hRncwek5UQTBNRFl3TmpVNU5ETmFNRGt4RlRBVEJnTlZCQW9UREhOcFozTjBiM0psTG1SbGRqRWdNQjRHQTFVRUF4TVhjMmxuYzNSdmNtVXRkSE5oTFhObGJHWnphV2R1WldRd2RqQVFCZ2NxaGtqT1BRSUJCZ1VyZ1FRQUlnTmlBQVFVUU50ZlJUL291M1lBVGE2d0Iva0tUZTcwY2ZKd3lSSUJvdk1udDhSY0pwaC9DT0U4MnV5UzZGbXBwTExMMVZCUEdjUGZwUVBZSk5Yeld3aThpY3doS1E2Vy9RZTJoM29lYkJiMkZIcHdOSkRxbytUTWFDL3RkZmt2L0VsSkI3MmpSVEJETUE0R0ExVWREd0VCL3dRRUF3SUJCakFTQmdOVkhSTUJBZjhFQ0RBR0FRSC9BZ0VBTUIwR0ExVWREZ1FXQkJTWTdBSHZmN3RSLzlTVkhtK0tpSmhUQjRuT3Z6QUtCZ2dxaGtqT1BRUURBd05wQURCbUFqRUF3R0VHcmZHWlIxY2VuMVI4L0RUVk1JOTQzTHNzWm1KUnREcC9pN1NmR0htR1JQNmdSYnVqOXZPSzNiNjdaMFFRQWpFQXVUMkg2NzNMUUVhSFRjeVFTWnJrcDRtWDdXd2ttRitzVmJrWVk1bVhOK1JNSDEzS1VFSEhPcUFTYWVtWVdLL0UiCiAgICAgICAgICB9CiAgICAgICAgXQogICAgICB9LAogICAgICAidmFsaWRGb3IiOiB7CiAgICAgICAgInN0YXJ0IjogIjIwMjUtMDctMDRUMDA6MDA6MDBaIgogICAgICB9CiAgICB9CiAgXQp9Cg==","registry.npmjs.org%2Fkeys.json":"ewogICAgImtleXMiOiBbCiAgICAgICAgewogICAgICAgICAgICAia2V5SWQiOiAiU0hBMjU2OmpsM2J3c3d1ODBQampva0NnaDBvMnc1YzJVNExoUUFFNTdnajljejFrekEiLAogICAgICAgICAgICAia2V5VXNhZ2UiOiAibnBtOnNpZ25hdHVyZXMiLAogICAgICAgICAgICAicHVibGljS2V5IjogewogICAgICAgICAgICAgICAgInJhd0J5dGVzIjogIk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRTFPbGIzek1BRkZ4WEtIaUlrUU81Y0ozWWhsNWk2VVBwK0lodXRlQkpidUhjQTVVb2dLbzBFV3RsV3dXNktTYUtvVE5FWUw3SmxDUWlWbmtoQmt0VWdnPT0iLAogICAgICAgICAgICAgICAgImtleURldGFpbHMiOiAiUEtJWF9FQ0RTQV9QMjU2X1NIQV8yNTYiLAogICAgICAgICAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgICAgICAgICAgICJzdGFydCI6ICIxOTk5LTAxLTAxVDAwOjAwOjAwLjAwMFoiLAogICAgICAgICAgICAgICAgICAgICJlbmQiOiAiMjAyNS0wMS0yOVQwMDowMDowMC4wMDBaIgogICAgICAgICAgICAgICAgfQogICAgICAgICAgICB9CiAgICAgICAgfSwKICAgICAgICB7CiAgICAgICAgICAgICJrZXlJZCI6ICJTSEEyNTY6amwzYndzd3U4MFBqam9rQ2doMG8ydzVjMlU0TGhRQUU1N2dqOWN6MWt6QSIsCiAgICAgICAgICAgICJrZXlVc2FnZSI6ICJucG06YXR0ZXN0YXRpb25zIiwKICAgICAgICAgICAgInB1YmxpY0tleSI6IHsKICAgICAgICAgICAgICAgICJyYXdCeXRlcyI6ICJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUUxT2xiM3pNQUZGeFhLSGlJa1FPNWNKM1lobDVpNlVQcCtJaHV0ZUJKYnVIY0E1VW9nS28wRVd0bFd3VzZLU2FLb1RORVlMN0psQ1FpVm5raEJrdFVnZz09IiwKICAgICAgICAgICAgICAgICJrZXlEZXRhaWxzIjogIlBLSVhfRUNEU0FfUDI1Nl9TSEFfMjU2IiwKICAgICAgICAgICAgICAgICJ2YWxpZEZvciI6IHsKICAgICAgICAgICAgICAgICAgICAic3RhcnQiOiAiMjAyMi0xMi0wMVQwMDowMDowMC4wMDBaIiwKICAgICAgICAgICAgICAgICAgICAiZW5kIjogIjIwMjUtMDEtMjlUMDA6MDA6MDAuMDAwWiIKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgIH0sCiAgICAgICAgewogICAgICAgICAgICAia2V5SWQiOiAiU0hBMjU2OkRoUTh3UjVBUEJ2RkhMRi8rVGMrQVl2UE9kVHBjSURxT2h4c0JIUndDN1UiLAogICAgICAgICAgICAia2V5VXNhZ2UiOiAibnBtOnNpZ25hdHVyZXMiLAogICAgICAgICAgICAicHVibGljS2V5IjogewogICAgICAgICAgICAgICAgInJhd0J5dGVzIjogIk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRVk2WWE3VysrN2FVUHp2TVRyZXpINlljeDNjK0hPS1lDY05HeWJKWlNDSnEvZmQ3UWE4dXVBS3RkSWtVUXRRaUVLRVJoQW1FNWxNTUpoUDhPa0RPYTJnPT0iLAogICAgICAgICAgICAgICAgImtleURldGFpbHMiOiAiUEtJWF9FQ0RTQV9QMjU2X1NIQV8yNTYiLAogICAgICAgICAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgICAgICAgICAgICJzdGFydCI6ICIyMDI1LTAxLTEzVDAwOjAwOjAwLjAwMFoiCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICAgImtleUlkIjogIlNIQTI1NjpEaFE4d1I1QVBCdkZITEYvK1RjK0FZdlBPZFRwY0lEcU9oeHNCSFJ3QzdVIiwKICAgICAgICAgICAgImtleVVzYWdlIjogIm5wbTphdHRlc3RhdGlvbnMiLAogICAgICAgICAgICAicHVibGljS2V5IjogewogICAgICAgICAgICAgICAgInJhd0J5dGVzIjogIk1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRVk2WWE3VysrN2FVUHp2TVRyZXpINlljeDNjK0hPS1lDY05HeWJKWlNDSnEvZmQ3UWE4dXVBS3RkSWtVUXRRaUVLRVJoQW1FNWxNTUpoUDhPa0RPYTJnPT0iLAogICAgICAgICAgICAgICAgImtleURldGFpbHMiOiAiUEtJWF9FQ0RTQV9QMjU2X1NIQV8yNTYiLAogICAgICAgICAgICAgICAgInZhbGlkRm9yIjogewogICAgICAgICAgICAgICAgICAgICJzdGFydCI6ICIyMDI1LTAxLTEzVDAwOjAwOjAwLjAwMFoiCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICB9CiAgICBdCn0K"}}}');
 
 /***/ }),
 
@@ -40929,7 +41436,7 @@ module.exports = {"rE":"6.0.0"};
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"name":"tuf-js","version":"6.0.1","description":"JavaScript implementation of The Update Framework (TUF)","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc --build tsconfig.build.json","clean":"rm -rf dist && rm tsconfig.build.tsbuildinfo","test":"jest"},"repository":{"type":"git","url":"git+https://github.com/theupdateframework/tuf-js.git"},"files":["dist"],"keywords":["tuf","security","update"],"author":"bdehamer@github.com","license":"MIT","bugs":{"url":"https://github.com/theupdateframework/tuf-js/issues"},"homepage":"https://github.com/theupdateframework/tuf-js/tree/main/packages/client#readme","devDependencies":{"@tufjs/repo-mock":"5.0.1","@types/debug":"^4.1.13","@types/retry":"^0.12.5"},"dependencies":{"@gar/promise-retry":"^1.0.3","@tufjs/models":"5.0.1","debug":"^4.4.3"},"engines":{"node":"^22.22.2 || ^24.15.0 || >=26.0.0"}}');
+module.exports = /*#__PURE__*/JSON.parse('{"name":"tuf-js","version":"6.0.2","description":"JavaScript implementation of The Update Framework (TUF)","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc --build tsconfig.build.json","clean":"rm -rf dist && rm tsconfig.build.tsbuildinfo","test":"jest"},"repository":{"type":"git","url":"git+https://github.com/theupdateframework/tuf-js.git"},"files":["dist"],"keywords":["tuf","security","update"],"author":"bdehamer@github.com","license":"MIT","bugs":{"url":"https://github.com/theupdateframework/tuf-js/issues"},"homepage":"https://github.com/theupdateframework/tuf-js/tree/main/packages/client#readme","devDependencies":{"@tufjs/repo-mock":"5.0.2","@types/debug":"^4.1.13","@types/retry":"^0.12.5"},"dependencies":{"@gar/promise-retry":"^1.0.3","@tufjs/models":"5.0.2","debug":"^4.4.3"},"engines":{"node":"^22.22.2 || ^24.15.0 || >=26.0.0"}}');
 
 /***/ })
 

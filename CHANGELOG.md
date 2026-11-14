@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.48.0] - 2026-11-13
+
+### Changed
+
+- Install BoringCache CLI `v1.48.0` by default, including remote readiness checks, verified source transfers, stable remote workspace paths, Gradle task reporting across build commands, per-session unit and cache lookup evidence for every adapter, run receipt issuers and reason codes, profile outputs and archive saves with up to 512 MiB of restore metadata.
+- The publisher trust provider embeds Sigstore TUF root version 16 instead of version 15, which expires on 20 November 2026, and uses sigstore 5.0.1.
+
+### Fixed
+
+- Go mode applies export-directory setup from the CLI and removes those directories in post, after workflow steps finish. This requires a CLI that supplies the export-directory setup plan.
+
 ## [1.47.0] - 2026-11-04
 
 ### Changed
@@ -406,7 +417,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.47.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.48.0...HEAD
+[1.48.0]: https://github.com/boringcache/one/compare/v1.47.0...v1.48.0
 [1.47.0]: https://github.com/boringcache/one/compare/v1.46.0...v1.47.0
 [1.46.0]: https://github.com/boringcache/one/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/boringcache/one/compare/v1.44.0...v1.45.0
