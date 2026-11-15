@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.48.1] - 2026-11-15
+
+### Changed
+
+- Install BoringCache CLI `v1.48.1` by default, including compact Bazel execution logs, corrected adapter session evidence, deterministic Cargo source timestamps, compressed archive metadata reads and adaptive on-demand cache reads.
+
 ## [1.48.0] - 2026-11-13
 
 ### Changed
@@ -417,7 +423,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Install BoringCache CLI `v1.19.6` by default.
 
-[Unreleased]: https://github.com/boringcache/one/compare/v1.48.0...HEAD
+[Unreleased]: https://github.com/boringcache/one/compare/v1.48.1...HEAD
+[1.48.1]: https://github.com/boringcache/one/compare/v1.48.0...v1.48.1
 [1.48.0]: https://github.com/boringcache/one/compare/v1.47.0...v1.48.0
 [1.47.0]: https://github.com/boringcache/one/compare/v1.46.0...v1.47.0
 [1.46.0]: https://github.com/boringcache/one/compare/v1.45.0...v1.46.0
